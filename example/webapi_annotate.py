@@ -1,5 +1,6 @@
-from image_annotator_lib.model_class.annotator_webapi import AnthropicApiAnnotator
 from PIL import Image
+
+from image_annotator_lib.model_class.annotator_webapi import AnthropicApiAnnotator
 
 # 画像を読み込み
 image = Image.open("tests/resources/img/1_img/file01.webp")

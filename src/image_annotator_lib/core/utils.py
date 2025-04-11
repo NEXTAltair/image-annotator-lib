@@ -14,7 +14,7 @@ from tqdm import tqdm
 from .config import DEFAULT_PATHS, DEFAULT_TIMEOUT, WD_LABEL_FILENAME, WD_MODEL_FILENAME
 
 
-def setup_logger(name: str, level: int = logging.INFO, log_file: Path | None = None) -> logging.Logger:
+def setup_logger(name: str, level: int = logging.INFO, log_file: Path | str | None = None) -> logging.Logger:
     """指定された名前でロガーを初期化します。"""
     # log_file が None の場合はデフォルトパスを使用
     if log_file is None:
@@ -30,16 +30,17 @@ def setup_logger(name: str, level: int = logging.INFO, log_file: Path | None = N
         stream_handler.setFormatter(formatter)
         logger.addHandler(stream_handler)
 
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        # 文字列の場合はPathオブジェクトに変換
+        log_file_path = Path(log_file) if isinstance(log_file, str) else log_file
+        log_file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file_path, encoding="utf-8")
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
-    return logger
+    return logging.getLogger(name)
 
 
-# ロガーの初期化
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def calculate_phash(image: Image.Image) -> str:
@@ -98,15 +99,18 @@ def _download_from_url(url: str, cache_dir: Path) -> Path:
     return local_path.resolve()
 
 
-def get_file_path(path_or_url: str, cache_dir: Path | None = None) -> Path:
+def get_file_path(path_or_url: str, cache_dir: Path | str | None = None) -> Path:
     """パスまたはURLからローカルファイルパスを取得します。"""
     # cache_dir が None の場合はデフォルトパスを使用
     if cache_dir is None:
         cache_dir = DEFAULT_PATHS["cache_dir"]
 
+    # 文字列の場合はPathオブジェクトに変換
+    cache_dir_path = Path(cache_dir) if isinstance(cache_dir, str) else cache_dir
+
     parsed = urlparse(path_or_url)
     if parsed.scheme in ("http", "https"):
-        return _download_from_url(path_or_url, cache_dir)
+        return _download_from_url(path_or_url, cache_dir_path)
     else:
         return _get_local_file_path(path_or_url)
 
@@ -146,6 +150,7 @@ def load_file(path_or_url: str) -> Path:
     """ファイルを取得し、ローカルパスを返します。"""
     cache_dir = DEFAULT_PATHS["cache_dir"]
     try:
+        # cache_dirが文字列の場合は自動的にget_file_path内で変換される
         file_path = get_file_path(path_or_url, cache_dir)
         if file_path.suffix.lower() == ".zip":
             return extract_zip(file_path)

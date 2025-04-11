@@ -37,10 +37,9 @@ from ..exceptions.errors import (
 )
 from .config import config_registry
 from .model_factory import ModelLoad
-from .utils import setup_logger
 
 # ロガーの初期化
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # --- 型定義 ---
 
@@ -157,7 +156,8 @@ class BaseAnnotator(ABC):
             RuntimeError: 初期化中に予期せぬエラーが発生した場合。
         """
         self.model_name = model_name
-        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        # モジュールレベルのロガーを再利用
+        self.logger = logger.getChild(self.__class__.__name__)
         self.logger.debug(f"{self.__class__.__name__} をモデル '{model_name}' で初期化中...")
 
         try:
@@ -352,7 +352,7 @@ class BaseAnnotator(ABC):
                     tags: list[str] = []
                     if error_in_format is None:
                         try:
-                            tags = self._generate_tags(formatted_output)  # この行を try ブロック内に移動
+                            tags = self._generate_tags(formatted_output)
                         except Exception as tag_gen_e:
                             self.logger.error(f"タグ生成中にエラー: {tag_gen_e}")
                             error_in_format = f"タグ生成エラー: {tag_gen_e}"
@@ -1212,6 +1212,8 @@ class WebApiBaseAnnotator(BaseAnnotator):
 
         self.model_name_on_provider: str | None = config_registry.get(self.model_name, "model_name_on_provider")
 
+        self.max_output_tokens: int | None = config_registry.get(self.model_name, "max_output_tokens", 1800)
+
         self.api_key = self._load_api_key()
         self.client: Any = None  # 追加: クライアントインスタンス用属性
 
@@ -1233,7 +1235,7 @@ class WebApiBaseAnnotator(BaseAnnotator):
         """環境変数から API キーをロードします。"""
         raise NotImplementedError("Web API サブクラスは _load_api_key を実装する必要があります。")
 
-    def _preprocess_images(self, images: list[Image.Image]) -> list[str]:
+    def _preprocess_images(self, images: list[Image.Image]) -> list[str] | list[bytes]:
         """画像リストを Base64 エンコードした文字列のリストに変換する"""
         import base64
         from io import BytesIO
@@ -1250,8 +1252,10 @@ class WebApiBaseAnnotator(BaseAnnotator):
         return encoded_images
 
     @abstractmethod
-    def _run_inference(self, processed: list[str]) -> Any:
-        """Base64エンコードされた画像文字列リストをAPIに送信して推論結果を取得する"""
+    def _run_inference(self, processed: list[str] | list[bytes]) -> Any:
+        """Base64エンコードされた画像文字列リストをAPIに送信して推論結果を取得する
+        google API は 文字列化すると受け付けないので Bytes を直接渡す
+        """
         raise NotImplementedError("Web API サブクラスは _run_inference を実装する必要があります。")
 
     def _wait_for_rate_limit(self) -> None:
@@ -1318,8 +1322,9 @@ class WebApiBaseAnnotator(BaseAnnotator):
         # 上記のいずれにも当てはまらない場合、汎用のWebApiErrorを送出
         raise WebApiError(f"処理中に予期せぬエラーが発生しました: {error_message}", provider_name=provider_name) from e
 
-    def _parse_common_json_response(self, text_content: str) -> WebApiAnnotationOutput:
+    def _parse_common_json_response(self, text_content: str | dict[str, Any]) -> WebApiAnnotationOutput:
         """共通のJSONレスポンス文字列を解析し、WebApiAnnotationOutputを生成するヘルパー。
+        Anthropicの場合はtoolで作成されたdictなので何もせずreturnする
 
         Args:
             text_content: APIから返されたテキストコンテンツ。
@@ -1328,6 +1333,9 @@ class WebApiBaseAnnotator(BaseAnnotator):
             解析結果を含むWebApiAnnotationOutput辞書。
             エラーが発生した場合は、errorフィールドにメッセージが含まれる。
         """
+        if isinstance(text_content, dict):
+            return WebApiAnnotationOutput(annotation=text_content, error=None)
+
         self.logger.debug(f"_parse_common_json_response を開始: text='{text_content[:100]}...'")
         try:
             # JSON文字列を辞書にパース

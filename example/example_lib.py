@@ -3,16 +3,31 @@ import pprint
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from image_annotator_lib import annotate, list_available_annotators
 from image_annotator_lib.core.utils import calculate_phash
-from PIL import Image
 
 available_models = list_available_annotators()
 print("利用可能なモデル:", available_models)
 print("-" * 80)
 
-image_dir = Path("tests/resources/img/1_img")
-image_paths = sorted(list(image_dir.glob("*.webp")))
+# テストしたいモデルを手動でリストに定義して絞り込む
+target_models = ["optimus-alpha", "claude-3-5-haiku", "gemini-1.5-flash", "gpt-4o-mini", "gpt-4.5-preview"]
+# 定義したリストに含まれるモデルだけを抽出
+available_models = [model for model in available_models if model in target_models]
+print("テスト対象モデル:", available_models)
+print("-" * 80)
+
+# 相対パスを絶対パスに変更
+current_dir = Path(__file__).parent
+project_root = current_dir.parent
+image_dir = project_root / "tests" / "resources" / "img" / "1_img"
+# 読み込む画像の最大枚数を指定
+num_images_to_load = 1  # ここで枚数を変更できます
+image_paths_all = sorted(image_dir.glob("*.webp"))
+image_paths = image_paths_all[:num_images_to_load]  # 最初のN枚を取得
+
 images: list[Image.Image] = [Image.open(p) for p in image_paths]
 image_path_strs = [str(p) for p in image_paths]
 
@@ -33,9 +48,6 @@ for i, img in enumerate(images):
     phash_to_path[phash] = image_path_strs[i]
     print(f"  - {image_path_strs[i]}: {phash}")
 print("-" * 80)
-
-available_models = [
-    item for item in available_models if "ToriiGate-v0.3" in item]
 
 print(f"\n===== 全利用可能モデル ({', '.join(available_models)}) の一括評価 =====\n")
 try:
@@ -98,7 +110,7 @@ try:
                                     item_conf: float = 0.0
                                     if isinstance(item_data, dict) and "confidence" in item_data:
                                         item_conf = float(item_data["confidence"])
-                                    elif isinstance(item_data, (int, float)):
+                                    elif isinstance(item_data, (float)):
                                         item_conf = float(item_data)
                                     sorted_items.append((item_tag, item_conf))
                                 sorted_items.sort(key=lambda x: x[1], reverse=True)
