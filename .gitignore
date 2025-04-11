@@ -1,0 +1,16 @@
+# Byte-compiled / optimized / DLL files
+__pycache__
+.venv/
+venv/
+.env
+temp
+models
+.DS_Store
+settings.json
+coverage.xml
+.coverage
+
+# 参考用リポジトリ
+stable-diffusion-webui-wd14-tagger/
+DeepDanbooru/
+
