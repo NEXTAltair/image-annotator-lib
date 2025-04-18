@@ -9,9 +9,15 @@ description = "Integrated library for image tagging and scoring."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
-authors = [
-    # { name = "Your Name", email = "you@example.com" }
+authors = [{ name = "NEXTAltair" }]
+keywords = [ # Merged keywords
+    "ai",
+    "machine-learning",
+    "tagging",
+    "image-annotation",
+    "computer-vision",
 ]
+
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",                     # Updated based on source tomls
@@ -21,13 +27,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Multimedia :: Graphics",
 ]
-keywords = [ # Merged keywords
-    "ai",
-    "machine-learning",
-    "tagging",
-    "image-annotation",
-    "computer-vision",
-]
+
 dependencies = [
     # Core & Data Handling
     "numpy>=1.26.0",
@@ -35,7 +35,6 @@ dependencies = [
     "Pillow>=10.0.0",
     "polars",
     "toml",
-
     # ML Frameworks & Models
     "torch>=2.5.1",
     "torchvision>=0.16.1",
@@ -53,7 +52,6 @@ dependencies = [
     "openai",
     "anthropic",
     "dotenv",
-
     # Image Processing & Utils
     "opencv-python>=4.8.0",
     "requests>=2.31.0",
@@ -62,38 +60,31 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+
+[dependency-groups]
 dev = [
-    # Testing
     "pytest>=8.0.0",
     "pytest-bdd>=8.0.0",
     "pytest-clarity>=1.0.1",
     "pytest-cov>=4.1.0",
     "pytest-xdist>=3.5.0",
-    "pytest-playwright",     # Moved from scorer dependencies
-
-    # Code Quality
+    "pytest-playwright",
     "mypy>=1.8.0",
     "ruff>=0.2.0",
     "types-requests>=2.32.0",
     "types-Pillow",
     "types-toml",
-
-    # Utilities
-    "psutil",
+    "psutil"
 ]
-
 
 [project.urls]
 Homepage = "https://github.com/user/image-annotator-lib"       # 仮
 Repository = "https://github.com/user/image-annotator-lib.git" # 仮
 
-[tool.hatch.version]
-path = "src/image_annotator_lib/__init__.py"
-
 [tool.ruff]
-# Lint Rules: https://docs.astral.sh/ruff/rules/
-# Format Options: https://docs.astral.sh/ruff/formatter/
-line-length = 119
+fix = true
+line-length = 108
+target-version = "py312"
 
 [tool.ruff.lint]
 select = [
@@ -106,10 +97,16 @@ select = [
     "UP",  # pyupgrade
     "RUF", # Ruff-specific rules
 ]
+
+exclude = [
+    "*/__pycache__"
+]
+
 ignore = [
     "E501",   # Line too long (handled by formatter)
     "RUF002", # カタカナの `ノ` でなにか言われるのを回避
 ]
+fixable = ["ALL"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -118,17 +115,29 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.mypy]
-python_version = "3.12"       # Match requires-python
+python_version = "3.12"
 ignore_missing_imports = true
 
-[tool.poetry.dependencies]
-imagehash = "^4.3.1" # pHash計算用
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]          # テスト実
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = ["-v", "-s", "-ra", "--tb=short", "--showlocals", "--cov=src", "--cov-report=xml"]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "gui: GUI tests",
+    "slow: Tests that take more time",
+]
 
 [tool.coverage.run]
-source = ["image_annotator_lib"]
+source = ["src"]
 branch = true
 omit = [
-    "*/__init__.py",                        # __init__.py は通常カバレッジ不
+    "*/__init__.py",
     "src/image_annotator_lib/exceptions/*",
 ]
 
@@ -147,11 +156,14 @@ exclude_lines = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/image_annotator_lib"]
 
-[tool.hatch.build.targets.wheel.sources]
-"src" = ""
-
 [tool.hatch.build.targets.sdist]
 include = ["/src", "/tests"]
 
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+
 [tool.hatch.build.targets.wheel.shared-data]
 "src/image_annotator_lib/py.typed" = "image_annotator_lib/py.typed"
+
+[tool.poetry.dependencies]
+imagehash = "^4.3.1" # pHash計算用
