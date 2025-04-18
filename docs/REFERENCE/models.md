@@ -2,8 +2,6 @@
 
 このドキュメントでは、`image-annotator-lib` で利用可能な主要なアノテーションモデル（Tagger および Scorer）について、その特徴、仕様、設定例などを詳しく説明します。
 
-**注意:** このドキュメントでは、ユーザーの指示に基づき、設定ファイル名を `annotator_config.toml` と記述していますが、現在の実際のコード実装では `models.toml` という名前が使用されている可能性があります。
-
 ## Scorer モデル (美的評価など)
 
 主に画像の美的品質や特定の属性を評価するためのモデルです。
@@ -252,6 +250,97 @@ Danbooru タグを予測するモデル。TensorFlow ベース。
     class = "DeepDanbooruTagger"
     model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v3-20211112-sgd-e28/deepdanbooru-v3-20211112-sgd-e28.zip"
     # device = "cuda" # TensorFlow GPU 版が必要
+    ```
+
+---
+
+## Web API モデル
+
+外部の Web API を利用して画像アノテーションを行うモデルです。これらのモデルは、ローカルにモデルファイルをダウンロードする代わりに、API キーを使用してクラウド上のモデルにアクセスします。
+
+---
+
+### 1. Google Gemini API
+
+Google が提供するマルチモーダルモデル Gemini を利用したアノテーターです。
+
+*   **クラス名:** `GoogleApiAnnotator` (実装クラス: `src/image_annotator_lib/model_class/annotator_webapi.py`)
+*   **特徴:** 高いマルチモーダル能力を持ち、詳細な画像分析が可能です。
+*   **設定例 (`config/annotator_config.toml`):**
+    ```toml
+    [gemini-1.5-pro-api]
+    class = "GoogleApiAnnotator"
+    model_name_on_provider = "gemini-1.5-pro" # APIプロバイダー側のモデル名
+    prompt_template = "Describe this image." # 使用するプロンプト
+    timeout = 90 # APIタイムアウト (秒)
+    retry_count = 3 # リトライ回数
+    retry_delay = 1.0 # リトライ間隔 (秒)
+    min_request_interval = 1.0 # 最小リクエスト間隔 (秒)
+    # APIキーは.envファイルで設定: GOOGLE_API_KEY
+    ```
+
+---
+
+### 2. OpenAI GPT-4o API
+
+OpenAI が提供するマルチモーダルモデル GPT-4o などを利用したアノテーターです。
+
+*   **クラス名:** `OpenAIApiAnnotator` (実装クラス: `src/image_annotator_lib/model_class/annotator_webapi.py`)
+*   **特徴:** 高性能な画像理解とテキスト生成能力を持ちます。
+*   **設定例 (`config/annotator_config.toml`):**
+    ```toml
+    [gpt-4o-api]
+    class = "OpenAIApiAnnotator"
+    model_name_on_provider = "gpt-4o" # APIプロバイダー側のモデル名
+    prompt_template = "この画像について説明してください。" # 使用するプロンプト
+    timeout = 60
+    retry_count = 3
+    retry_delay = 1.0
+    min_request_interval = 1.0
+    # APIキーは.envファイルで設定: OPENAI_API_KEY
+    ```
+
+---
+
+### 3. Anthropic Claude API
+
+Anthropic が提供する Claude モデルを利用したアノテーターです。
+
+*   **クラス名:** `AnthropicApiAnnotator` (実装クラス: `src/image_annotator_lib/model_class/annotator_webapi.py`)
+*   **特徴:** 長いコンテキストウィンドウと優れた推論能力を持ちます。
+*   **設定例 (`config/annotator_config.toml`):**
+    ```toml
+    [claude-3-opus-api]
+    class = "AnthropicApiAnnotator"
+    model_name_on_provider = "claude-3-opus-20240229" # APIプロバイダー側のモデル名
+    prompt_template = "What is in this image?" # 使用するプロンプト
+    timeout = 120
+    retry_count = 3
+    retry_delay = 1.0
+    min_request_interval = 1.0
+    # APIキーは.envファイルで設定: ANTHROPIC_API_KEY
+    ```
+
+---
+
+### 4. OpenRouter API
+
+OpenRouter が提供する様々なモデル（OpenAI互換API経由）を利用したアノテーターです。
+
+*   **クラス名:** `OpenRouterApiAnnotator` (実装クラス: `src/image_annotator_lib/model_class/annotator_webapi.py`)
+*   **特徴:** OpenRouter がサポートする多様なモデルを選択して利用できます。
+*   **設定例 (`config/annotator_config.toml`):**
+    ```toml
+    [openrouter-llama3-api]
+    class = "OpenRouterApiAnnotator"
+    api_endpoint = "https://openrouter.ai/api/v1/chat/completions" # OpenRouter APIエンドポイント
+    model_name_on_provider = "meta-llama/llama-3-70b-instruct" # OpenRouterで指定するモデル名
+    prompt_template = "Generate tags for this image." # 使用するプロンプト
+    timeout = 60
+    retry_count = 3
+    retry_delay = 1.0
+    min_request_interval = 1.0
+    # APIキーは.envファイルで設定: OPENROUTER_API_KEY
     ```
 
 ---

@@ -4,71 +4,167 @@ This guide provides information for developers working with or extending the `im
 
 ## How to Add a New Model
 
-This section explains the steps to add a new image annotation model (like a Tagger or Scorer) to the `image-annotator-lib`.
+This section provides a comprehensive guide for developers on how to add a new image annotation model (including traditional ML models and Web API based models) to the `image-annotator-lib`.
 
-### 1. Implement the Model Class
+### 1. Understand the Architecture and Class Hierarchy
 
-Create a Python class for your new model. This class must follow the library's class hierarchy.
+The library employs a 3-layer class hierarchy to manage different types of annotators while minimizing code duplication. Understanding this structure is crucial before implementing a new model.
 
 **Class Hierarchy:**
 
-1.  **`BaseAnnotator` (`core/base.py`)**: Abstract base class for all annotators.
-2.  **Framework-Specific Base Classes (`core/base.py`)**: Implement common logic for specific ML frameworks (ONNX, Transformers, TensorFlow, CLIP, etc.).
-3.  **Concrete Model Classes (`models/`)**: Inherit from a framework-specific base class and implement only the logic specific to the individual model.
+1.  **`BaseAnnotator` (`core/base.py`)**:
+    *   Abstract base class for all annotators (Tagger and Scorer).
+    *   Provides common functionality like logger initialization, configuration loading, context management (`__enter__`, `__exit__`), **chunk processing for batch inference**, pHash calculation, basic error handling, and **standardized result generation (`_generate_result`)**.
+    *   Defines abstract methods that must be implemented by subclasses: `_preprocess_images`, `_run_inference`, `_format_predictions`, and `_generate_tags`.
+
+2.  **Framework/Type-Specific Base Classes (`core/base.py`, `model_class/annotator_webapi.py`)**:
+    *   Inherit from `BaseAnnotator`.
+    *   Implement common logic for specific ML frameworks (ONNX, Transformers, TensorFlow, CLIP, etc.) or types of annotators (e.g., Web API based).
+    *   Handle framework-specific model loading/unloading and implement some of the abstract methods from `BaseAnnotator` that are common within that framework/type.
+    *   Examples: `ONNXBaseAnnotator`, `TransformersBaseAnnotator`, `TensorflowBaseAnnotator`, `ClipBaseAnnotator`, `PipelineBaseAnnotator`, **`BaseWebApiAnnotator`**.
+
+3.  **Concrete Model Classes (`models/`, `model_class/annotator_webapi.py`)**:
+    *   Inherit from a framework/type-specific base class.
+    *   Implement only the logic specific to the individual model. This typically involves implementing the remaining abstract methods (most commonly `_generate_tags`) and handling model-specific initialization and file loading.
+    *   Examples: `WDTagger`, `AestheticShadowV2`, `GoogleApiAnnotator`, `OpenAIApiAnnotator`.
+
+### 2. Implement the Concrete Model Class
+
+Create a Python class for your new model in the appropriate directory (`src/image_annotator_lib/models/` for traditional models, `src/image_annotator_lib/model_class/annotator_webapi.py` for Web API models, or a new file if creating a new type).
 
 **Implementation Steps:**
 
-1.  **Choose the appropriate framework base class**: Based on the model's framework.
+1.  **Choose the appropriate base class**: Select the base class that matches your model's framework or type (e.g., `ONNXBaseAnnotator`, `TransformersBaseAnnotator`, `BaseWebApiAnnotator`).
 
-    - ONNX models → `ONNXBaseAnnotator`
-    - Transformers models → `TransformersBaseAnnotator`
-    - TensorFlow models → `TensorflowBaseAnnotator`
-    - CLIP models → `ClipBaseAnnotator`
-    - Pipeline models (using multiple sub-models) -> `PipelineBaseAnnotator`
+2.  **Define the class**:
+    *   Inherit from the chosen base class.
+    *   Implement the `__init__` method:
+        *   Call `super().__init__(model_name)` to initialize the parent class. The `model_name` is automatically passed by the factory.
+        *   Access model-specific configuration using `self.config.get("your_key", default_value)`.
+        *   Add any model-specific initialization (e.g., loading tag lists, setting thresholds, initializing API clients for Web API models). For Web API models, API keys should be loaded from environment variables within the base class's `_load_api_key` method, not directly in the concrete class `__init__`.
 
-2.  **Create the concrete model class**: Create a new Python file within the `src/image_annotator_lib/models/` directory.
+    *   **Override necessary abstract methods**: The base classes handle most of the workflow (loading, prediction loop, error handling, result structuring). You typically only need to implement or override methods specific to how your model processes data and generates tags/scores.
 
-3.  **Define the class**:
-    - Inherit from the chosen framework base class.
-    - Implement the `__init__` method:
-      - Call `super().__init__(model_name)` to initialize the parent class.
-      - Add any model-specific initialization (e.g., setting thresholds).
-    - **Override necessary abstract methods**: The base classes handle most of the workflow (loading, prediction loop, error handling). You typically only need to implement or override methods specific to how your model processes data. Common methods to override include:
-      - `_preprocess_images(self, images: list[Image.Image]) -> Any`: Preprocess a list of images into the format the model expects.
-      - `_run_inference(self, processed: Any) -> Any`: Run inference using the preprocessed data.
-      - `_format_predictions(self, raw_outputs: Any) -> list[Any]`: Format the raw model outputs into a standardized list.
-      - `_generate_tags(self, formatted_output: Any) -> list[str]`: Generate the final list of tags (or score strings like `["[SCORE]0.95"]`) from the formatted output. **This is often the main method you need to implement.**
+        *   `_preprocess_images(self, images: list[Image.Image]) -> Any`: Preprocess a list of PIL Images into the format the model expects. The return type depends on the model/framework (e.g., tensors, byte lists for some Web APIs, Base64 strings for others).
+        *   `_run_inference(self, processed: Any) -> Any`: Run inference using the preprocessed data. This method should return the raw model outputs. For Web API models, this involves making the API call.
+        *   `_format_predictions(self, raw_outputs: Any) -> list[Any]`: Format the raw model outputs into a standardized list or structure that is easier for `_generate_tags` to consume. This step is optional if `_generate_tags` can directly process the raw output.
+        *   `_generate_tags(self, formatted_output: Any) -> list[str]`: Generate the final list of tags (or score strings like `["[SCORE]0.95"]`) from the formatted output. **This is often the main method you need to implement.** The base class's `predict` method will use the output of this method to construct the final `AnnotationResult`.
 
-**Example Implementation (ONNX Tagger):**
+    *   **Do NOT typically override `_generate_result`**: The `_generate_result` method is implemented in `BaseAnnotator` to create the standardized `AnnotationResult` TypedDict. It takes `phash`, `model_name`, `tags` (from `_generate_tags`), `formatted_output` (from `_format_predictions`), and `error` as input. Overriding this method is generally not necessary and is discouraged to maintain result structure consistency.
+
+    *   **Handle Batching**: The `BaseAnnotator.predict` method handles splitting the input images into chunks (batches) and iterating through them. Your `_preprocess_images` and `_run_inference` methods should be designed to accept and process data in batches as provided by the base class.
+
+    *   **Handle Results and Errors**: The `BaseAnnotator.predict` method collects results and errors for each image and model. Errors occurring during `_preprocess_images`, `_run_inference`, `_format_predictions`, or `_generate_tags` should ideally be caught within those methods and returned as part of the result structure if possible, or allowed to propagate as exceptions which the base `predict` method will catch and record in the `error` field of the `AnnotationResult`.
+
+**Example Implementation (Conceptual - ONNX Tagger):**
 
 ```python
 # src/image_annotator_lib/models/tagger_onnx.py
 
-from ..core.base import ONNXBaseAnnotator
+from ..core.base import ONNXBaseAnnotator, AnnotationResult # Import AnnotationResult
 from PIL import Image
-from typing import Any, List
+from typing import Any, List, Dict # Import Dict
 
 class MyNewONNXTagger(ONNXBaseAnnotator):
-    def __init__(self, model_name: str):
-        # model_name is automatically passed by the factory
-        super().__init__(model_name)
-        # Add model-specific initialization here, if needed
-        self.my_threshold = 0.5
+    """My new ONNX Tagger model.""" # Add a docstring
 
-    # You might only need to implement _generate_tags if the base class
-    # handles preprocessing, inference, and formatting suitably.
-    def _generate_tags(self, formatted_output: Any) -> List[str]:
-        # formatted_output comes from the base class's _format_predictions
-        # (or your override if you provided one).
+    def __init__(self, model_name: str):
+        super().__init__(model_name)
+        # Access model-specific config, e.g., threshold
+        self.my_threshold = self.config.get("threshold", 0.5)
+        self.tag_names = self._load_tag_names() # Example: load tag names
+
+    def _load_tag_names(self) -> List[str]:
+        """Load tag names from a file specified in config."""
+        tag_file_path = self.config.get("tag_file_path")
+        if not tag_file_path:
+            self.logger.warning("tag_file_path not specified in config.")
+            return []
+        try:
+            with open(tag_file_path, "r", encoding="utf-8") as f:
+                return [line.strip() for line in f if line.strip()]
+        except FileNotFoundError:
+            self.logger.error(f"Tag file not found at {tag_file_path}")
+            return []
+        except Exception as e:
+            self.logger.error(f"Error loading tag file {tag_file_path}: {e}", exc_info=True)
+            return []
+
+    # Implement abstract methods as needed.
+    # _preprocess_images and _run_inference might be handled by ONNXBaseAnnotator.
+    # You might only need to implement _generate_tags.
+
+    def _generate_tags(self, formatted_output: Dict[str, float]) -> List[str]:
+        """Generate tags from formatted model output."""
         final_tags = []
-        # --- Add your custom logic here ---
-        # Example: Iterate through formatted_output, apply threshold, get tag names
-        # for score, tag_index in formatted_output:
-        #     if score > self.my_threshold:
-        #         tag_name = self.get_tag_name(tag_index) # Assuming you load tag names in __init__
-        #         final_tags.append(tag_name)
-        # --- End custom logic --
+        # formatted_output is assumed to be a dict like {"tag_name": score}
+        for tag_name, score in formatted_output.items():
+            if score > self.my_threshold:
+                final_tags.append(tag_name)
         return final_tags
+
+    # If ONNXBaseAnnotator's _format_predictions is not suitable, override it:
+    # def _format_predictions(self, raw_outputs: Any) -> Dict[str, float]:
+    #     """Format raw model outputs into a dictionary of tag names and scores."""
+    #     # Your formatting logic here
+    #     pass
+
+# Example Implementation (Conceptual - Web API Annotator):
+
+# from ..core.base import BaseWebApiAnnotator, AnnotationResult
+# from PIL import Image
+# from typing import Any, List, Dict
+
+# class MyNewWebApiAnnotator(BaseWebApiAnnotator):
+#     """My new Web API Annotator model."""
+
+#     def __init__(self, model_name: str):
+#         super().__init__(model_name)
+#         # BaseWebApiAnnotator handles API key loading, rate limiting, retries.
+#         # Access model-specific config, e.g., specific prompt template override
+#         self.model_specific_prompt = self.config.get("model_specific_prompt")
+#         # API client is initialized in __enter__ by BaseWebApiAnnotator
+
+#     # _load_api_key is implemented in BaseWebApiAnnotator
+
+#     # _preprocess_images might be implemented in BaseWebApiAnnotator (e.g., Base64 encoding)
+#     # If your API requires a different format (e.g., raw bytes), override it:
+#     # def _preprocess_images(self, images: list[Image.Image]) -> list[bytes]:
+#     #     # Your image preprocessing logic for the API
+#     #     pass
+
+#     def _run_inference(self, processed_images: Any) -> list[Any]:
+#         """Run inference using the Web API."""
+#         if not self.client:
+#              raise WebApiError("API client not initialized.") # Use appropriate exception
+
+#         results = []
+#         for processed_image_data in processed_images: # Processed data from _preprocess_images
+#             try:
+#                 self._wait_for_rate_limit() # Handled by BaseWebApiAnnotator
+#                 # Make API call using self.client and processed_image_data
+#                 # Use self.model_name_on_provider and self.prompt_template (or model_specific_prompt)
+#                 # Handle API-specific errors and retry logic (BaseWebApiAnnotator might help)
+#                 api_response = self.client.call_api(processed_image_data, self.model_name_on_provider, self.prompt_template) # Conceptual call
+#                 results.append(api_response)
+#             except Exception as e:
+#                 self.logger.error(f"API call failed: {e}", exc_info=True)
+#                 # Return an error structure or raise an exception
+#                 results.append({"error": str(e)}) # Example error structure
+#         return results
+
+#     # _format_predictions might be implemented in BaseWebApiAnnotator (e.g., JSON parsing)
+#     # If your API response format is unique, override it:
+#     # def _format_predictions(self, raw_outputs: list[Any]) -> list[Any]:
+#     #     # Your API response parsing logic
+#     #     pass
+
+#     def _generate_tags(self, formatted_output: Any) -> List[str]:
+#         """Generate tags from formatted API output."""
+#         # Your logic to extract tags/scores from the formatted API response
+#         pass
+
+#     # __enter__ and __exit__ are typically handled by BaseWebApiAnnotator for client management.
 ```
 
 ### 2. Add Entry to Configuration File

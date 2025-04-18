@@ -16,10 +16,7 @@
 
 ライブラリの設計思想、アーキテクチャ、重要なコンセプトに関する詳細な説明。
 
-- [アーキテクチャ](./EXPLANATION/architecture.md) - ライブラリの全体構造と設計パターン
-- [設計決定の背景](./EXPLANATION/design_decisions.md) - 主要な設計判断とその理由
-- [リファクタリング履歴](./EXPLANATION/refactoring.md) - 大規模な変更と改善履歴
-- [レガシー情報](./EXPLANATION/legacy_info.md) - 旧バージョンからの移行に関する情報
+- [統合アーキテクチャと設計](./EXPLANATION/integrated_architecture.md) - ライブラリの全体構造、設計思想、主要な設計決定、Web API 設計、旧ライブラリ情報など
 
 ### 4. [リファレンス](./REFERENCE/)
 

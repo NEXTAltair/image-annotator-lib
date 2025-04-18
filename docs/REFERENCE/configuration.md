@@ -10,7 +10,7 @@
 
 設定ファイルは、通常、ライブラリを使用するプロジェクトのルートディレクトリ直下にある `config` ディレクトリ内に配置されます。
 
-*   **デフォルトパス:** `[プロジェクトルート]/config/annotator_config.toml`
+*   **デフォルトパス:** `src/image_annotator_lib/resources/system/annotator_config.toml`
 
 ライブラリは起動時にこのパスから設定を読み込もうとします。
 
