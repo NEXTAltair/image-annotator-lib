@@ -13,7 +13,13 @@ print("利用可能なモデル:", available_models)
 print("-" * 80)
 
 # テストしたいモデルを手動でリストに定義して絞り込む
-target_models = ["optimus-alpha", "claude-3-5-haiku", "gemini-1.5-flash", "gpt-4o-mini", "gpt-4.5-preview"]
+target_models = [
+    "deepdanbooru-v3-20211112-sgd-e28",
+    "wd-vit-tagger-v3",
+    "idolsankaku-eva02-large-tagger-v1",
+    "Z3D-E621-Convnext",
+]
+# ["optimus-alpha", "claude-3-5-haiku", "gemini-1.5-flash", "gpt-4o-mini", "gpt-4.5-preview"]
 # 定義したリストに含まれるモデルだけを抽出
 available_models = [model for model in available_models if model in target_models]
 print("テスト対象モデル:", available_models)
