@@ -94,6 +94,8 @@ path = "src/image_annotator_lib/__init__.py"
 # Lint Rules: https://docs.astral.sh/ruff/rules/
 # Format Options: https://docs.astral.sh/ruff/formatter/
 line-length = 119
+
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -106,7 +108,7 @@ select = [
 ]
 ignore = [
     "E501",   # Line too long (handled by formatter)
-    "RUF021", # カタカナの `ノ` でなにか言われるのを回避
+    "RUF002", # カタカナの `ノ` でなにか言われるのを回避
 ]
 
 [tool.ruff.format]

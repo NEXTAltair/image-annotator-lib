@@ -8,7 +8,7 @@ from typing import Any, TypedDict
 
 from PIL import Image
 
-from .core.base import AnnotationResult
+from .core.base import AnnotationResult, BaseAnnotator
 from .core.registry import get_cls_obj_registry
 from .core.utils import calculate_phash
 
@@ -64,9 +64,7 @@ def _create_annotator_instance(model_name: str) -> Any:
     registry = get_cls_obj_registry()
     Annotator_class = registry[model_name]
     instance = Annotator_class(model_name=model_name)
-    logger.debug(
-        f"モデル '{model_name}' の新しいインスタンスを作成しました (クラス: {Annotator_class.__name__})"
-    )
+    logger.debug(f"モデル '{model_name}' の新しいインスタンスを作成しました (クラス: {Annotator_class.__name__})")
     return instance
 
 
@@ -95,7 +93,7 @@ def get_annotator_instance(model_name: str) -> Any:
 
 
 def _annotate_model(
-    Annotator: Any, images: list[Image.Image], phash_list: list[str]
+    Annotator: BaseAnnotator, images: list[Image.Image], phash_list: list[str]
 ) -> list[AnnotationResult]:
     """1モデル分のアノテーション処理を実施します。
     ・モデルのロード / 復元、予測、キャッシュ &リリースを実行
@@ -175,7 +173,9 @@ def _handle_error(
         }
 
 
-def annotate(images_list: list[Image.Image], model_name_list: list[str]) -> PHashAnnotationResults:
+def annotate(
+    images_list: list[Image.Image], model_name_list: list[str], phash_list: list[str] | None = None
+) -> PHashAnnotationResults:
     """複数の画像を指定された複数のモデルで評価(アノテーション)します。
 
     各画像のpHashをキーとして、モデルごとの評価結果を整理して返します。
@@ -184,6 +184,7 @@ def annotate(images_list: list[Image.Image], model_name_list: list[str]) -> PHas
     Args:
         images_list: 評価対象の PIL Image オブジェクトのリスト。
         model_name_list: 使用するモデル名のリスト。
+        phash_list: 各画像に対応するpHashのリスト。
 
     Returns:
         結果を格納した辞書。最上位のキーは画像のpHash (または代替キー 'unknown_image_{index}')、
@@ -198,16 +199,27 @@ def annotate(images_list: list[Image.Image], model_name_list: list[str]) -> PHas
     """
     logger.info(f"{len(images_list)} 枚の画像を {len(model_name_list)} 個のモデルで評価開始...")
 
-    # 画像ごとに先にpHashを計算
-    phash_list: list[str] = []
     phash_map: dict[int, str] = {}
 
-    logger.debug("画像のpHash計算を開始...")
-    for i, image in enumerate(images_list):
-        phash = calculate_phash(image)
-        phash_list.append(phash)
-        phash_map[i] = phash
-    logger.debug(f"pHash計算完了: {len(phash_list)}個")
+    if phash_list is None:
+        phash_list = []
+        logger.debug("画像のpHash計算を開始...")
+        for i, image in enumerate(images_list):
+            phash = calculate_phash(image)
+            phash_list.append(phash)
+            phash_map[i] = phash
+        logger.debug(f"pHash計算完了: {len(phash_list)}個")
+    else:
+        logger.debug("提供されたpHashリストを使用します。")
+        for i, phash in enumerate(phash_list):
+            if i < len(images_list):
+                phash_map[i] = phash
+            else:
+                # phash_list が画像リストより長い場合は、警告を出してループを抜けるなどの処理も検討可能
+                logger.warning(
+                    f"pHashリストの要素数が画像リストの要素数を超えています。インデックス {i} 以降のpHashは無視されます。"
+                )
+                break
 
     # 結果格納用 (pHash ベース)
     # {phash: {model_name: {"tags": [...], "formatted_output": ..., "error": ...}}}
