@@ -1,5 +1,5 @@
 import hashlib
-import logging
+import sys
 import zipfile
 from pathlib import Path
 from urllib.parse import urlparse
@@ -7,40 +7,53 @@ from urllib.parse import urlparse
 import huggingface_hub
 import imagehash
 import requests
+from loguru import logger
 from PIL import Image
 from tqdm import tqdm
 
-# --- ローカルインポート ---
-from .config import DEFAULT_PATHS, DEFAULT_TIMEOUT, WD_LABEL_FILENAME, WD_MODEL_FILENAME
+# confing モジュールで定数を定義すると循環インポートになるのを回避
+from .constants import DEFAULT_PATHS
+
+DEFAULT_TIMEOUT = 30
+WD_MODEL_FILENAME = "model.onnx"
+WD_LABEL_FILENAME = "selected_tags.csv"
 
 
-def setup_logger(name: str, level: int = logging.INFO, log_file: Path | str | None = None) -> logging.Logger:
-    """指定された名前でロガーを初期化します。"""
-    # log_file が None の場合はデフォルトパスを使用
-    if log_file is None:
-        log_file = DEFAULT_PATHS["log_file"]
+# ログフォーマット
+LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function} - {message}"
 
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
+# loguru のデフォルトハンドラを削除 (明示的に設定するため)
+logger.remove()
 
-    if not logger.handlers:
-        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# コンソールシンク (stderr)
+logger.add(
+    sys.stderr,
+    level="INFO",  # デフォルトレベル (必要に応じて変更)
+    format=LOG_FORMAT,
+    colorize=True,
+    backtrace=True,
+    diagnose=True,
+)
 
-        stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(formatter)
-        logger.addHandler(stream_handler)
-
-        # 文字列の場合はPathオブジェクトに変換
-        log_file_path = Path(log_file) if isinstance(log_file, str) else log_file
-        log_file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file_path, encoding="utf-8")
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-
-    return logging.getLogger(name)
-
-
-logger = logging.getLogger(__name__)
+# ファイルシンク (DEFAULT_PATHS["log_file"] を使用)
+try:
+    log_file_path = Path(DEFAULT_PATHS["log_file"])
+    log_file_path.parent.mkdir(parents=True, exist_ok=True)  # フォルダ作成
+    logger.add(
+        log_file_path,
+        level="DEBUG",
+        format=LOG_FORMAT,
+        rotation="25 MB",
+        retention=5,
+        encoding="utf-8",
+        backtrace=True,
+        diagnose=True,
+    )
+    logger.info(f"Logging to file: {log_file_path}")
+except Exception as e:
+    # ファイルログ設定失敗時はエラーログを出力して続行 (コンソールには出力される)
+    logger.error(f"Failed to configure file logging to '{DEFAULT_PATHS['log_file']}': {e}")
+    logger.error("File logging disabled.")
 
 
 def calculate_phash(image: Image.Image) -> str:
@@ -107,6 +120,7 @@ def get_file_path(path_or_url: str, cache_dir: Path | str | None = None) -> Path
 
     # 文字列の場合はPathオブジェクトに変換
     cache_dir_path = Path(cache_dir) if isinstance(cache_dir, str) else cache_dir
+    assert isinstance(cache_dir_path, Path), "cache_dir_path must be a Path object"
 
     parsed = urlparse(path_or_url)
     if parsed.scheme in ("http", "https"):

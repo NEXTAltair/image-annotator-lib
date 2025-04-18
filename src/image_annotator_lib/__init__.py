@@ -1,4 +1,3 @@
-import logging
 import os
 
 from PIL import Image
@@ -9,19 +8,9 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 from .api import PHashAnnotationResults
 from .core.base import AnnotationResult
-from .core.utils import setup_logger
-from .exceptions.errors import (
-    AnnotatorError,
-    ModelLoadError,
-    ModelNotFoundError,
-    OutOfMemoryError,
-)
-
-setup_logger("image_annotator_lib", level=logging.DEBUG)
-
+from .exceptions.errors import AnnotatorError, ModelLoadError, ModelNotFoundError, OutOfMemoryError
 
 # --- Public API ---
-
 __all__ = [
     "AnnotationResult",
     "AnnotatorError",
@@ -49,13 +38,16 @@ def list_available_annotators() -> list[str]:
     return _cached_list_available_annotators()
 
 
-def annotate(images_list: list[Image.Image], model_name_list: list[str]) -> PHashAnnotationResults:
+def annotate(
+    images_list: list[Image.Image], model_name_list: list[str], phash_list: list[str] | None = None
+) -> PHashAnnotationResults:
     """
     指定されたモデルを使用して画像のリストにアノテーションを付けます。
 
     Args:
         images_list: アノテーションを付けるPIL Imageオブジェクトのリスト。
         model_name_list: 使用するアノテーターモデル名のリスト。
+        phash_list: 画像のpHash値のリスト。
 
     Returns:
         pHash をキーとし、その値がモデル名をキーとする ModelResultDict の辞書。
@@ -68,7 +60,7 @@ def annotate(images_list: list[Image.Image], model_name_list: list[str]) -> PHas
 
         _cached_annotate = _annotate_impl
 
-    return _cached_annotate(images_list, model_name_list)
+    return _cached_annotate(images_list, model_name_list, phash_list)
 
 
 # You might want to add version information here later

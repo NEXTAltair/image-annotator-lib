@@ -1,11 +1,9 @@
 """CLIP ベースの Scorer モデルの実装。"""
 
-import logging
 from typing import Any
 
 from ..core.base import ClipBaseAnnotator
-
-logger = logging.getLogger(__name__)
+from ..core.utils import logger
 
 # --- Improved Aesthetic / Waifu Aesthetic ---
 

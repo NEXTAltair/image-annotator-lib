@@ -1,14 +1,11 @@
 """Pipeline ベースの Aesthetic Score モデルの実装。"""
 
-import logging
 from typing import Any
 
 # PipelineBaseAnnotator をインポート
 from image_annotator_lib.core.base import PipelineBaseAnnotator
 
-# AnnotationResult は型ヒントで使用する可能性があるため残す (が、直接は使わない)
-
-logger = logging.getLogger(__name__)
+from ..core.utils import logger
 
 
 class AestheticShadow(PipelineBaseAnnotator):
@@ -105,13 +102,13 @@ class CafePredictor(PipelineBaseAnnotator):
                         score_found = True
                         break  # aesthetic スコアが見つかったらループを抜ける
                     except (TypeError, ValueError):
-                        self.logger.error(f"モデルからの戻り値 'aesthetic' のスコアが不正です: {entry}")
+                        logger.error(f"モデルからの戻り値 'aesthetic' のスコアが不正です: {entry}")
                         scores.append(0.0)
                         score_found = True
                         break
             if not score_found:
                 # 'aesthetic' ラベルが見つからなかった場合
-                self.logger.warning(f"出力に 'aesthetic' ラベルが見つかりませんでした: {single_output}")
+                logger.warning(f"出力に 'aesthetic' ラベルが見つかりませんでした: {single_output}")
                 scores.append(0.0)
 
         return scores

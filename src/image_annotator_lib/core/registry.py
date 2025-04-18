@@ -1,19 +1,18 @@
 import importlib
 import inspect
-import logging
 from pathlib import Path
 from types import ModuleType
 from typing import TypeVar
 
 from .base import BaseAnnotator
 from .config import config_registry
+from .utils import logger
 
 T = TypeVar("T", bound=BaseAnnotator)
 ModelClass = type[BaseAnnotator]
 
 _MODEL_CLASS_OBJ_REGISTRY: dict[str, ModelClass] = {}
 
-logger = logging.getLogger(__name__)
 
 # --- プライベートヘルパー関数 ---
 

@@ -1,6 +1,5 @@
 """TensorFlow を使用する Tagger モデルの実装。"""
 
-import logging
 from typing import Any
 
 import numpy as np
@@ -9,8 +8,6 @@ from PIL import Image
 
 from ..core.base import TensorflowBaseAnnotator
 from ..core.config import config_registry
-
-logger = logging.getLogger(__name__)
 
 
 class DeepDanbooruTagger(TensorflowBaseAnnotator):
@@ -29,16 +26,14 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
         super().__init__(model_name=model_name)
         # tag_threshold の設定 (config_registry.get を使用、デフォルト値 0.35)
         self.tag_threshold = config_registry.get(self.model_name, "tag_threshold", 0.35)
-        self.logger.info(f"Tag threshold set to: {self.tag_threshold}")
+        logger.info(f"Tag threshold set to: {self.tag_threshold}")
         # model_format は TensorflowBaseAnnotator で処理されるため、ここでは不要
         logger.debug(f"DeepDanbooruTagger '{model_name}' initialized with threshold: {self.tag_threshold}")
 
     def _load_tags(self) -> None:
         """DeepDanbooru固有のタグファイル (tags.txt, tags-character.txt, tags-general.txt) をロードします。"""
         if "model_dir" not in self.components or not self.components["model_dir"]:
-            self.logger.error(
-                "モデルディレクトリが components に設定されていません。タグをロードできません。"
-            )
+            logger.error("モデルディレクトリが components に設定されていません。タグをロードできません。")
             # タグファイルがないと動作しないため、エラーを送出する方が良いかもしれない
             raise FileNotFoundError("モデルディレクトリが見つかりません。")
             # return # ここでは到達不能
@@ -62,16 +57,16 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
             # components に代入したリストの長さを取得 (None でないことが保証される)
             general_len = len(self.components["tags_general"])
             character_len = len(self.components["tags_character"])
-            self.logger.info(
+            logger.info(
                 f"タグファイルをロードしました: total={len(all_tags)}, general={general_len}, character={character_len}"
             )
 
         except FileNotFoundError as e:
-            self.logger.error(f"必須タグファイルが見つかりません: {e}")
+            logger.error(f"必須タグファイルが見つかりません: {e}")
             # 必須ファイルがない場合はエラーとして扱う
             raise e
         except Exception as e:
-            self.logger.exception(f"タグファイルの読み込み中に予期せぬエラーが発生しました: {e}")
+            logger.exception(f"タグファイルの読み込み中に予期せぬエラーが発生しました: {e}")
             raise e  # エラーを再送出
 
     # メソッド名を _preprocess_images に変更、引数型を修正
@@ -82,10 +77,10 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
         # TODO: 設定ファイルで明示的に指定する方が良いかもしれない
         if "v1-" in self.model_name:
             target_size = (299, 299)
-            self.logger.debug("Using target size 299x299 for v1 model.")
+            logger.debug("Using target size 299x299 for v1 model.")
         else:
             target_size = (512, 512)  # v3, v4 and potentially others
-            self.logger.debug("Using target size 512x512 for v3/v4 model.")
+            logger.debug("Using target size 512x512 for v3/v4 model.")
 
         for image in images:
             if image.mode != "RGB":
@@ -96,7 +91,7 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
 
         # リストを NumPy 配列に変換してバッチを作成
         batch_array = np.stack(processed_images, axis=0)
-        self.logger.debug(f"Preprocessed batch shape: {batch_array.shape}")
+        logger.debug(f"Preprocessed batch shape: {batch_array.shape}")
         return batch_array.astype(np.float32)
 
     # _run_inference は TensorflowBaseAnnotator の実装を使用
@@ -110,13 +105,13 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
         try:
             predictions_np = raw_output.numpy()
         except Exception as e:
-            self.logger.exception(f"TensorFlow テンソルの NumPy 変換中にエラー: {e}")
+            logger.exception(f"TensorFlow テンソルの NumPy 変換中にエラー: {e}")
             # エラーが発生した場合、空の結果リストを返すか、例外を再送出するか検討
             # BaseAnnotator.predict でエラーハンドリングされるため、例外を送出する
             raise ValueError("TensorFlow テンソルの NumPy 変換に失敗しました。") from e
 
         batch_size = predictions_np.shape[0]
-        self.logger.debug(f"Formatting predictions for batch size: {batch_size}")
+        logger.debug(f"Formatting predictions for batch size: {batch_size}")
 
         # components からタグリストを取得 (存在チェックと None の場合のデフォルト値設定)
         all_tags = self.components.get("all_tags")
@@ -125,14 +120,12 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
         character_tags = self.components.get("tags_character", [])
 
         if not all_tags:
-            self.logger.error(
-                "タグ候補リスト (all_tags) が components に存在しません。フォーマットできません。"
-            )
+            logger.error("タグ候補リスト (all_tags) が components に存在しません。フォーマットできません。")
             # エラーを示す結果を返すのではなく、例外を送出する
             raise ValueError("タグ候補リストが見つかりません。")
 
         if len(all_tags) != predictions_np.shape[1]:
-            self.logger.error(
+            logger.error(
                 f"タグ候補リストの長さ ({len(all_tags)}) とモデル出力次元 ({predictions_np.shape[1]}) が一致しません。"
             )
             raise ValueError("タグ候補リストとモデル出力の次元が一致しません。")

@@ -1,13 +1,10 @@
 """ONNX Runtime を使用する Tagger モデルの実装。"""
 
-import logging
-
 import polars as pl
 
 from ..core.base import ONNXBaseAnnotator
 from ..core.config import config_registry
-
-logger = logging.getLogger(__name__)
+from ..core.utils import logger
 
 
 # E621カテゴリ番号の定義 (tagger-wrapper-lib からコピー)
@@ -30,7 +27,7 @@ class WDTagger(ONNXBaseAnnotator):
     def __init__(self, model_name: str):
         """WDTagger を初期化します。"""
         super().__init__(model_name=model_name)
-        # カテゴリマッピング：WD-Taggerのカテゴリ番号を定義
+        # カテゴリマッピング:WD-Taggerのカテゴリ番号を定義
         self.CATEGORY_MAPPING = {"rating": 9, "general": 0, "character": 4}
         # カテゴリIDとインデックス属性名の対応マップ
         # BaseAnnotator の _format_predictions_single で使用される
@@ -43,12 +40,12 @@ class WDTagger(ONNXBaseAnnotator):
         self._init_empty_indexes()
         # tag_threshold の設定 (config_registry.get を使用、デフォルト値 0.35)
         self.tag_threshold = config_registry.get(self.model_name, "tag_threshold", 0.35)
-        self.logger.info(f"Tag threshold set to: {self.tag_threshold}")
+        logger.info(f"Tag threshold set to: {self.tag_threshold}")
 
     def _load_tags(self) -> None:
         """タグ情報 (語彙) をロードし、カテゴリごとのインデックスを設定します。"""
         if "csv_path" not in self.components or not self.components["csv_path"]:
-            self.logger.error("タグ情報ファイルパス (csv_path) が components に設定されていません。")
+            logger.error("タグ情報ファイルパス (csv_path) が components に設定されていません。")
             raise FileNotFoundError("タグ情報ファイルパスが見つかりません。")
 
         csv_path = self.components["csv_path"]
@@ -68,9 +65,9 @@ class WDTagger(ONNXBaseAnnotator):
             # 各カテゴリのインデックスを抽出
             self._extract_category_indexes(categories)
 
-            self.logger.info(f"WDタガータグ情報を読み込みました: 合計{len(self.all_tags)}個のタグ")
+            logger.info(f"WDタガータグ情報を読み込みました: 合計{len(self.all_tags)}個のタグ")
         except Exception as e:
-            self.logger.error(f"タグ情報の読み込みに失敗しました ({csv_path}): {e}")
+            logger.error(f"タグ情報の読み込みに失敗しました ({csv_path}): {e}")
             # デフォルト値を設定
             self._init_empty_indexes()
             self.all_tags = []
@@ -90,7 +87,7 @@ class WDTagger(ONNXBaseAnnotator):
                 indexes = [i for i, cat in enumerate(categories) if cat == category_id]
                 setattr(self, attr_name, indexes)
             else:
-                self.logger.warning(
+                logger.warning(
                     f"カテゴリキー '{category_key}' に対応する属性名が _category_attr_map にありません。"
                 )
 
@@ -119,12 +116,12 @@ class Z3D_E621Tagger(ONNXBaseAnnotator):
         self._init_empty_indexes()
         # tag_threshold の設定 (config_registry.get を使用、デフォルト値 0.35)
         self.tag_threshold = config_registry.get(self.model_name, "tag_threshold", 0.35)
-        self.logger.info(f"Tag threshold set to: {self.tag_threshold}")
+        logger.info(f"Tag threshold set to: {self.tag_threshold}")
 
     def _load_tags(self) -> None:
         """Z3D_E621用のタグ情報 (語彙) をロードします。"""
         if "csv_path" not in self.components or not self.components["csv_path"]:
-            self.logger.error("タグ情報ファイルパス (csv_path) が components に設定されていません。")
+            logger.error("タグ情報ファイルパス (csv_path) が components に設定されていません。")
             raise FileNotFoundError("タグ情報ファイルパスが見つかりません。")
 
         csv_path = self.components["csv_path"]
@@ -137,10 +134,10 @@ class Z3D_E621Tagger(ONNXBaseAnnotator):
             # カテゴリ処理
             self._process_categories(tags_df)
 
-            self.logger.info(f"Z3D_E621タグ情報を読み込みました: 合計{len(self.all_tags)}個のタグ")
+            logger.info(f"Z3D_E621タグ情報を読み込みました: 合計{len(self.all_tags)}個のタグ")
 
         except Exception as e:
-            self.logger.error(f"タグ情報の読み込みに失敗しました ({csv_path}): {e}")
+            logger.error(f"タグ情報の読み込みに失敗しました ({csv_path}): {e}")
             # エラー時はデフォルト値を設定
             self._init_empty_indexes()
             self.all_tags = []

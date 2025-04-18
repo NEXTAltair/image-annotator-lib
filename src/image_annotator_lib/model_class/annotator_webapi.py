@@ -15,6 +15,7 @@ from PIL import Image
 
 from ..core.base import WebApiBaseAnnotator
 from ..core.config import config_registry
+from ..core.utils import logger
 from ..exceptions.errors import ApiKeyMissingError, WebApiError
 
 
@@ -399,11 +400,13 @@ class OpenAIApiAnnotator(WebApiBaseAnnotator):
                 try:
                     timeout_float = float(self.timeout) if self.timeout is not None else 60.0
                 except (ValueError, TypeError):
-                    self.logger.warning(f"無効なタイムアウト値 '{self.timeout}', デフォルト60.0を使用します")
+                    logger.warning(f"無効なタイムアウト値 '{self.timeout}', デフォルト60.0を使用します")
                     timeout_float = 60.0
 
                 # model_name_on_providerがNoneでないことを表明
-                assert self.model_name_on_provider is not None, "プロバイダーのモデル名を設定する必要があります"
+                assert self.model_name_on_provider is not None, (
+                    "プロバイダーのモデル名を設定する必要があります"
+                )
                 response = self.client.responses.create(
                     model=self.model_name_on_provider,
                     input=input,
@@ -632,7 +635,9 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
         if self.client:
             return self
         else:
-            raise WebApiError(f"{self.provider_name} クライアントの初期化に失敗しました", self.provider_name)
+            raise WebApiError(
+                f"{self.provider_name} クライアントの初期化に失敗しました", self.provider_name
+            )
 
     def _load_api_key(self) -> str:
         """OpenRouter API キーを環境変数から読み込む (オーバーライド)"""
@@ -652,7 +657,9 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
             try:
                 self._wait_for_rate_limit()
 
-                assert self.model_name_on_provider is not None, "プロバイダーのモデル名を設定する必要があります"
+                assert self.model_name_on_provider is not None, (
+                    "プロバイダーのモデル名を設定する必要があります"
+                )
 
                 # OpenRouter用のリクエスト形式
                 response = self.client.chat.completions.create(
@@ -663,7 +670,10 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
                             "role": "user",
                             "content": [
                                 {"type": "text", "text": BASE_PROMPT},
-                                {"type": "image_url", "image_url": {"url": f"data:image/webp;base64,{encoded_image}"}},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/webp;base64,{encoded_image}"},
+                                },
                             ],
                         },
                     ],
@@ -696,7 +706,9 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
                 # OpenRouterのChoice型からメッセージコンテンツを取得
                 choice = response.choices[0]
                 if not choice.message or not choice.message.content:
-                    formatted_outputs.append(FormattedOutput(annotation=None, error="メッセージコンテンツが空です"))
+                    formatted_outputs.append(
+                        FormattedOutput(annotation=None, error="メッセージコンテンツが空です")
+                    )
                     continue
 
                 # メッセージコンテンツから直接JSONを解析

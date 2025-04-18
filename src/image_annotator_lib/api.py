@@ -3,16 +3,14 @@
 主に Gradio インターフェースや既存の統合テストからの利用を想定しています。
 """
 
-import logging
 from typing import Any, TypedDict
 
 from PIL import Image
 
 from .core.base import AnnotationResult, BaseAnnotator
 from .core.registry import get_cls_obj_registry
-from .core.utils import calculate_phash
+from .core.utils import calculate_phash, logger
 
-logger = logging.getLogger(__name__)
 _MODEL_INSTANCE_REGISTRY: dict[str, Any] = {}
 
 
@@ -64,7 +62,9 @@ def _create_annotator_instance(model_name: str) -> Any:
     registry = get_cls_obj_registry()
     Annotator_class = registry[model_name]
     instance = Annotator_class(model_name=model_name)
-    logger.debug(f"モデル '{model_name}' の新しいインスタンスを作成しました (クラス: {Annotator_class.__name__})")
+    logger.debug(
+        f"モデル '{model_name}' の新しいインスタンスを作成しました (クラス: {Annotator_class.__name__})"
+    )
     return instance
 
 

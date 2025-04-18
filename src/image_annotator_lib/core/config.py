@@ -1,40 +1,11 @@
-import importlib.resources
-import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import toml
 
-# --- 定数定義 ---
-# パッケージ名
-PACKAGE_NAME = "image_annotator_lib"
-
-# システム設定ファイルのパス
-SYSTEM_CONFIG_PATH = importlib.resources.files(PACKAGE_NAME).joinpath(
-    "resources", "system", "annotator_config.toml"
-)
-# --- プロジェクトルート基準のパス設定 ---
-# ライブラリを利用するプロジェクトの実行時カレントディレクトリを取得
-PROJECT_ROOT = Path.cwd()
-
-# ユーザー設定ファイルのパス (プロジェクトルート/config/user_config.toml)
-USER_CONFIG_PATH = PROJECT_ROOT / "config" / "user_config.toml"
-
-DEFAULT_PATHS = {
-    "config_toml": SYSTEM_CONFIG_PATH,
-    "user_config_toml": USER_CONFIG_PATH,
-    # ログファイルのパス (プロジェクトルート/logs/image-annotator-lib.log)
-    "log_file": PROJECT_ROOT / "logs" / "image-annotator-lib.log",
-    # キャッシュディレクトリのパス (プロジェクトルート/models)
-    "cache_dir": PROJECT_ROOT / "models",
-}
-DEFAULT_TIMEOUT = 30
-WD_MODEL_FILENAME = "model.onnx"
-WD_LABEL_FILENAME = "selected_tags.csv"
-
-# ロガーの初期化
-logger = logging.getLogger(__name__)
+from .constants import DEFAULT_PATHS
+from .utils import logger
 
 
 @lru_cache
@@ -58,16 +29,23 @@ def _load_config_from_file(config_path: str | Path) -> dict[str, dict[str, Any]]
 
 def save_model_size(model_name: str, size_mb: float, config_path: str | Path | None = None) -> None:
     """モデルのサイズ推定値を保存します。"""
+
+    # 修正: 入力に応じて Path オブジェクトを決定する
     if config_path is None:
-        config_path = DEFAULT_PATHS["config_toml"]
+        path_to_use: Path = DEFAULT_PATHS["config_toml"]
+    elif isinstance(config_path, str):
+        path_to_use = Path(config_path)
+    else:  # config_path is Path
+        path_to_use = config_path
+
     try:
         size_gb = size_mb / 1024
 
-        config_path_obj = Path(config_path) if isinstance(config_path, str) else config_path
-        if config_path_obj.exists():
-            config_data = toml.load(config_path)
+        # 修正: path_to_use を使用する
+        if path_to_use.exists():
+            config_data = toml.load(path_to_use)
         else:
-            logger.error(f"設定ファイル {config_path} が見つかりません")
+            logger.error(f"設定ファイル {path_to_use} が見つかりません")
             return
 
         if model_name not in config_data:
@@ -76,7 +54,8 @@ def save_model_size(model_name: str, size_mb: float, config_path: str | Path | N
 
         config_data[model_name]["estimated_size_gb"] = round(size_gb, 3)
 
-        with open(config_path, "w") as f:
+        # 修正: path_to_use を使用する
+        with open(path_to_use, "w") as f:
             toml.dump(config_data, f)
 
         logger.debug(f"モデル '{model_name}' の推定サイズ ({size_gb:.3f}GB) を保存しました")
@@ -92,7 +71,9 @@ class ModelConfigRegistry:
         self._config_data: dict[str, dict[str, Any]] = {}
         self._is_loaded = False
 
-    def load(self, config_path: str | Path | None = None, user_config_path: str | Path | None = None) -> None:
+    def load(
+        self, config_path: str | Path | None = None, user_config_path: str | Path | None = None
+    ) -> None:
         """システム設定ファイルとユーザー設定ファイルを読み込み、内部データ (_config_data) を更新します。
         ユーザー設定はシステム設定を上書きします。ユーザー設定ファイルが存在しない場合は無視されます。
         """
@@ -106,13 +87,15 @@ class ModelConfigRegistry:
         self._config_data = _load_config_from_file(config_path)
         logger.info(f"設定マネージャーがシステム設定を {config_path} から読み込みました。")
 
-        # ユーザー設定の読み込み（存在する場合のみ）
+        # ユーザー設定の読み込み(存在する場合のみ)
         if user_config_path is not None:
-            user_config_path_obj = Path(user_config_path) if isinstance(user_config_path, str) else user_config_path
+            user_config_path_obj = (
+                Path(user_config_path) if isinstance(user_config_path, str) else user_config_path
+            )
             if user_config_path_obj.exists():
                 try:
                     user_config = _load_config_from_file(user_config_path)
-                    # ユーザー設定でシステム設定を更新（ユーザー設定が優先）
+                    # ユーザー設定でシステム設定を更新(ユーザー設定が優先)
                     for model_name, model_config in user_config.items():
                         if model_name in self._config_data:
                             # 既存のモデル設定をユーザー設定で上書き
@@ -120,11 +103,17 @@ class ModelConfigRegistry:
                         else:
                             # 新しいモデル設定を追加
                             self._config_data[model_name] = model_config
-                    logger.info(f"ユーザー設定を {user_config_path} から読み込み、システム設定を上書きしました。")
+                    logger.info(
+                        f"ユーザー設定を {user_config_path} から読み込み、システム設定を上書きしました。"
+                    )
                 except Exception as e:
-                    logger.warning(f"ユーザー設定ファイル {user_config_path} の読み込み中にエラーが発生しました: {e}")
+                    logger.warning(
+                        f"ユーザー設定ファイル {user_config_path} の読み込み中にエラーが発生しました: {e}"
+                    )
             else:
-                logger.debug(f"ユーザー設定ファイル {user_config_path} が存在しないため、システム設定のみ使用します。")
+                logger.debug(
+                    f"ユーザー設定ファイル {user_config_path} が存在しないため、システム設定のみ使用します。"
+                )
 
     def get(self, model_name: str, key: str, default: Any = None) -> Any | None:
         """指定されたモデルとキーに対応する設定値を取得します。

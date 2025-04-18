@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "image-annotator-lib"
-version = "0.1.0"
+version = "0.1.1"
 description = "Integrated library for image tagging and scoring."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -38,7 +38,7 @@ dependencies = [
     # ML Frameworks & Models
     "torch>=2.5.1",
     "torchvision>=0.16.1",
-    "tensorflow>=2.19.0;platform_system!='Darwin'",      # Use newer version from scorer
+    "tensorflow>=2.19.0;platform_system!='Darwin'", # Use newer version from scorer
     "transformers>=4.27.4",
     "tf-keras>=2.19.0",
     "accelerate>=0.26.0",
@@ -56,7 +56,9 @@ dependencies = [
     "opencv-python>=4.8.0",
     "requests>=2.31.0",
     "tqdm>=4.66.0",
-    "imagehash",            # For pHash calculation in base.py
+    "imagehash", # For pHash calculation in base.py
+    "pillow>=9.0.0",
+    "loguru",
 ]
 
 [project.optional-dependencies]
