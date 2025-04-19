@@ -3,7 +3,7 @@ description: プロジェクト・ドキュメンテーションルール (AI �
 globs: 
 alwaysApply: false
 ---
-version: 4.0.0
+version: 4.0.1
 
 
 # プロジェクト・ドキュメンテーションルール (AI 向け指示)
@@ -15,9 +15,9 @@ version: 4.0.0
 ## ライブラリ情報: image-annotator-lib
 
 - **目的:** 画像評価、タグ付け、関連処理を行う統合ライブラリとして機能させること。
-- **管理:** `pyproject.toml` で管理し、`uv sync` でインストール可能とすること。
-- **参照:** コーディング時は `docs` ディレクトリのドキュメントを参照すること。
-- **更新:** 処理システムの変更時は関連ドキュメントを更新し､`docs` と `memory-bank` にその詳細を残すこと
+- **管理:** [pyproject.toml](mdc:pyproject.toml) で管理し、`uv sync` でインストール可能とすること。
+- **参照:** コーディング時は [doc-lookup-rules.mdc](mdc:.cursor/rules/doc-lookup-rules.mdc) のを参照すること。
+- **更新:** 処理システムの変更時は関連ドキュメントを更新し､ [docs/PLAN](mdc:docs/PLAN)  と [decisionLog.md](mdc:memory-bank/decisionLog.md) にその詳細を残すこと
 
 ## ドキュメンテーション
 

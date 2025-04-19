@@ -1,6 +1,6 @@
 ---
-description: プロジェクトのディレクトリ構造に関するルール / Rules for the project directory structure
-globs: 
+description: 
+globs: *.py,*.md,*.toml,*.feature
 alwaysApply: false
 ---
 version: "4.0.0"

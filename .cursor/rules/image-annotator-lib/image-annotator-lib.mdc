@@ -1,17 +1,13 @@
 ---
-description: 
+description: image-annotator-lib 内部実装ルール・設計概要
 globs: 
-alwaysApply: true
+alwaysApply: false
 ---
----
-description: "image-annotator-libの設計アウトラインを記述した文書"
-globs: "src/*", "src/**/*"
 version: "3.0.0"
----
 
 # image-annotator-lib 内部実装ルール・設計概要 (AI 向け指示)
 
-このドキュメントは、`image-annotator-lib` ライブラリの内部実装に関するルール、設計概要、および統合による主要な変更点を記述する。AI はコードを実装・変更する際に `.cursor/rules/coding-rules.mdc` を守ったうえでこれらの指示に従うこと。
+このドキュメントは、`image-annotator-lib` ライブラリの内部実装に関するルール、設計概要、および統合による主要な変更点を記述する。AI はコードを実装・変更する際に [coding-rules.mdc](mdc:.cursor/rules/coding-rules.mdc) を守ったうえでこれらの指示に従うこと。
 
 ## 1. 内部実装ルール (AI 向け指示)
 
@@ -32,7 +28,7 @@ AI は `image-annotator-lib` の内部クラスを実装・変更する際、以
 - **`ModelLoad` (`core/model_factory.py`)**:
   - 各フレームワークに対応したモデルのロード、キャッシュ管理（LRU、CPU 退避）、メモリ使用量推定、リソース解放の責務を担うこと。
 - **`core/registry.py` モジュール**:
-  - モジュールレベルの関数と辞書を用いて、`models/` ディレクトリ内の具象モデルクラスを動的に検出し、設定ファイル (`src/image_annotator_lib/resources/system/annotator_config.toml`) に基づいてモデル名とクラスを紐付けて登録する責務を担うこと。
+  - モジュールレベルの関数と辞書を用いて、`models/` ディレクトリ内の具象モデルクラスを動的に検出し、設定ファイル に基づいてモデル名とクラスを紐付けて登録する責務を担うこと。
 
 ### 1.2. オーバーライドルール
 
@@ -49,18 +45,18 @@ AI は `image-annotator-lib` の内部クラスを実装・変更する際、以
 
 ### 1.3. 参照
 
-- クラス間のアクセス制御（カプセル化）については、`.cursor/rules/encapsulation-rules.mdc` を参照すること。
+- クラス間のアクセス制御（カプセル化）については を参照すること。
 
 ## 2. 設計概要と変更のポイント
 
 ### 2.1. 目的
 
-- `scorer-wrapper-lib` と `tagger-wrapper-lib` を `image-annotator-lib` に統合し、コードの重複削減、API の統一、メンテナンス性の向上、機能拡張の容易化を図ること。特にモデル管理 (`ModelLoad`) とクラス登録 (`registry.py`) の共通化を重視すること。
+- コードの重複削減、API の統一、メンテナンス性の向上、機能拡張の容易化を図ること。特にモデル管理 (`ModelLoad`) とクラス登録 (`registry.py`) の共通化を重視すること。
 
 ### 2.2. 主要な機能
 
 - 画像タギング､キャプショニング､スコアリング機能 (Annotator)
-- 設定ファイル (`src\image_annotator_lib\resources\system\annotator_config.toml`) 駆動のモデル選択・設定。
+- 設定ファイル [annotator_config.toml](mdc:src/image_annotator_lib/resources/system/annotator_config.toml) 駆動のモデル選択・設定。
 - 統一された高機能モデル管理 (動的登録、メモリ管理、エラーハンドリング)。
 - 統一された API インターフェース (`Annotator` クラス経由、または直接モデルクラス利用)。
 
@@ -88,15 +84,15 @@ AI は `image-annotator-lib` の内部クラスを実装・変更する際、以
 
 ```
 image-annotator-lib/
-         ├── pyproject.toml
-         ├── README.md
+         ├── [pyproject.toml](mdc:pyproject.toml)
+         ├── [README.md](mdc:README.md)
          └── src/
             └── image_annotator_lib/
-               ├── __init__.py
-               ├── core/          # 共通基盤 (base.py, model_factory.py, registry.py, utils.py)
-               ├── exceptions/    # 共通例外 (errors.py)
+               ├── [__init__.py](mdc:src/image_annotator_lib/__init__.py)
+               ├── core/          # 共通基盤 ([base.py](mdc:src/image_annotator_lib/core/base.py), [model_factory.py](mdc:src/image_annotator_lib/core/model_factory.py), [registry.py](mdc:src/image_annotator_lib/core/registry.py), [utils.py](mdc:src/image_annotator_lib/core/utils.py))
+               ├── exceptions/    # 共通例外 ([errors.py](mdc:src/image_annotator_lib/exceptions/errors.py))
                ├── models/        # 各モデル実装 (tagger_*.py, scorer_*.py)
-               └── annotator.py   # 統合APIクラス
+               └── [api.py](mdc:src/image_annotator_lib/api.py)   # 統合APIクラス
 ```
 
 ### 3.2. 主要クラス/モジュール
@@ -112,6 +108,6 @@ image-annotator-lib/
 
 ### 3.3. コーディング規約/開発環境 (主要ツール)
 
-(詳細は `.cursor/rules/codingrules.mdc` を参照)
+(詳細は [coding-rules.mdc](mdc:.cursor/rules/coding-rules.mdc) を参照)
 
 
