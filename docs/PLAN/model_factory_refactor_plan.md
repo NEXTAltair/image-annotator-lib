@@ -52,41 +52,42 @@
 
 ### フェーズ 1: `ModelLoad` 内部ヘルパーの準備
 
--   [ ] `ModelLoad` 内にサイズ管理用の内部ヘルパーメソッド/クラス (`_get_or_calculate_size` 等) を定義する。
--   [ ] `ModelLoad` 内にキャッシュ/状態管理用の内部ヘルパーメソッド/クラス (`_update_model_state`, `_clear_cache_internal` 等) を定義する。
--   [ ] `ModelLoad` 内にデバイス移動用の内部ヘルパーメソッド (`_move_components_to_device`) を定義する。
--   [ ] `BaseModelLoader` のロジックを `ModelLoad` の内部ヘルパーに移管するか、内部クラスとして再定義する。
--   [ ] `ModelLoad` の静的変数 (`_MODEL_STATES` 等) が新しい内部ヘルパー経由でのみアクセスされるようにする。
+-   [x] `ModelLoad` 内にサイズ管理用の内部ヘルパーメソッド/クラス (`_get_or_calculate_size` 等) を定義する。
+-   [x] `ModelLoad` 内にキャッシュ/状態管理用の内部ヘルパーメソッド/クラス (`_update_model_state`, `_clear_cache_internal`, `_get_current_cache_usage` 等) を定義する。
+-   [x] `ModelLoad` 内にデバイス移動用の内部ヘルパーメソッド (`_move_components_to_device`) を定義する。
+-   [x] `BaseModelLoader` のロジックを `ModelLoad` の内部ヘルパーに移管するか、内部クラス (`_BaseLoaderInternal`) として再定義する。
+-   [x] `ModelLoad` の静的変数 (`_MEMORY_USAGE`, `_MODEL_LAST_USED` 等) が新しい内部ヘルパー経由でのみアクセスされるようにする (関連ヘルパーメソッドを追加し、`_clear_cache_internal`, `cache_to_main_memory` を修正)。
 
 ### フェーズ 2: ローダー実装の内部化とリファクタリング
 
--   [ ] `TransformersLoader` を `ModelLoad` の内部クラス `_TransformersLoader` として定義する。
--   [ ] `ONNXLoader` を `ModelLoad` の内部クラス `_ONNXLoader` として定義する。
--   [ ] `TensorFlowLoader` を `ModelLoad` の内部クラス `_TensorFlowLoader` として定義する。
--   [ ] `CLIPLoader` を `ModelLoad` の内部クラス `_CLIPLoader` として定義する。
--   [ ] `_TransformersLoader.load_components` を `ModelLoad` の内部ヘルパーを使用するようにリファクタリングする。
--   [ ] `_ONNXLoader.load_components` を同様にリファクタリングする。
--   [ ] `_TensorFlowLoader.load_components` を同様にリファクタリングする。
--   [ ] `_CLIPLoader.load_components` を同様にリファクタリングする。
--   [ ] 共通のエラーハンドリングロジック (`_handle_load_error` など) を内部ヘルパーとして実装し、各ローダーから呼び出す。
+-   [x] `TransformersLoader` を `ModelLoad` の内部クラス `_TransformersLoader` として定義する。
+-   [x] `ONNXLoader` を `ModelLoad` の内部クラス `_ONNXLoader` として定義する。
+-   [x] `TensorFlowLoader` を `ModelLoad` の内部クラス `_TensorFlowLoader` として定義する。
+-   [x] `CLIPLoader` を `ModelLoad` の内部クラス `_CLIPLoader` として定義する。
+-   [x] `_TransformersLoader.load_components` を `ModelLoad` の内部ヘルパー (`_BaseLoaderInternal.load_components` の共通シーケンス) を使用するようにリファクタリングする。
+-   [x] `_ONNXLoader.load_components` を同様にリファクタリングする。
+-   [x] `_TensorFlowLoader.load_components` を同様にリファクタリングする。
+-   [x] `_CLIPLoader.load_components` を同様にリファクタリングする。
+-   [x] 共通のエラーハンドリングロジック (`_handle_load_error` など) を内部ヘルパーとして実装し、各ローダーから呼び出す。
 
 ### フェーズ 3: `ModelLoad` 静的メソッドのインターフェース維持と内部呼び出し修正
 
--   [ ] 静的メソッド `ModelLoad.load_transformers_components` の内部実装を `_TransformersLoader` を呼び出すように修正する。
--   [ ] 静的メソッド `ModelLoad.load_onnx_components` の内部実装を `_ONNXLoader` を呼び出すように修正する。
--   [ ] 静的メソッド `ModelLoad.load_tensorflow_components` の内部実装を `_TensorFlowLoader` を呼び出すように修正する。
--   [ ] 静的メソッド `ModelLoad.load_clip_components` の内部実装を `_CLIPLoader` を呼び出すように修正する。
--   [ ] 静的メソッド `ModelLoad.cache_to_main_memory` の内部実装を内部ヘルパー (`_move_components_to_device`, `_update_model_state` 等) を呼び出すように修正する。
--   [ ] 静的メソッド `ModelLoad.restore_model_to_cuda` の内部実装を内部ヘルパーを呼び出すように修正する。
--   [ ] 静的メソッド `ModelLoad.release_model` の内部実装を内部状態ヘルパーを呼び出すように修正する。
--   [ ] 静的メソッド `ModelLoad.release_model_components` の内部実装を内部状態/リソースヘルパーを呼び出すように修正する。
+-   [x] 静的メソッド `ModelLoad.load_transformers_components` の内部実装を `_TransformersLoader` を呼び出すように修正する。
+-   [x] 静的メソッド `ModelLoad.load_onnx_components` の内部実装を `_ONNXLoader` を呼び出すように修正する。
+-   [x] 静的メソッド `ModelLoad.load_tensorflow_components` の内部実装を `_TensorFlowLoader` を呼び出すように修正する。
+-   [x] 静的メソッド `ModelLoad.load_clip_components` の内部実装を `_CLIPLoader` を呼び出すように修正する。
+-   [x] 静的メソッド `ModelLoad.cache_to_main_memory` の内部実装を内部ヘルパー (`_move_components_to_device`, `_update_model_state`, `_get_current_cache_usage` 等) を呼び出すように修正する。
+-   [x] 静的メソッド `ModelLoad.restore_model_to_cuda` の内部実装を内部ヘルパーを呼び出すように修正する。
+-   [x] 静的メソッド `ModelLoad.release_model` の内部実装を内部状態ヘルパー (`_release_model_internal`) を呼び出すように修正する。
+-   [x] 静的メソッド `ModelLoad.release_model_components` の内部実装を内部状態/リソースヘルパー (`_release_model_internal`) を呼び出すように修正する。
 
 ### フェーズ 4: CLIP関連、utils、Linter対応、最終調整
 
 -   [x] `create_clip_model` 関数をリファクタリングする (構造推測を排除し、設定ファイル利用を検討。`ModelLoad` の内部ヘルパー `_create_clip_model_internal` とし、さらに内部ヘルパーメソッドに分割して複雑度を削減)。
--   [ ] `utils` モジュールの関数 (`download_onnx_tagger_model`, `load_file` 等) を `huggingface_hub` 等で代替可能か調査し、可能であれば `ModelLoad` 内部で直接ライブラリを使用する。
--   [ ] `model_factory.py` 内の Linter エラー (例: MyPy 型互換性エラー、TypedDict キー削除エラー) を修正する。
--   [ ] `model_factory.py` 全体の内部クラス/メソッドの命名規則を確認・統一する。
--   [ ] `model_factory.py` 内のログ出力メッセージを見直し、レベルや内容を改善する。
--   [ ] `model_factory.py` 内の型ヒントを見直し、整合性を確保する。
--   [ ] `ModelLoad` クラスおよび内部ヘルパー/クラスの Docstring を更新する。 
+-   [-] `utils` モジュールの関数 (`download_onnx_tagger_model`, `load_file` 等) を `huggingface_hub` 等で代替可能か調査し、可能であれば `ModelLoad` 内部で直接ライブラリを使用する。 -> **(見送り)** 任意URL対応の複雑さから現状維持とする。
+-   [x] `model_factory.py` 内の Linter エラー (例: MyPy 型互換性エラー、TypedDict キー削除エラー) を修正する。
+    -   [方針決定] MyPy の `_load_components_internal` 戻り値型互換性エラーについては、`typing.Union` を用いて解決する。
+-   [x] `model_factory.py` 全体の内部クラス/メソッドの命名規則を確認・統一する。
+-   [x] `model_factory.py` 内のログ出力メッセージを見直し、レベルや内容を改善する。
+-   [x] `model_factory.py` 内の型ヒントを見直し、整合性を確保する。
+-   [x] `ModelLoad` クラスおよび内部ヘルパー/クラスの Docstring を更新する。 

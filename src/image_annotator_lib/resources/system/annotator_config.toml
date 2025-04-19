@@ -1,64 +1,36 @@
-[aesthetic_shadow_v1]  # model_name
-model_path = "shadowlilac/aesthetic-shadow" # model_path モファイルパスか､HFリポジトリ名､DL先のURL
-device = "cuda" # device 処理に使う使用デバイス
-class = "AestheticShadow" # class 使用するクラス Optional 必要ならば実装する
+[aesthetic_shadow_v1]
+model_path = "shadowlilac/aesthetic-shadow"
+device = "cuda"
+class = "AestheticShadow"
+estimated_size_gb = 4.065
 
 [aesthetic_shadow_v2]
 model_path = "NEXTAltair/cache_aestheic-shadow-v2"
 device = "cuda"
 class = "AestheticShadow"
+estimated_size_gb = 4.065
 
 [cafe_aesthetic]
 model_path = "cafeai/cafe_aesthetic"
 device = "cuda"
 class = "CafePredictor"
-
-# [cafe_style] # TODO: scoring モデルではないので後回し
-# type = "pipeline"
-# model_path = "cafeai/cafe_style"
-# device = "cuda"
-# score_prefix = "[CAFE]"
-# class = "CafePredictor"
-
-# [cafe_waifu] # TODO: scoring モデルではないので後回し
-# type = "pipeline"
-# model_path = "cafeai/cafe_waifu"
-# device = "cuda"
-# score_prefix = "[CAFE]"
-# class = "CafePredictor"
+estimated_size_gb = 0.32
 
 [ImprovedAesthetic]
-model_path = "https://github.com/christophschuhmann/improved-aesthetic-predictor/raw/main/sac+logos+ava1-l14-linearMSE.pth" #ローカルに保存している場合はパスを指定
-base_model = "openai/clip-vit-large-patch14" # CLIPのベースモデル
+model_path = "https://github.com/christophschuhmann/improved-aesthetic-predictor/raw/main/sac+logos+ava1-l14-linearMSE.pth"
+base_model = "openai/clip-vit-large-patch14"
 device = "cuda"
 class = "ImprovedAesthetic"
+estimated_size_gb = 0.003
 
 [WaifuAesthetic]
 model_path = "https://huggingface.co/hakurei/waifu-diffusion-v1-4/resolve/main/models/aes-B32-v0.pth"
 base_model = "openai/clip-vit-base-patch32"
 device = "cuda"
 class = "WaifuAesthetic"
-activation_type = "ReLU"        # 指定あり → ReLU活性化関数を使用
-final_activation_type = "Sigmoid"  # 指定あり → 最終層にSigmoid活性化関数を使用
-
-# [ImageReward] #TODO: 実装がクソややこしいので後回し `pip install image-reward` でライブラリとして導入すると依存関係の互換性で問題が出る
-# BLIPの開発元のライブラリ `salesforce-lavis`は Rustのビルドツールを要求されるからユーザーにわざわざ入れさせたくない
-# type = "blip_mlp"
-# base_model = "https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_large.pth"
-# device = "cpu"
-# class = "ImageRewardScorer"
-# model_path = "https://huggingface.co/THUDM/ImageReward/resolve/main/ImageReward.pt" # モデル重みファイルの直接ダウンロードURLに修正
-# score_prefix = "[IR]"
-
-# [ImageRewardAesthetic] # ImprovedAestheticと同じだよな?
-# type = "clip_mlp"
-# base_model = "https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_large.pth"
-# device = "cpu"
-# class = "ClipMlpModel"
-# model_path = "https://huggingface.co/THUDM/ImageReward/resolve/main/ImageReward.pt" # モデル重みファイルの直接ダウンロードURLに修正
-# score_prefix = "[IR]"
-
-# --- Content from taggers.toml starts here ---
+activation_type = "ReLU"
+final_activation_type = "Sigmoid"
+estimated_size_gb = 0.002
 
 [idolsankaku-eva02-large-tagger-v1]
 model_path = "deepghs/idolsankaku-eva02-large-tagger-v1"
@@ -73,6 +45,7 @@ estimated_size_gb = 0.587
 [Z3D-E621-Convnext]
 model_path = "toynya/Z3D-E621-Convnext"
 class = "Z3D_E621Tagger"
+estimated_size_gb = 0.544
 
 [wd-v1-4-convnext-tagger-v2]
 model_path = "SmilingWolf/wd-v1-4-convnext-tagger-v2"
@@ -122,7 +95,7 @@ estimated_size_gb = 1.761
 [BLIPLargeCaptioning]
 model_path = "Salesforce/blip-image-captioning-large"
 class = "BLIPTagger"
-estimated_size_gb = 2.1
+estimated_size_gb = 1.75
 
 ["blip2-opt-2.7b"]
 model_path = "Salesforce/blip2-opt-2.7b"
@@ -160,7 +133,7 @@ class = "BLIP2Tagger"
 device = "cpu"
 estimated_size_gb = 17.627
 
-[blip2-flan-t5-xxl] #スペック不足メモリに展開できない
+[blip2-flan-t5-xxl]
 model_path = "Salesforce/blip2-flan-t5-xxl"
 class = "BLIP2Tagger"
 device = "cpu"
@@ -203,7 +176,7 @@ class = "DeepDanbooruTagger"
 estimated_size_gb = 0.66
 
 ["gemini-1.5-pro"]
-class = "GoogleApiAnnotator" # モデルクラス
+class = "GoogleApiAnnotator"
 model_name_on_provider = "gemini-1.5-pro"
 timeout = 90
 retry_count = 3
@@ -219,7 +192,7 @@ retry_delay = 1.0
 min_request_interval = 1.0
 
 ["gemini-2.0-flash"]
-class = "GoogleApiAnnotator" # モデルクラス
+class = "GoogleApiAnnotator"
 model_name_on_provider = "gemini-2.0-flash"
 timeout = 90
 retry_count = 3
@@ -250,8 +223,7 @@ retry_count = 3
 retry_delay = 1.0
 min_request_interval = 1.0
 
-
-["optimus-alpha"]
+[optimus-alpha]
 class = "OpenRouterApiAnnotator"
 model_name_on_provider = "openrouter/optimus-alpha"
 timeout = 60
@@ -259,7 +231,7 @@ retry_count = 3
 retry_delay = 1.0
 min_request_interval = 1.0
 
-["claude-3-7-sonnet"]
+[claude-3-7-sonnet]
 class = "AnthropicApiAnnotator"
 model_name_on_provider = "claude-3-7-sonnet-20250219"
 timeout = 60
@@ -267,7 +239,7 @@ retry_count = 3
 retry_delay = 1.0
 min_request_interval = 1.0
 
-["claude-3-5-haiku"]
+[claude-3-5-haiku]
 class = "AnthropicApiAnnotator"
 model_name_on_provider = "claude-3-5-haiku-20241022"
 timeout = 60

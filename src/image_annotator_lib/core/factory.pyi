@@ -1,14 +1,43 @@
 # Stub file for image_annotator_lib.core.factory
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
+import onnxruntime as ort
+import tensorflow as tf
 import torch
+import torch.nn as nn
+from transformers.models.auto.modeling_auto import AutoModelForVision2Seq
+from transformers.models.auto.processing_auto import AutoProcessor
+from transformers.models.clip import CLIPModel, CLIPProcessor
+from transformers.pipelines.base import Pipeline
 
+# --- TypedDict Definitions (Copied from implementation for clarity in stub) ---
+class TransformersComponents(TypedDict):
+    model: AutoModelForVision2Seq
+    processor: AutoProcessor
+
+class TransformersPipelineComponents(TypedDict):
+    pipeline: Pipeline
+
+class ONNXComponents(TypedDict):
+    session: ort.InferenceSession
+    csv_path: Path
+
+class TensorFlowComponents(TypedDict):
+    model_dir: Path
+    model: tf.Module | tf.keras.Model
+
+class CLIPComponents(TypedDict):
+    model: nn.Module
+    processor: CLIPProcessor
+    clip_model: CLIPModel
+
+# --- Classifier Stub ---
 # Assuming Classifier is defined elsewhere or here temporarily
-# Ideally, move Classifier definition to its own file/stub
 class Classifier(torch.nn.Module): ...
 
+# --- ModelLoad Stub ---
 class ModelLoad:
     """Handles loading, caching, and memory management for various model types. / 様々なモデルタイプのロード、キャッシュ、メモリ管理を扱います。"""
 
@@ -20,7 +49,7 @@ class ModelLoad:
     logger: logging.Logger
 
     @staticmethod
-    def get_model_size(model_name: str) -> float:
+    def get_model_size(model_name: str) -> float | None:
         """モデルの推定メモリ使用量を取得（MB単位）。
         Gets the estimated memory usage of a model in megabytes (MB).
 
@@ -28,7 +57,7 @@ class ModelLoad:
             model_name (str): The name of the model. / モデルの名前。
 
         Returns:
-            float: Estimated memory usage in MB, or 0.0 if unknown. / 推定メモリ使用量 (MB)、不明な場合は 0.0。
+            Optional[float]: Estimated memory usage in MB, or None if unknown. / 推定メモリ使用量 (MB)、不明な場合は None。
         """
         ...
 
@@ -43,17 +72,6 @@ class ModelLoad:
         ...
 
     @staticmethod
-    def _clear_cache_if_needed(model_name: str, model_size: float) -> None:
-        """必要に応じて古いモデルをキャッシュから削除します。
-        Removes old models from the cache if necessary to make space.
-
-        Args:
-            model_name (str): The name of the model being loaded. / ロード中のモデルの名前。
-            model_size (float): The estimated size of the model being loaded (MB). / ロード中のモデルの推定サイズ (MB)。
-        """
-        ...
-
-    @staticmethod
     def cache_to_main_memory(model_name: str, components: dict[str, Any]) -> dict[str, Any]:
         """モデルコンポーネントをメインメモリ (CPU) にキャッシュします。
         Caches the model components to main memory (CPU).
@@ -63,23 +81,14 @@ class ModelLoad:
             components (dict[str, Any]): The dictionary containing model components. / モデルコンポーネントを含む辞書。
 
         Returns:
-            dict[str, Any]: The components dictionary (potentially modified in place). / コンポーネント辞書 (インプレースで変更される可能性あり)。
+            dict[str, Any]: The components dictionary (potentially modified in place, or empty on failure). / コンポーネント辞書 (インプレースで変更される可能性あり、失敗時は空)。
         """
         ...
 
     @staticmethod
-    def _calculate_and_save_model_size(model_name: str, model_size: float) -> None:
-        """モデルサイズを計算し、内部キャッシュと設定ファイルに保存します。
-        Calculates and saves the model size to the internal cache and configuration file.
-
-        Args:
-            model_name (str): The name of the model. / モデルの名前。
-            model_size (float): The calculated model size in MB. / 計算されたモデルサイズ (MB)。
-        """
-        ...
-
-    @staticmethod
-    def load_transformer_components(model_name: str, model_path: str, device: str) -> dict[str, Any] | None:
+    def load_transformers_components(
+        model_name: str, model_path: str, device: str
+    ) -> TransformersComponents | None:
         """Transformer モデルのコンポーネント (モデル、プロセッサ) をロードします。
         Loads Transformer model components (model, processor).
 
@@ -89,29 +98,36 @@ class ModelLoad:
             device (str): The device to load the model onto ("cuda" or "cpu"). / モデルをロードするデバイス ("cuda" または "cpu")。
 
         Returns:
-            Optional[dict[str, Any]]: Dictionary with "model" and "processor", or None if already loaded. / "model" と "processor" を含む辞書、またはロード済みの場合は None。
+            Optional[TransformersComponents]: Dictionary with "model" and "processor", or None if load fails or already loaded. / "model" と "processor" を含む辞書、またはロード失敗・ロード済みの場合は None。
         """
         ...
 
     @staticmethod
-    def load_onnx_components(model_name: str, model_repo: str, device: str) -> dict[str, Any]:
+    def load_onnx_components(
+        model_name: str,
+        model_path: str,
+        device: str,  # Implementation takes model_path, not model_repo
+    ) -> ONNXComponents | None:
         """ONNX モデルのコンポーネント (セッション、CSVパス) をロードします。
         Loads ONNX model components (session, csv_path).
 
         Args:
             model_name (str): The name of the model. / モデルの名前。
-            model_repo (str): Repository or path for the ONNX model. / ONNX モデルのリポジトリまたはパス。
+            model_path (str): Path or identifier for the ONNX model. / ONNX モデルのパスまたは識別子。
             device (str): The device to run inference on ("cuda" or "cpu"). / 推論を実行するデバイス ("cuda" または "cpu")。
 
         Returns:
-            dict[str, Any]: Dictionary with "session" and "csv_path". / "session" と "csv_path" を含む辞書。
+            Optional[ONNXComponents]: Dictionary with "session" and "csv_path", or None if load fails or already loaded. / "session" と "csv_path" を含む辞書、またはロード失敗・ロード済みの場合は None。
         """
         ...
 
     @staticmethod
     def load_tensorflow_components(
-        model_name: str, model_path: str, device: str, model_format: str = "h5"
-    ) -> dict[str, Any]:
+        model_name: str,
+        model_path: str,
+        device: str,
+        model_format: str,  # No default in implementation
+    ) -> TensorFlowComponents | None:
         """TensorFlow モデルのコンポーネント (モデル、モデルディレクトリ) をロードします。
         Loads TensorFlow model components (model, model_dir).
 
@@ -122,25 +138,27 @@ class ModelLoad:
             model_format (str): The format of the model ("h5", "saved_model", "pb"). / モデルのフォーマット ("h5", "saved_model", "pb")。
 
         Returns:
-            dict[str, Any]: Dictionary with "model" and "model_dir". / "model" と "model_dir" を含む辞書。
+            Optional[TensorFlowComponents]: Dictionary with "model" and "model_dir", or None if load fails or already loaded. / "model" と "model_dir" を含む辞書、またはロード失敗・ロード済みの場合は None。
         """
         ...
 
     @staticmethod
-    def load_pipeline_components(
-        model_name: str, model_path: str, batch_size: int, device: str
-    ) -> dict[str, Any] | None:
+    def load_transformers_pipeline_components(
+        task: str, model_name: str, model_path: str, device: str, batch_size: int
+    ) -> TransformersPipelineComponents | None:
         """Hugging Face Pipeline モデルのコンポーネントをロードします。
         Loads Hugging Face Pipeline model components.
 
         Args:
+            task (str): The task for the pipeline. / パイプラインのタスク。
             model_name (str): The name of the model. / モデルの名前。
             model_path (str): Path or identifier for the pipeline model. / パイプラインモデルのパスまたは識別子。
-            batch_size (int): Batch size for the pipeline. / パイプラインのバッチサイズ。
             device (str): The device to load the pipeline onto ("cuda" or "cpu"). / パイプラインをロードするデバイス ("cuda" または "cpu")。
+            batch_size (int): Batch size for the pipeline. / パイプラインのバッチサイズ。
+
 
         Returns:
-            Optional[dict[str, Any]]: Dictionary with "pipeline", or None if already loaded. / "pipeline" を含む辞書、またはロード済みの場合は None。
+            Optional[TransformersPipelineComponents]: Dictionary with "pipeline", or None if load fails or already loaded. / "pipeline" を含む辞書、またはロード失敗・ロード済みの場合は None。
         """
         ...
 
@@ -152,7 +170,7 @@ class ModelLoad:
         device: str,
         activation_type: str | None = None,
         final_activation_type: str | None = None,
-    ) -> dict[str, Any] | None:
+    ) -> CLIPComponents | None:
         """CLIP ベースの Scorer モデルのコンポーネント (分類器、プロセッサ、CLIPモデル) をロードします。
         Loads CLIP-based Scorer model components (classifier, processor, clip_model).
 
@@ -165,22 +183,26 @@ class ModelLoad:
             final_activation_type (Optional[str]): Type of activation for the final layer. / 最終層の活性化関数のタイプ。
 
         Returns:
-            Optional[dict[str, Any]]: Dictionary with "model", "processor", "clip_model", or None if already loaded. / "model", "processor", "clip_model" を含む辞書、またはロード済みの場合は None。
+            Optional[CLIPComponents]: Dictionary with "model", "processor", "clip_model", or None if load fails or already loaded. / "model", "processor", "clip_model" を含む辞書、またはロード失敗・ロード済みの場合は None。
         """
         ...
 
     @staticmethod
-    def restore_model_to_cuda(model_name: str, device: str, model: dict[str, Any]) -> dict[str, Any]:
+    def restore_model_to_cuda(
+        model_name: str,
+        device: str,
+        components: dict[str, Any],  # 'model' arg name changed to 'components'
+    ) -> dict[str, Any] | None:  # Implementation returns None on failure
         """キャッシュされたモデルを指定された CUDA デバイスに復元します。
         Restores a cached model to the specified CUDA device.
 
         Args:
             model_name (str): The name of the model. / モデルの名前。
             device (str): The target CUDA device (e.g., "cuda:0"). / ターゲット CUDA デバイス (例: "cuda:0")。
-            model (dict[str, Any]): The dictionary containing model components (potentially on CPU). / モデルコンポーネントを含む辞書 (CPU 上にある可能性あり)。
+            components (dict[str, Any]): The dictionary containing model components (potentially on CPU). / モデルコンポーネントを含む辞書 (CPU 上にある可能性あり)。
 
         Returns:
-            dict[str, Any]: The components dictionary with components moved to the target device. / コンポーネントがターゲットデバイスに移動されたコンポーネント辞書。
+            Optional[dict[str, Any]]: The components dictionary with components moved to the target device, or None on failure. / コンポーネントがターゲットデバイスに移動されたコンポーネント辞書、失敗時は None。
         """
         ...
 
@@ -204,15 +226,6 @@ class ModelLoad:
             components (dict[str, Any]): The dictionary containing model components. / モデルコンポーネントを含む辞書。
 
         Returns:
-            dict[str, Any]: The components dictionary with released components set to None. / 解放されたコンポーネントが None に設定されたコンポーネント辞書。
+            dict[str, Any]: An empty dictionary, as components are released. / コンポーネントが解放されるため、空の辞書。
         """
         ...
-
-    @staticmethod
-    def _calculate_transformer_size(model: torch.nn.Module) -> float: ...
-    @staticmethod
-    def _calculate_model_size(model_file_path: Path, multiplier: float) -> float: ...
-
-# Classifier definition might be moved to a separate stub/file later
-# Classifier クラス定義は後で別のスタブ/ファイルに移動する可能性あり
-# class Classifier(torch.nn.Module): ...
