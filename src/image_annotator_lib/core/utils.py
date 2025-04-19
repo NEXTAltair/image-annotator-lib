@@ -1,6 +1,8 @@
 import hashlib
+import logging
 import sys
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -248,7 +250,7 @@ def determine_effective_device(requested_device: str, model_name: str | None = N
                             actual_device = "cuda"  # Fallback to default cuda
                 except (ValueError, IndexError):
                     logger.warning(
-                        f"無効なCUDAデバイス指定 '{requested_device}' です。デフォルトの CUDA デバイスを使用します。"
+                        f"要求されたCUDAデバイス '{requested_device}' の形式が不正です。デフォルトの CUDA デバイスを使用します。"
                     )
                     actual_device = "cuda"
 
@@ -264,4 +266,33 @@ def determine_effective_device(requested_device: str, model_name: str | None = N
             f"モデル '{model_name or 'N/A'}' の実行デバイスを '{requested_device}' から '{actual_device}' に変更しました。"
         )
 
+    logger.debug(f"要求デバイス: '{requested_device}', 決定デバイス: '{actual_device}'")
     return actual_device
+
+
+@contextmanager
+def suppress_logging(level: str | int = "WARNING"):
+    """指定されたレベル以下のログ出力を一時的に抑制するコンテキストマネージャ。
+
+    Args:
+        level: 抑制するログレベル (文字列または logging レベル定数)。
+               このレベル "以下" のログが抑制されます。
+    """
+    # 文字列レベルを数値レベルに変換
+    numeric_level = logging.getLevelName(level) if isinstance(level, str) else level
+    if not isinstance(numeric_level, int):
+        logger.warning(f"無効なログレベル指定: {level}。抑制をスキップします。")
+        try:
+            yield
+        finally:
+            pass
+        return
+
+    previous_level = logging.root.manager.disable
+    # 指定レベル未満を無効化 (指定レベル自体は出力される)
+    # 例えば level=WARNING (30) なら、DEBUG(10), INFO(20) が無効になる
+    logging.disable(numeric_level - 1)
+    try:
+        yield
+    finally:
+        logging.disable(previous_level)

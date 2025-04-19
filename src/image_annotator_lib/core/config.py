@@ -27,40 +27,9 @@ def _load_config_from_file(config_path: str | Path) -> dict[str, dict[str, Any]]
         raise  # 予期せぬエラーは再送出
 
 
-def save_model_size(model_name: str, size_mb: float, config_path: str | Path | None = None) -> None:
-    """モデルのサイズ推定値を保存します。"""
-
-    # 修正: 入力に応じて Path オブジェクトを決定する
-    if config_path is None:
-        path_to_use: Path = DEFAULT_PATHS["config_toml"]
-    elif isinstance(config_path, str):
-        path_to_use = Path(config_path)
-    else:  # config_path is Path
-        path_to_use = config_path
-
-    try:
-        size_gb = size_mb / 1024
-
-        # 修正: path_to_use を使用する
-        if path_to_use.exists():
-            config_data = toml.load(path_to_use)
-        else:
-            logger.error(f"設定ファイル {path_to_use} が見つかりません")
-            return
-
-        if model_name not in config_data:
-            logger.warning(f"モデル '{model_name}' の設定が見つかりません")
-            return
-
-        config_data[model_name]["estimated_size_gb"] = round(size_gb, 3)
-
-        # 修正: path_to_use を使用する
-        with open(path_to_use, "w") as f:
-            toml.dump(config_data, f)
-
-        logger.debug(f"モデル '{model_name}' の推定サイズ ({size_gb:.3f}GB) を保存しました")
-    except Exception as e:
-        logger.error(f"モデルサイズの保存に失敗しました: {e}")
+# save_model_size 関数は ModelConfigRegistry に統合するため削除またはコメントアウトを検討
+# def save_model_size(model_name: str, size_mb: float, config_path: str | Path | None = None) -> None:
+#     ...
 
 
 class ModelConfigRegistry:
@@ -68,75 +37,154 @@ class ModelConfigRegistry:
 
     def __init__(self) -> None:
         """初期化時に設定データを空の辞書で初期化します。"""
-        self._config_data: dict[str, dict[str, Any]] = {}
-        self._is_loaded = False
+        self._system_config_data: dict[str, dict[str, Any]] = {}  # System config
+        self._user_config_data: dict[str, dict[str, Any]] = {}  # User overrides/additions
+        self._merged_config_data: dict[str, dict[str, Any]] = {}  # Merged view
+        self._system_config_path: Path | None = None
+        self._user_config_path: Path | None = None
 
     def load(
         self, config_path: str | Path | None = None, user_config_path: str | Path | None = None
     ) -> None:
-        """システム設定ファイルとユーザー設定ファイルを読み込み、内部データ (_config_data) を更新します。
-        ユーザー設定はシステム設定を上書きします。ユーザー設定ファイルが存在しない場合は無視されます。
+        """システム設定ファイルとユーザー設定ファイルを読み込み、内部データを更新します。
+        ユーザー設定はシステム設定を上書きします。
         """
-        if config_path is None:
-            config_path = DEFAULT_PATHS["config_toml"]
+        # Determine paths and ensure they are Path objects
+        # Cast Traversable from DEFAULT_PATHS to str before creating Path
+        sys_path_arg = config_path if config_path else str(DEFAULT_PATHS["config_toml"])
+        user_path_arg = user_config_path if user_config_path else str(DEFAULT_PATHS["user_config_toml"])
 
-        if user_config_path is None:
-            user_config_path = DEFAULT_PATHS["user_config_toml"]
+        self._system_config_path = Path(sys_path_arg) if sys_path_arg else None
+        self._user_config_path = Path(user_path_arg) if user_path_arg else None
 
-        # システム設定の読み込み
-        self._config_data = _load_config_from_file(config_path)
-        logger.info(f"設定マネージャーがシステム設定を {config_path} から読み込みました。")
-
-        # ユーザー設定の読み込み(存在する場合のみ)
-        if user_config_path is not None:
-            user_config_path_obj = (
-                Path(user_config_path) if isinstance(user_config_path, str) else user_config_path
-            )
-            if user_config_path_obj.exists():
-                try:
-                    user_config = _load_config_from_file(user_config_path)
-                    # ユーザー設定でシステム設定を更新(ユーザー設定が優先)
-                    for model_name, model_config in user_config.items():
-                        if model_name in self._config_data:
-                            # 既存のモデル設定をユーザー設定で上書き
-                            self._config_data[model_name].update(model_config)
-                        else:
-                            # 新しいモデル設定を追加
-                            self._config_data[model_name] = model_config
-                    logger.info(
-                        f"ユーザー設定を {user_config_path} から読み込み、システム設定を上書きしました。"
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"ユーザー設定ファイル {user_config_path} の読み込み中にエラーが発生しました: {e}"
-                    )
-            else:
-                logger.debug(
-                    f"ユーザー設定ファイル {user_config_path} が存在しないため、システム設定のみ使用します。"
+        # Load system config
+        if self._system_config_path:
+            try:
+                self._system_config_data = _load_config_from_file(self._system_config_path)
+                logger.info(
+                    f"設定マネージャーがシステム設定を {self._system_config_path} から読み込みました。"
                 )
+            except Exception as e:
+                logger.error(
+                    f"システム設定ファイル {self._system_config_path} の読み込みに失敗しました: {e}"
+                )
+                self._system_config_data = {}
+        else:
+            logger.error("システム設定ファイルのパスが決定できませんでした。")
+            self._system_config_data = {}
+
+        # Load user config (if exists)
+        self._user_config_data = {}
+        if self._user_config_path is not None and self._user_config_path.exists():
+            try:
+                self._user_config_data = _load_config_from_file(self._user_config_path)
+                logger.info(f"ユーザー設定を {self._user_config_path} から読み込みました。")
+            except Exception as e:
+                logger.warning(
+                    f"ユーザー設定ファイル {self._user_config_path} の読み込み中にエラーが発生しました: {e}"
+                )
+                self._user_config_data = {}
+        else:
+            logger.debug(
+                f"ユーザー設定ファイル {self._user_config_path} が存在しないかパスが指定されていません。"
+            )
+
+        # Merge configs (user overrides system)
+        self._merge_configs()
+
+    def _merge_configs(self) -> None:
+        """システム設定とユーザー設定をマージして _merged_config_data を作成"""
+        self._merged_config_data = self._system_config_data.copy()
+        for model_name, user_model_config in self._user_config_data.items():
+            if model_name in self._merged_config_data:
+                self._merged_config_data[model_name].update(user_model_config)
+            else:
+                self._merged_config_data[model_name] = user_model_config
+        logger.debug("システム設定とユーザー設定をマージしました。")
 
     def get(self, model_name: str, key: str, default: Any = None) -> Any | None:
-        """指定されたモデルとキーに対応する設定値を取得します。
-
-        前提: `model_name` は設定データ内に必ず存在します。
-
-        - `key` がモデルの設定内に存在する場合: その値を返します。
-        - `key` がモデルの設定内に存在しない場合: `default` 引数で指定された値を返します。
-
-        Args:
-            model_name: 設定値を取得したいモデルの名前 (設定内に存在することが前提)。
-            key: 取得したい設定のキー。
-            default: `key` が見つからなかった場合に返すデフォルト値 (デフォルト: None)。
-
-        Returns:
-            取得した設定値。`key` が見つからなければ `default` 引数の値。
-        """
-        model_config = self._config_data[model_name]
+        """指定されたモデルとキーに対応するマージ済みの設定値を取得します。"""
+        if model_name not in self._merged_config_data:
+            # モデル自体が存在しない場合は警告を出し、デフォルト値を返す
+            # logger.warning(f"設定内にモデル '{model_name}' が見つかりません。") # 必要に応じてログ出力
+            return default
+        model_config = self._merged_config_data[model_name]
         return model_config.get(key, default)
 
+    def set(self, model_name: str, key: str, value: Any) -> None:
+        """指定されたモデルとキーに対応する設定値をユーザー設定として更新します。"""
+        logger.debug(f"ユーザー設定を更新: モデル '{model_name}', キー '{key}', 値 '{value}'")
+        if model_name not in self._user_config_data:
+            self._user_config_data[model_name] = {}
+        self._user_config_data[model_name][key] = value
+        # Immediately update the merged view as well
+        self._merge_configs()
+
+    def set_system_value(self, model_name: str, key: str, value: Any) -> None:
+        """指定されたモデルとキーに対応する設定値をシステム設定として更新します。"""
+        logger.debug(f"システム設定を更新: モデル '{model_name}', キー '{key}', 値 '{value}'")
+        if model_name not in self._system_config_data:
+            self._system_config_data[model_name] = {}
+        self._system_config_data[model_name][key] = value
+        # Immediately update the merged view as well
+        self._merge_configs()
+
+    def save_user_config(self, user_config_path: str | Path | None = None) -> None:
+        """現在のユーザー設定 (_user_config_data) を指定されたファイルパスに保存します。"""
+        save_path = Path(user_config_path) if user_config_path else self._user_config_path
+
+        if save_path is None:
+            logger.error("ユーザー設定の保存パスが指定されていません。保存をスキップします。")
+            return
+
+        if not self._user_config_data:
+            logger.debug("保存すべきユーザー設定がありません。保存をスキップします。")
+            return
+
+        try:
+            # Ensure the parent directory exists
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Write the user config data to the file
+            with open(save_path, "w", encoding="utf-8") as f:
+                toml.dump(self._user_config_data, f)
+            logger.info(f"ユーザー設定を {save_path} に保存しました。")
+
+        except Exception as e:
+            logger.error(
+                f"ユーザー設定ファイル {save_path} の保存中にエラーが発生しました: {e}", exc_info=True
+            )
+
+    def save_system_config(self, system_config_path: str | Path | None = None) -> None:
+        """現在のシステム設定 (_system_config_data) を指定されたファイルパスに保存します。"""
+        save_path = Path(system_config_path) if system_config_path else self._system_config_path
+
+        if save_path is None:
+            logger.error("システム設定の保存パスが指定されていません。保存をスキップします。")
+            return
+
+        if not self._system_config_data:
+            # 通常、システム設定が空になることはないはずだが念のため
+            logger.warning("保存すべきシステム設定がありません。保存をスキップします。")
+            return
+
+        try:
+            # Ensure the parent directory exists (though usually not needed for system config)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Write the system config data to the file
+            with open(save_path, "w", encoding="utf-8") as f:
+                toml.dump(self._system_config_data, f)
+            logger.info(f"システム設定を {save_path} に保存しました。")
+
+        except Exception as e:
+            logger.error(
+                f"システム設定ファイル {save_path} の保存中にエラーが発生しました: {e}", exc_info=True
+            )
+
     def get_all_config(self) -> dict[str, Any]:
-        """ロード済みの設定データ全体を辞書として返します。"""
-        return self._config_data.copy()  # 内部データのコピーを返す
+        """ロード済みのマージされた設定データ全体を辞書として返します。"""
+        return self._merged_config_data.copy()  # 内部データのコピーを返す
 
 
 # --- 共有インスタンスの作成と初期ロード --- #

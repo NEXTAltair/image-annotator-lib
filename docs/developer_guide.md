@@ -228,6 +228,41 @@ This completes the process of adding a new model. Consider adding unit tests for
 
 ---
 
+## Model Loading and Memory Management
+
+The `image-annotator-lib` incorporates mechanisms for efficient model loading and memory management, primarily handled by the `ModelLoad` class and its associated loader classes within `src/image_annotator_lib/core/model_factory.py`.
+
+### Early Size Calculation and Memory Check
+
+To prevent out-of-memory errors and optimize resource usage, the library performs the following steps *before* attempting to load the actual model components onto the target device (CPU or GPU):
+
+1.  **Size Determination**: The loader attempts to determine the model's memory footprint (in MB) by checking:
+    *   An internal static cache (`ModelLoad._MODEL_SIZES`).
+    *   The `estimated_size_gb` value in the `annotator_config.toml` file.
+    *   **If the size is unknown**: The loader performs a calculation specific to the model type:
+        *   **Transformers/Pipeline**: Temporarily loads the model structure onto the CPU.
+        *   **ONNX**: Calculates based on the `.onnx` file size.
+        *   **TensorFlow**: Calculates based on the H5 file or SavedModel directory size.
+        *   **CLIP**: Temporarily creates the classifier model on the CPU.
+        (Temporary resources used for calculation are released immediately afterward.)
+
+2.  **Size Saving**: If the size was calculated, it is saved to both the internal cache and the system's `annotator_config.toml` file under the `estimated_size_gb` key for that model. This speeds up subsequent loads.
+
+3.  **Memory Check**: Using the determined size, the library checks if sufficient *system* memory is available using `psutil`. If the required memory exceeds available memory, the loading process is aborted, and a warning is logged.
+
+4.  **Cache Clearing**: If the memory check passes, the library determines if clearing older models from the cache is necessary to accommodate the new model, based on the required size and the maximum allowed cache size (`system total memory * cache ratio`).
+
+5.  **Component Loading**: Only after passing the memory check and potentially clearing the cache does the library proceed to load the actual model components onto the specified target device.
+
+### Benefits
+
+-   **Reduced OOM Errors**: Proactively checks memory availability before loading large models.
+-   **Faster Subsequent Loads**: Automatically calculates and saves unknown model sizes.
+-   **Improved Cache Management**: Makes more informed decisions about clearing the model cache.
+-   **Standardized Loading Flow**: Provides a consistent loading process across different model types.
+
+---
+
 ## How to Run Tests
 
 This section describes how to run the tests for the `image-annotator-lib` project, which uses `pytest` and `pytest-bdd`.
@@ -352,121 +387,4 @@ The basic configuration (level, format, handlers) for the library's loggers is h
 
 - Gets or creates a logger with the specified name.
 - Sets the logging level (default is `logging.INFO`).
-- Sets a standard log format (`%(asctime)s - %(name)s - %(levelname)s - %(message)s`).
-- Configures handlers to output logs to both the console (standard output) and a log file (`logs/image_annotator_lib.log`).
-  - The `logs/` directory is created automatically if it doesn't exist.
-- Prevents duplicate handler setup.
-
-**Excerpt from `core/utils.py`:**
-
-```python
-# src/image_annotator_lib/core/utils.py
-
-import logging
-from pathlib import Path
-
-LOG_FILE = Path("logs/image_annotator_lib.log") # Log file path
-
-def setup_logger(name: str, level: int = logging.INFO) -> logging.Logger:
-    logger = logging.getLogger(name)
-    # Ensures logger level is set appropriately, even if already configured
-    if logger.level == logging.NOTSET or logger.level > level:
-        logger.setLevel(level)
-
-    # Check if handlers are already configured for this logger to avoid duplication
-    if not logger.handlers:
-        # Also check the root logger if propagating
-        # This basic setup assumes direct handling, not relying on root logger config
-        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-
-        # Console handler
-        stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(formatter)
-        # Set level for the handler itself if needed, otherwise inherits logger level
-        # stream_handler.setLevel(level)
-        logger.addHandler(stream_handler)
-
-        # File handler
-        try:
-            LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8") # Use UTF-8
-            file_handler.setFormatter(formatter)
-            # file_handler.setLevel(level)
-            logger.addHandler(file_handler)
-        except OSError as e:
-            # Handle potential errors during log file setup (e.g., permission denied)
-            logger.error(f"Could not set up log file handler at {LOG_FILE}: {e}", exc_info=False)
-            # Continue without file logging if setup fails
-
-    # Ensure propagation is handled as intended (usually True by default)
-    # logger.propagate = True
-
-    return logger
-```
-
-### 3. Controlling Log Levels
-
-You can adjust the verbosity of the logs by changing the log level. Common levels include:
-
-- **`logging.DEBUG`**: Detailed information, useful for diagnosing problems.
-- **`logging.INFO`**: Confirmation that things are working as expected.
-- **`logging.WARNING`**: Indication of something unexpected or problematic in the near future (e.g., 'disk space low').
-- **`logging.ERROR`**: Due to a more serious problem, the software has not been able to perform some function.
-- **`logging.CRITICAL`**: A serious error, indicating that the program itself may be unable to continue running.
-
-To change the log level for the entire library or specific modules when using the library, use the standard `logging` module:
-
-```python
-import logging
-
-# Example: Set the root logger for 'image_annotator_lib' to DEBUG
-logging.getLogger('image_annotator_lib').setLevel(logging.DEBUG)
-
-# Example: Set a specific model module's logger to DEBUG
-logging.getLogger('image_annotator_lib.models.tagger_onnx').setLevel(logging.DEBUG)
-
-# You might also need to adjust handler levels if they were set explicitly
-# Example: Find and adjust the console handler level for the library's root logger
-lib_logger = logging.getLogger('image_annotator_lib')
-for handler in lib_logger.handlers:
-    if isinstance(handler, logging.StreamHandler):
-        handler.setLevel(logging.DEBUG)
-```
-
-### 4. Logging Within Classes
-
-When logging within classes, you can use the module-level logger or get a logger specific to the class name for finer granularity.
-
-```python
-import logging
-
-logger = logging.getLogger(__name__) # Module-level logger
-
-class MyAnnotator:
-    def __init__(self, model_name: str):
-        # Option 1: Use module logger
-        logger.info(f"Initializing MyAnnotator for {model_name}")
-
-        # Option 2: Use a class-specific logger (optional)
-        # self.class_logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
-        # self.class_logger.info(f"Initializing MyAnnotator instance for {model_name}")
-
-        self.model_name = model_name
-
-    def some_method(self):
-        logger.debug(f"Executing some_method in MyAnnotator ({self.model_name})")
-        # self.class_logger.debug("Executing some_method")
-        try:
-            # Perform some operation
-            pass
-        except Exception as e:
-            # Log errors with traceback information
-            logger.error(f"Error in some_method: {e}", exc_info=True)
-```
-
-### Summary
-
-- Logs are output using the standard `logging` module.
-- Basic setup via `core/utils.py:setup_logger` outputs to console and `logs/image_annotator_lib.log`.
-- Log levels can be controlled externally using standard `logging` functions.
-- Use `logging.getLogger(__name__)` for effective log source tracking.
+- Sets a standard log format (`%(asctime)s - %(name)s - %(levelname)s - %(message)s`
