@@ -1,13 +1,9 @@
 ---
-description: 
+description: プロジェクトのディレクトリ構造に関するルール / Rules for the project directory structure
 globs: 
-alwaysApply: true
+alwaysApply: false
 ---
----
-description: "プロジェクトのディレクトリ構造に関するルール / Rules for the project directory structure"
-globs: "*.py", ".md"
-version: "3.0.0"
----
+version: "4.0.0"
 
 # ディレクトリ構成ルール (AI向け指示)
 
@@ -15,7 +11,7 @@ version: "3.0.0"
 
 ## 1. 基本ルール
 
-- ディレクトリ名、ファイル名には、その役割を簡潔に示す英語の小文字とアンダースコア (`_`) を使用すること。
+- ディレクトリ名、ファイル名には、その役割を簡潔に示す英語の小文字とアンダースコア (`_`) を使用する。
 
 
 ## 2. `image-annotator-lib` ディレクトリ構成
@@ -46,5 +42,5 @@ version: "3.0.0"
 - **`conftest.py`**: プロジェクト全体のテストで共通して使用するフィクスチャやフックを定義する。
 
 **指示:**
-- 新しい `image-annotator-lib` のモジュールを追加した場合、対応するユニットテストファイルを `tests/unit/image_annotator_lib/` 配下の適切な場所に作成すること。
-- 新しいBDDシナリオを追加する場合、Feature ファイルを `tests/features/` に、ステップ定義を `tests/step_defs/` に作成すること。
+- 新しい `image-annotator-lib` のモジュールを追加した場合、対応するユニットテストファイルを `tests/unit/image_annotator_lib/` 配下の適切な場所に作成する。
+- 新しいBDDシナリオを追加する場合、Feature ファイルを `tests/features/` に、ステップ定義を `tests/step_defs/` に作成する。

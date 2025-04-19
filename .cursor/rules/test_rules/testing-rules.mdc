@@ -1,13 +1,9 @@
 ---
-description: 
-globs: tests/**/*
+description: テスト方針
+globs: 
 alwaysApply: false
 ---
----
-description: 
-globs: test_*.py,*.feature,conftest.py
-alwaysApply: false
----
+Version 1.0.0
 # テスト方針
 
 ## 基本方針
@@ -36,6 +32,6 @@ alwaysApply: false
 
 ## テストの執行
 
-- `uv pytest` コマンドで実行する
+- `uv run pytest` コマンドで実行する
 - コマンドオプションは必要に応じて使い分ける
 - カバレッジの測定結果は `XML` として出力する

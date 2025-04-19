@@ -45,7 +45,7 @@
   - モジュールの目的、コンポーネント、依存関係を説明するモジュールレベルコメントを追加。
   - 明確な日本語の実装コメントを記述。
   - **コード追加/変更時には Todo Tree タグ (`TODO`, `FIXME`, `OPTIMIZE`, `BUG`, `HACK`, `XXX`, `[ ]`, `[x]`) を使用**し、意図や課題を明確化。
-  - コード変更時には関連ドキュメント (docstring, `docs_image-annotator-lib/`) も更新。
+  - コード変更時には関連ドキュメント (docstring, `doc`) も更新。
 - **ディレクトリ構造 (`directory-structure-rules.mdc`):**
   - ライブラリソース: `src/image_annotator_lib/` (`core/`, `exceptions/`, `models/`, `api.py`)。
   - テスト: プロジェクトルート `tests/` (`unit/`, `integration/`, `features/`, `step_defs/`, `resources/`)。ユニットテストは `src/` 構造を反映。
@@ -54,7 +54,7 @@
 
 ## 3. ドキュメント構成概要
 
-- **`docs_image-annotator-lib/`:** ライブラリの包括的なドキュメント。
+- **`doc`:** ライブラリの包括的なドキュメント。
   - `getting_started.md`: 基本的な使い方チュートリアル。
   - `developer_guide.md`: モデル追加、テスト実行、ロギング設定方法。
   - `EXPLANATION/`: 設計原則、アーキテクチャ、決定事項、履歴。

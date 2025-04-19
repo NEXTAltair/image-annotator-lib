@@ -1,13 +1,10 @@
 ---
-description: 
-globs: tests/**/*.feature
+description: BDD の原則に基づくテスト実装および実行ルール / Guidelines for BDD-based test implementation and execution
+globs: 
 alwaysApply: false
 ---
----
-description: BDD の原則に基づくテスト実装および実行ルール / Guidelines for BDD-based test implementation and execution
-globs: tests/**/*.feature
-version: 2.7.0
----
+
+version:3.0.0
 
 # BDD Feature ファイル ルールガイドライン
 
@@ -44,4 +41,12 @@ version: 2.7.0
 
 - **目的**: 同じ振る舞いを異なるデータパターンでテストしたい場合に使用する。
 - **パラメータ**: `Examples` テーブル内のパラメータ名と値は、**半角英数字** および **スネークケース** で必ず記述する。これはテストの安定性向上、文字化けリスク回避、CI 環境等での互換性確保のため。
+- **コメント**: ステップ定義に `#` で始まるコメントをつけるとバグが発生するので､コメントは使用せず｡ステップ定義を具体的な説明に変更する｡
 - **類似ケース**: 類似のケースを複数テストする場合はシナリオアウトラインを使用する。
+
+## 自己チェック義務
+
+AI は `.feature` ファイルを生成・編集した後、ユーザーに提示する前に**必ず**以下の点について自己チェックを行い、ルール違反があれば修正すること。
+
+- [ ] **半角文字:** 全角英数字・全角記号が含まれていないか？ (特に括弧、スペース)
+- [ ] **テーブル:** `datatable` や `Examples` の中で全角文字を使用していないか?

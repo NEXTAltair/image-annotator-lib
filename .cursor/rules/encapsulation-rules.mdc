@@ -1,18 +1,10 @@
 ---
-description: 
+description: カプセル化と適切なプロパティアクセスに関するルール
 globs: 
-alwaysApply: true
----
----
-description: 
-globs: "*.py"
 alwaysApply: false
 ---
----
-description: "カプセル化と適切なプロパティアクセスに関するルール"
-globs: image-annotator-lib/**/*.py
-version: "1.1.0"
----
+version: 2.0.0
+
 
 # カプセル化ルール (AI向け指示)
 
