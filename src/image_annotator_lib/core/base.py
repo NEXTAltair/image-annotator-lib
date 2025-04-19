@@ -34,6 +34,7 @@ from ..exceptions.errors import (
     OutOfMemoryError,
     WebApiError,
 )
+from . import utils
 from .config import config_registry
 from .model_factory import ModelLoad
 from .utils import logger
@@ -142,44 +143,31 @@ class BaseAnnotator(ABC):
     """
 
     def __init__(self, model_name: str):
-        """BaseAnnotator を初期化します。
-
-        モデル名に基づいて設定ファイルを読み込み、共通の属性を設定します。
-
-        Args:
-            model_name: `models.toml` 内のモデル名。
-
-        Raises:
-            ValueError: 設定ファイルが見つからない、または必須キー (`model_path`) が
-                        設定ファイル内に存在しない場合。
-            RuntimeError: 初期化中に予期せぬエラーが発生した場合。
-        """
+        """アノテータの基本初期化"""
         self.model_name = model_name
-        # モジュールレベルのロガーを再利用
-        logger.debug(f"{self.__class__.__name__} をモデル '{model_name}' で初期化中...")
+        self.config = config_registry.get_all_config()  # TODO: これはいらないかも
+        if not self.config:
+            raise ValueError(f"モデル '{model_name}' の設定が見つかりません。")
 
-        try:
-            self.model_path = config_registry.get(self.model_name, "model_path")
-            logger.debug(f"モデルパス: {self.model_path}")
+        # 要求されたデバイスを取得
+        requested_device = config_registry.get(self.model_name, "device", "cuda")
 
-            # device と chunk_size (オプション、デフォルト値指定)
-            self.device = config_registry.get(self.model_name, "device", "cuda")
-            # chunk_size を int にキャストして型を保証
-            chunk_size_val = config_registry.get(self.model_name, "chunk_size", 8)
-            try:
-                self.chunk_size = int(chunk_size_val)
-            except (ValueError, TypeError):
-                logger.warning(
-                    f"chunk_size に不正な値 {chunk_size_val} が設定されました。デフォルトの 8 を使用します。"
-                )
-                self.chunk_size = 8
+        # --- utils.determine_effective_device を使って実際のデバイスを決定 --- #
+        self.device = utils.determine_effective_device(requested_device, self.model_name)
+        # --- ここまで修正 ---
 
-            self.components: dict[str, Any] = {}
-            logger.debug(f"{self.__class__.__name__} '{model_name}' の初期化完了。")
+        self.chunk_size = config_registry.get(self.model_name, "chunk_size", 8)
+        self.components: dict[str, Any] | None = None
 
-        except Exception as e:
-            logger.exception(f"モデル '{model_name}' の初期化中にエラーが発生しました: {e}")
-            raise RuntimeError(f"モデル '{model_name}' の初期化に失敗しました。") from e
+        logger.debug(
+            f"{self.__class__.__name__} をモデル '{self.model_name}' で初期化中 (デバイス: {self.device})..."
+        )  # ログにデバイス情報追加
+        self.model_path = config_registry.get(
+            self.model_name, "model_path"
+        )  # config_registry から取得するように変更
+        logger.debug(f"モデルパス: {self.model_path}")
+
+        logger.debug(f"{self.__class__.__name__} '{self.model_name}' の初期化完了。")
 
     @abstractmethod
     def __enter__(self) -> Self:

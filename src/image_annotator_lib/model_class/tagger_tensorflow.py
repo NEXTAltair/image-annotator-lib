@@ -8,6 +8,7 @@ from PIL import Image
 
 from ..core.base import TensorflowBaseAnnotator
 from ..core.config import config_registry
+from ..core.utils import logger
 
 
 class DeepDanbooruTagger(TensorflowBaseAnnotator):

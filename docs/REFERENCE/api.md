@@ -96,14 +96,14 @@ print(available)
 **注意:** これはライブラリ内部で使用される型定義であり、直接ユーザーがインスタンス化するものではありません。`annotate` 関数の戻り値に含まれる辞書がこの構造に準拠します。
 
 ```python
-from typing import TypedDict, Any, List, Optional
+from typing import TypedDict, Any
 
 class AnnotationResult(TypedDict, total=False):
-    phash: Optional[str]       # 画像の知覚ハッシュ (計算失敗時は None)
+    phash: str | None       # 画像の知覚ハッシュ (計算失敗時は None)
     model_name: str            # 必須: モデル名
-    tags: List[str]            # 必須: タグ、スコアタグ、キャプションなどを集約したリスト
+    tags: list[str]            # 必須: タグ、スコアタグ、キャプションなどを集約したリスト
     formatted_output: Any      # 必須: 整形済み出力 (モデル依存)
-    error: Optional[str]       # エラー情報 (エラーがない場合は None)
+    error: str | None       # エラー情報 (エラーがない場合は None)
 ```
 
 - `total=False` のため、エラー発生時など状況によっては一部のキーが存在しない可能性がありますが、`annotate` 関数の戻り値としては `tags`, `formatted_output`, `error` は通常含まれます (`phash`, `model_name` は上位のキーとして使われます)。

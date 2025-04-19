@@ -20,6 +20,7 @@
 src/
 └── image_annotator_lib/   # ライブラリパッケージ
     ├── __init__.py        # パッケージ初期化、主要APIのエクスポート
+    ├── api.py             # ユーザー向けAPI関数 (annotate)
     ├── core/              # Tagger/Scorer共通の基盤モジュール
     │   ├── base.py          # BaseAnnotator, フレームワーク別基底クラス, 型定義
     │   ├── model_factory.py # ModelLoad (モデルロード/キャッシュ管理)
@@ -33,7 +34,9 @@ src/
     │   ├── tagger_tensorflow.py
     │   ├── scorer_clip.py
     │   └── pipeline_scorers.py
-    └── api.py             # ユーザー向けAPI関数 (annotate)
+    └── resources/         # 設定ファイルなどのリソース
+        └── system/
+            └── annotator_config.toml # 主要な設定ファイル
 ```
 
 ## クラス階層 (3 層構造)

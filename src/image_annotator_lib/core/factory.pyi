@@ -1,7 +1,7 @@
 # Stub file for image_annotator_lib.core.factory
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import torch
 
@@ -79,9 +79,7 @@ class ModelLoad:
         ...
 
     @staticmethod
-    def load_transformer_components(
-        model_name: str, model_path: str, device: str
-    ) -> Optional[dict[str, Any]]:
+    def load_transformer_components(model_name: str, model_path: str, device: str) -> dict[str, Any] | None:
         """Transformer モデルのコンポーネント (モデル、プロセッサ) をロードします。
         Loads Transformer model components (model, processor).
 
@@ -131,7 +129,7 @@ class ModelLoad:
     @staticmethod
     def load_pipeline_components(
         model_name: str, model_path: str, batch_size: int, device: str
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Hugging Face Pipeline モデルのコンポーネントをロードします。
         Loads Hugging Face Pipeline model components.
 
@@ -152,9 +150,9 @@ class ModelLoad:
         base_model: str,
         model_path: str,
         device: str,
-        activation_type: Optional[str] = None,
-        final_activation_type: Optional[str] = None,
-    ) -> Optional[dict[str, Any]]:
+        activation_type: str | None = None,
+        final_activation_type: str | None = None,
+    ) -> dict[str, Any] | None:
         """CLIP ベースの Scorer モデルのコンポーネント (分類器、プロセッサ、CLIPモデル) をロードします。
         Loads CLIP-based Scorer model components (classifier, processor, clip_model).
 

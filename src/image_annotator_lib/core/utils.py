@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import huggingface_hub
 import imagehash
 import requests
+import torch
 from loguru import logger
 from PIL import Image
 from tqdm import tqdm
@@ -22,38 +23,44 @@ WD_LABEL_FILENAME = "selected_tags.csv"
 # ログフォーマット
 LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function} - {message}"
 
-# loguru のデフォルトハンドラを削除 (明示的に設定するため)
-logger.remove()
+# logger初期化用関数
+_logger_initialized = False
 
-# コンソールシンク (stderr)
-logger.add(
-    sys.stderr,
-    level="INFO",  # デフォルトレベル (必要に応じて変更)
-    format=LOG_FORMAT,
-    colorize=True,
-    backtrace=True,
-    diagnose=True,
-)
 
-# ファイルシンク (DEFAULT_PATHS["log_file"] を使用)
-try:
-    log_file_path = Path(DEFAULT_PATHS["log_file"])
-    log_file_path.parent.mkdir(parents=True, exist_ok=True)  # フォルダ作成
+def init_logger():
+    global _logger_initialized
+    if _logger_initialized:
+        return
+    _logger_initialized = True
+    # loguru のデフォルトハンドラを削除 (明示的に設定するため)
+    logger.remove()
+    # コンソールシンク (stderr)
     logger.add(
-        log_file_path,
-        level="DEBUG",
+        sys.stderr,
+        level="INFO",  # デフォルトレベル (必要に応じて変更)
         format=LOG_FORMAT,
-        rotation="25 MB",
-        retention=5,
-        encoding="utf-8",
+        colorize=True,
         backtrace=True,
         diagnose=True,
     )
-    logger.info(f"Logging to file: {log_file_path}")
-except Exception as e:
-    # ファイルログ設定失敗時はエラーログを出力して続行 (コンソールには出力される)
-    logger.error(f"Failed to configure file logging to '{DEFAULT_PATHS['log_file']}': {e}")
-    logger.error("File logging disabled.")
+    # ファイルシンク (DEFAULT_PATHS["log_file"] を使用)
+    try:
+        log_file_path = Path(DEFAULT_PATHS["log_file"])
+        log_file_path.parent.mkdir(parents=True, exist_ok=True)  # フォルダ作成
+        logger.add(
+            log_file_path,
+            level="DEBUG",
+            format=LOG_FORMAT,
+            rotation="25 MB",
+            retention=5,
+            encoding="utf-8",
+            backtrace=True,
+            diagnose=True,
+        )
+        logger.info(f"Logging to file: {log_file_path}")
+    except Exception as e:
+        logger.error(f"Failed to configure file logging to '{DEFAULT_PATHS['log_file']}': {e}")
+        logger.error("File logging disabled.")
 
 
 def calculate_phash(image: Image.Image) -> str:
@@ -87,7 +94,7 @@ def _is_cached(url: str, cache_dir: Path) -> tuple[bool, Path]:
 
 
 def _perform_download(url: str, target_path: Path) -> None:
-    """実際のダウンロード処理を行う（進捗表示付き）"""
+    """実際のダウンロード処理を行う(進捗表示付き)"""
     logger.info(f"Downloading model from {url} to {target_path}")
     response = requests.get(url, stream=True, timeout=DEFAULT_TIMEOUT)
     response.raise_for_status()
@@ -200,3 +207,61 @@ def download_onnx_tagger_model(model_repo: str) -> tuple[Path, Path]:
     )
 
     return Path(csv_path), Path(model_path)
+
+
+def determine_effective_device(requested_device: str, model_name: str | None = None) -> str:
+    """要求されたデバイスとCUDAの利用可否に基づき、実際に使用するデバイスを決定する。
+
+    CUDAが要求されたが利用できない場合は、警告ログを出力し "cpu" を返す。
+
+    Args:
+        requested_device: ユーザーまたは設定から要求されたデバイス ("cuda", "cpu" など)。
+        model_name: ログ出力用のモデル名 (任意)。
+
+    Returns:
+        実際に使用すべきデバイス名 ("cuda" または "cpu")。
+    """
+    actual_device = requested_device
+
+    if requested_device.startswith("cuda"):
+        try:
+            # torch.cuda.is_available() を呼び出す前に torch がインポートされていることを確認
+            if not torch.cuda.is_available():
+                log_prefix = f"モデル '{model_name}' の" if model_name else ""
+                logger.warning(
+                    f"{log_prefix}要求されたデバイス '{requested_device}' は利用できません "
+                    f"(CUDA非対応PyTorch または CUDA環境不備)。CPU にフォールバックします。"
+                )
+                actual_device = "cpu"
+            else:
+                # CUDA is available, check if the specific device index is valid (optional)
+                try:
+                    # Example: "cuda:1"
+                    if ":" in requested_device:
+                        device_index = int(requested_device.split(":")[1])
+                        if device_index >= torch.cuda.device_count():
+                            log_prefix = f"モデル '{model_name}' の" if model_name else ""
+                            logger.warning(
+                                f"{log_prefix}要求されたCUDAデバイスインデックス '{device_index}' は無効です "
+                                f"(利用可能なデバイス数: {torch.cuda.device_count()})。デフォルトの CUDA デバイス (cuda:0) を使用します。"
+                            )
+                            actual_device = "cuda"  # Fallback to default cuda
+                except (ValueError, IndexError):
+                    logger.warning(
+                        f"無効なCUDAデバイス指定 '{requested_device}' です。デフォルトの CUDA デバイスを使用します。"
+                    )
+                    actual_device = "cuda"
+
+        except Exception as e:
+            # torch.cuda のチェック自体でエラーが発生した場合 (稀だが念のため)
+            logger.error(f"CUDA利用可否の確認中にエラーが発生しました: {e}。CPU にフォールバックします。")
+            actual_device = "cpu"
+
+    # 必要に応じて他のデバイスタイプのチェックを追加します(たとえば、Appleシリコンの「MPS」)
+
+    if actual_device != requested_device:
+        logger.info(
+            f"モデル '{model_name or 'N/A'}' の実行デバイスを '{requested_device}' から '{actual_device}' に変更しました。"
+        )
+
+    return actual_device

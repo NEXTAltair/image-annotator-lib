@@ -14,7 +14,7 @@ The library employs a 3-layer class hierarchy to manage different types of annot
 
 1.  **`BaseAnnotator` (`core/base.py`)**:
     *   Abstract base class for all annotators (Tagger and Scorer).
-    *   Provides common functionality like logger initialization, configuration loading, context management (`__enter__`, `__exit__`), **chunk processing for batch inference**, pHash calculation, basic error handling, and **standardized result generation (`_generate_result`)**.
+    *   Provides common functionality like logger initialization, configuration loading (via `config_registry`), context management (`__enter__`, `__exit__`), **chunk processing for batch inference**, pHash calculation, basic error handling, and **standardized result generation (`_generate_result`)**.
     *   Defines abstract methods that must be implemented by subclasses: `_preprocess_images`, `_run_inference`, `_format_predictions`, and `_generate_tags`.
 
 2.  **Framework/Type-Specific Base Classes (`core/base.py`, `model_class/annotator_webapi.py`)**:
@@ -40,7 +40,7 @@ Create a Python class for your new model in the appropriate directory (`src/imag
     *   Inherit from the chosen base class.
     *   Implement the `__init__` method:
         *   Call `super().__init__(model_name)` to initialize the parent class. The `model_name` is automatically passed by the factory.
-        *   Access model-specific configuration using `self.config.get("your_key", default_value)`.
+        *   Access model-specific configuration using `config_registry.get(self.model_name, "your_key", default_value)` from the shared `config_registry` instance (`src/image_annotator_lib/core/config.py`). **Do not access `self.config` directly.**
         *   Add any model-specific initialization (e.g., loading tag lists, setting thresholds, initializing API clients for Web API models). For Web API models, API keys should be loaded from environment variables within the base class's `_load_api_key` method, not directly in the concrete class `__init__`.
 
     *   **Override necessary abstract methods**: The base classes handle most of the workflow (loading, prediction loop, error handling, result structuring). You typically only need to implement or override methods specific to how your model processes data and generates tags/scores.
@@ -50,7 +50,7 @@ Create a Python class for your new model in the appropriate directory (`src/imag
         *   `_format_predictions(self, raw_outputs: Any) -> list[Any]`: Format the raw model outputs into a standardized list or structure that is easier for `_generate_tags` to consume. This step is optional if `_generate_tags` can directly process the raw output.
         *   `_generate_tags(self, formatted_output: Any) -> list[str]`: Generate the final list of tags (or score strings like `["[SCORE]0.95"]`) from the formatted output. **This is often the main method you need to implement.** The base class's `predict` method will use the output of this method to construct the final `AnnotationResult`.
 
-    *   **Do NOT typically override `_generate_result`**: The `_generate_result` method is implemented in `BaseAnnotator` to create the standardized `AnnotationResult` TypedDict. It takes `phash`, `model_name`, `tags` (from `_generate_tags`), `formatted_output` (from `_format_predictions`), and `error` as input. Overriding this method is generally not necessary and is discouraged to maintain result structure consistency.
+    *   **Do NOT typically override `_generate_result`**: The `_generate_result` method is implemented in `BaseAnnotator` to create the standardized `AnnotationResult` TypedDict. It takes `phash`, `tags` (from `_generate_tags`), `formatted_output` (from `_format_predictions`), and `error` as input. Overriding this method is generally not necessary and is discouraged to maintain result structure consistency.
 
     *   **Handle Batching**: The `BaseAnnotator.predict` method handles splitting the input images into chunks (batches) and iterating through them. Your `_preprocess_images` and `_run_inference` methods should be designed to accept and process data in batches as provided by the base class.
 
@@ -61,6 +61,8 @@ Create a Python class for your new model in the appropriate directory (`src/imag
 ```python
 # src/image_annotator_lib/models/tagger_onnx.py
 
+# Import the shared config registry
+from ..core.config import config_registry
 from ..core.base import ONNXBaseAnnotator, AnnotationResult # Import AnnotationResult
 from PIL import Image
 from typing import Any, List, Dict # Import Dict
@@ -70,13 +72,14 @@ class MyNewONNXTagger(ONNXBaseAnnotator):
 
     def __init__(self, model_name: str):
         super().__init__(model_name)
-        # Access model-specific config, e.g., threshold
-        self.my_threshold = self.config.get("threshold", 0.5)
+        # Access model-specific config using config_registry
+        self.my_threshold = config_registry.get(self.model_name, "threshold", 0.5)
         self.tag_names = self._load_tag_names() # Example: load tag names
 
     def _load_tag_names(self) -> List[str]:
         """Load tag names from a file specified in config."""
-        tag_file_path = self.config.get("tag_file_path")
+        # Access config using config_registry
+        tag_file_path = config_registry.get(self.model_name, "tag_file_path")
         if not tag_file_path:
             self.logger.warning("tag_file_path not specified in config.")
             return []
@@ -112,6 +115,8 @@ class MyNewONNXTagger(ONNXBaseAnnotator):
 # Example Implementation (Conceptual - Web API Annotator):
 
 # from ..core.base import BaseWebApiAnnotator, AnnotationResult
+# from ..core.config import config_registry # Import config_registry
+# from ..exceptions.errors import WebApiError # Import exceptions
 # from PIL import Image
 # from typing import Any, List, Dict
 
@@ -121,8 +126,8 @@ class MyNewONNXTagger(ONNXBaseAnnotator):
 #     def __init__(self, model_name: str):
 #         super().__init__(model_name)
 #         # BaseWebApiAnnotator handles API key loading, rate limiting, retries.
-#         # Access model-specific config, e.g., specific prompt template override
-#         self.model_specific_prompt = self.config.get("model_specific_prompt")
+#         # Access model-specific config using config_registry
+#         self.model_specific_prompt = config_registry.get(self.model_name, "model_specific_prompt")
 #         # API client is initialized in __enter__ by BaseWebApiAnnotator
 
 #     # _load_api_key is implemented in BaseWebApiAnnotator
@@ -139,13 +144,17 @@ class MyNewONNXTagger(ONNXBaseAnnotator):
 #              raise WebApiError("API client not initialized.") # Use appropriate exception
 
 #         results = []
+#         # Get necessary config values
+#         provider_model_name = config_registry.get(self.model_name, "model_name_on_provider")
+#         prompt_to_use = self.model_specific_prompt or self.prompt_template # Use specific prompt if available
+
 #         for processed_image_data in processed_images: # Processed data from _preprocess_images
 #             try:
 #                 self._wait_for_rate_limit() # Handled by BaseWebApiAnnotator
 #                 # Make API call using self.client and processed_image_data
-#                 # Use self.model_name_on_provider and self.prompt_template (or model_specific_prompt)
+#                 # Use provider_model_name and prompt_to_use
 #                 # Handle API-specific errors and retry logic (BaseWebApiAnnotator might help)
-#                 api_response = self.client.call_api(processed_image_data, self.model_name_on_provider, self.prompt_template) # Conceptual call
+#                 api_response = self.client.call_api(processed_image_data, provider_model_name, prompt_to_use) # Conceptual call
 #                 results.append(api_response)
 #             except Exception as e:
 #                 self.logger.error(f"API call failed: {e}", exc_info=True)
@@ -167,22 +176,24 @@ class MyNewONNXTagger(ONNXBaseAnnotator):
 #     # __enter__ and __exit__ are typically handled by BaseWebApiAnnotator for client management.
 ```
 
-### 2. Add Entry to Configuration File
+### 3. Add Entry to Configuration File
 
-To make the new model available, add an entry for it in the configuration file (`config/annotator_config.toml`).
+To make the new model available, add an entry for it in the configuration file (`src/image_annotator_lib/resources/system/annotator_config.toml` or the user config file `src/image_annotator_lib/resources/user/annotator_config.toml`). User configuration entries will override system entries if they share the same model name.
 
 **Configuration Fields:**
 
 - **Section Name (`[model_unique_name]`)**: A unique name to identify the model within the library.
 - `class` (Required): The name of your implemented concrete model class (as a string).
-- `model_path` (Required): The path or URL to the model file(s) or repository.
-- `estimated_size_gb` (Recommended): Approximate size of the model in GB for memory management.
+- `model_path` (Required for local/downloadable models): The path or URL to the model file(s) or repository. For API models, this might be the model identifier on the provider's platform.
+- `estimated_size_gb` (Recommended for local/downloadable models): Approximate size of the model in GB for memory management. API models typically have this set to 0.
 - `device` (Optional): Specify the device (`"cuda"`, `"cpu"`, etc.) for the model. Defaults based on system availability if not set.
-- Other model-specific configuration keys can be added and accessed via `self.config` within your class.
+- Other model-specific configuration keys can be added and accessed via `config_registry.get(self.model_name, "your_key", default_value)` within your class.
 
 **Example Entry:**
 
 ```toml
+# In system/annotator_config.toml or user/annotator_config.toml
+
 [my-new-onnx-tagger-v1]
 class = "MyNewONNXTagger"
 model_path = "path/to/your/model.onnx"
@@ -190,10 +201,11 @@ estimated_size_gb = 0.5
 # Optional device override
 # device = "cuda"
 # Model-specific config
-# tag_file_path = "path/to/tags.txt"
+tags_file_path = "path/to/tags.txt"
+threshold = 0.45 # Override default threshold
 ```
 
-### 3. Verify Functionality
+### 4. Verify Functionality
 
 After completing the steps above, test if the new model works correctly using the library.
 

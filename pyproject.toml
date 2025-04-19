@@ -35,9 +35,6 @@ dependencies = [
     "Pillow>=10.0.0",
     "polars",
     "toml",
-    # ML Frameworks & Models
-    "torch>=2.5.1",
-    "torchvision>=0.16.1",
     "tensorflow>=2.19.0;platform_system!='Darwin'", # Use newer version from scorer
     "transformers>=4.27.4",
     "tf-keras>=2.19.0",
@@ -59,6 +56,8 @@ dependencies = [
     "imagehash", # For pHash calculation in base.py
     "pillow>=9.0.0",
     "loguru",
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
 ]
 
 [project.optional-dependencies]
