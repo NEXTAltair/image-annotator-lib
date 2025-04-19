@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "image-annotator-lib"
-version = "0.1.1"
+version = "0.1.2"
 description = "Integrated library for image tagging and scoring."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -76,7 +76,8 @@ dev = [
     "types-requests>=2.32.0",
     "types-Pillow",
     "types-toml",
-    "psutil"
+    "psutil",
+    "pytest-mock" # テストモック用
 ]
 
 [project.urls]
@@ -125,7 +126,6 @@ ignore_missing_imports = true
 pythonpath = ["src"]          # テスト実
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = ["-v", "-s", "-ra", "--tb=short", "--showlocals", "--cov=src", "--cov-report=xml"]
 markers = [

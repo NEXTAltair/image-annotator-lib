@@ -8,6 +8,8 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 from .api import PHashAnnotationResults
 from .core.base import AnnotationResult
+from .core.registry import initialize_registry, list_available_annotators
+from .core.utils import init_logger
 from .exceptions.errors import AnnotatorError, ModelLoadError, ModelNotFoundError, OutOfMemoryError
 
 # --- Public API ---
@@ -22,20 +24,11 @@ __all__ = [
 ]
 
 # モジュールレベルのキャッシュ
-# NOTE: 遅延インポートにして必要なときだけregistryとannotatorをインポートしないと他のテストが激遅になる
-_cached_list_available_annotators = None
+# NOTE: 遅延インポートにして必要なときだけannotatorをインポートしないと他のテストが激遅になる
 _cached_annotate = None
 
-
-def list_available_annotators() -> list[str]:
-    """利用可能なアノテーターモデルのリストを返します。"""
-    global _cached_list_available_annotators
-    if _cached_list_available_annotators is None:
-        # pylint: disable=import-outside-toplevel
-        from .core.registry import list_available_annotators as _list_available_annotators_impl
-
-        _cached_list_available_annotators = _list_available_annotators_impl
-    return _cached_list_available_annotators()
+init_logger()
+initialize_registry()
 
 
 def annotate(

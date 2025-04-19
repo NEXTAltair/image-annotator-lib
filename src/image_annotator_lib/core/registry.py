@@ -237,8 +237,14 @@ def list_available_annotators() -> list[str]:
     return list(_MODEL_CLASS_OBJ_REGISTRY.keys())
 
 
-# --- 初期化 ---
-# モジュールがロードされるときにモデルを登録します。
-logger.debug("アノテータレジストリを初期化中...")
-register_annotators()
-logger.debug(f"レジストリの初期化が完了しました。登録済みアノテータ: {len(_MODEL_CLASS_OBJ_REGISTRY)}")
+def initialize_registry() -> None:
+    """
+    loggerとレジストリの初期化を明示的に行う関数。
+    必ずlogger初期化後に呼び出すこと。
+    """
+    from .utils import init_logger
+
+    init_logger()
+    logger.debug("アノテータレジストリを初期化中...")
+    register_annotators()
+    logger.debug(f"レジストリの初期化が完了しました。登録済みアノテータ: {len(_MODEL_CLASS_OBJ_REGISTRY)}")
