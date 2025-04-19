@@ -1,7 +1,8 @@
 import gc
 import time
+from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, ClassVar, TypedDict, cast
+from typing import Any, ClassVar, TypedDict, cast, override
 
 import onnxruntime as ort
 import psutil
@@ -14,6 +15,7 @@ from transformers.models.clip import CLIPModel, CLIPProcessor
 from transformers.pipelines import pipeline
 from transformers.pipelines.base import Pipeline  # Import Pipeline base class
 
+from ..exceptions.errors import ModelLoadError, OutOfMemoryError
 from . import utils
 from .config import config_registry
 from .utils import logger
@@ -36,40 +38,169 @@ class ONNXComponents(TypedDict):
 
 class TensorFlowComponents(TypedDict):
     model_dir: Path
-    model: tf.Module | tf.keras.Model  # tf.Module covers SavedModel and Keras models
+    model: tf.Module | tf.keras.Model
 
 
 class CLIPComponents(TypedDict):
-    model: nn.Module  # This is the Classifier
+    model: nn.Module  # Classifier head
     processor: CLIPProcessor
     clip_model: CLIPModel
 
 
-# --- BaseModelLoader ---
-class BaseModelLoader:
-    """モデルローダーの基底クラス"""
+# --- ModelLoad Refactoring ---
+class ModelLoad:
+    """
+    ModelLoadクラスの実装
 
-    def __init__(self, model_name: str, device: str) -> None:
-        self.model_name = model_name
-        self.device = device
+    モデルのロード、メモリ管理、キャッシュ制御を担当します。
+    内部ヘルパーメソッドと内部ローダークラスを用いて、責務分離と共通化を図ります。
+    外部インターフェース (静的メソッド) は後方互換性のために維持されます。
+    """
 
-        # --- 既存の初期化処理---
-        self._MODEL_STATES = ModelLoad._MODEL_STATES
-        self._MEMORY_USAGE = ModelLoad._MEMORY_USAGE
-        self._MODEL_LAST_USED = ModelLoad._MODEL_LAST_USED
-        self._CACHE_RATIO = 0.5
-        # Remove _MODEL_SIZES instance variable, it will be managed by the static cache
-        # self._MODEL_SIZES: dict[str, float] = {}
+    # --- Class Variables ---
+    _MODEL_STATES: ClassVar[dict[str, str]] = {}
+    _MEMORY_USAGE: ClassVar[dict[str, float]] = {}
+    _MODEL_LAST_USED: ClassVar[dict[str, float]] = {}
+    _CACHE_RATIO: ClassVar[float] = 0.5
+    _MODEL_SIZES: ClassVar[dict[str, float]] = {}  # Central static cache
 
-    def _check_memory_before_load(self, model_size_mb: float | None) -> bool:
-        """モデルロード前に利用可能なメモリを確認する"""
-        # model_size_mb = self.get_model_size()
-        if model_size_mb is None or model_size_mb <= 0:
+    # --- Internal Helper Methods: Size Management ---
+
+    @staticmethod
+    def _get_model_size_from_config(model_name: str) -> float | None:
+        """Config からモデルの推定メモリ使用量 (MB単位) を取得。"""
+        try:
+            estimated_size_gb_any = config_registry.get(model_name, "estimated_size_gb")
+            if estimated_size_gb_any is None:
+                return None
+            try:
+                estimated_size_gb = float(estimated_size_gb_any)
+                size_mb = estimated_size_gb * 1024
+                logger.debug(f"モデル '{model_name}' サイズを config から読み込み: {size_mb / 1024:.3f}GB")
+                return size_mb
+            except (ValueError, TypeError):
+                logger.error(
+                    f"モデル '{model_name}' config 内 estimated_size_gb ('{estimated_size_gb_any}') を float に変換できません。"
+                )
+                return None
+        except KeyError:
+            return None  # Model not in config
+        except Exception as e:
+            logger.error(f"モデル '{model_name}' config サイズ取得中に予期せぬエラー: {e}", exc_info=True)
+            return None
+
+    @staticmethod
+    def _calculate_file_size_mb(file_path: Path) -> float:
+        """ファイルサイズをMB単位で取得"""
+        try:
+            return file_path.stat().st_size / (1024 * 1024)
+        except FileNotFoundError:
+            logger.error(f"サイズ計算エラー: ファイルが見つかりません {file_path}")
+            return 0.0
+        except Exception as e:
+            logger.error(f"ファイルサイズ取得エラー ({file_path}): {e}")
+            return 0.0
+
+    @staticmethod
+    def _calculate_dir_size_mb(dir_path: Path) -> float:
+        """ディレクトリサイズをMB単位で計算"""
+        total_size = 0
+        try:
+            for item in dir_path.rglob("*"):
+                if item.is_file():
+                    total_size += item.stat().st_size
+            return total_size / (1024 * 1024)
+        except Exception as e:
+            logger.error(f"ディレクトリサイズ計算エラー ({dir_path}): {e}", exc_info=True)
+            return 0.0
+
+    @staticmethod
+    def _calculate_transformer_size_mb(model: torch.nn.Module) -> float:
+        """Transformerモデルのパラメータ/バッファサイズからメモリ使用量(MB)を計算"""
+        try:
+            param_size = sum(p.numel() * p.element_size() for p in model.parameters())
+            buffer_size = sum(b.numel() * b.element_size() for b in model.buffers())
+            return (param_size + buffer_size) / (1024 * 1024)
+        except Exception as e:
+            logger.error(f"Transformerモデルサイズ計算エラー: {e}", exc_info=True)
+            return 0.0
+
+    @staticmethod
+    def _save_size_to_config(model_name: str, size_mb: float) -> None:
+        """計算されたサイズをMB単位でConfigに保存"""
+        if size_mb <= 0:
+            return
+        try:
+            size_gb = size_mb / 1024
+            config_registry.set_system_value(model_name, "estimated_size_gb", round(size_gb, 3))
+            config_registry.save_system_config()
+            logger.debug(f"モデル '{model_name}' 計算サイズ ({size_gb:.3f}GB) をシステム設定に保存。")
+        except Exception as e:
+            logger.error(f"モデル '{model_name}' サイズのシステム設定保存中にエラー: {e}", exc_info=True)
+
+    @classmethod
+    def _get_or_calculate_size(
+        cls,
+        model_name: str,
+        model_path: str,  # Path or identifier
+        model_type: str,  # 'transformers', 'pipeline', 'onnx', 'tensorflow', 'clip'
+        loader_instance: Any,  # Instance of the internal loader for calculation method
+        **kwargs: Any,  # Additional args for specific calculators (task, format, etc.)
+    ) -> float:
+        """モデルサイズを取得または計算 (MB単位、内部ヘルパー)"""
+        # 1. Check static cache
+        if model_name in cls._MODEL_SIZES and cls._MODEL_SIZES[model_name] > 0:
             logger.debug(
-                f"モデル '{self.model_name}' のサイズが不明または無効 ({model_size_mb}) なため、"
-                f"事前メモリチェックをスキップします。"
+                f"モデル '{model_name}' サイズキャッシュ取得: {cls._MODEL_SIZES[model_name]:.2f} MB"
             )
-            return True  # Allow loading if size is unknown
+            return cls._MODEL_SIZES[model_name]
+
+        # 2. Check config
+        config_size_mb = cls._get_model_size_from_config(model_name)
+        if config_size_mb is not None and config_size_mb > 0:
+            cls._MODEL_SIZES[model_name] = config_size_mb  # Cache config value
+            return config_size_mb
+
+        # 3. Calculate size using loader-specific method
+        logger.info(f"モデル '{model_name}' サイズ不明 ({model_type})。計算試行...")
+        calculated_size_mb = 0.0
+        try:
+            # Delegate to the specific loader's calculation method
+            if hasattr(loader_instance, "_calculate_specific_size"):
+                calculated_size_mb = loader_instance._calculate_specific_size(
+                    model_path=model_path, **kwargs
+                )
+            else:
+                logger.warning(
+                    f"ローダー ({type(loader_instance).__name__}) にサイズ計算メソッド _calculate_specific_size がありません。"
+                )
+
+            if calculated_size_mb > 0:
+                logger.info(f"モデル '{model_name}' サイズ計算成功: {calculated_size_mb:.2f} MB")
+            else:
+                logger.warning(f"モデル '{model_name}' サイズ計算失敗または結果が0。")
+
+        except Exception as e:
+            logger.error(f"モデル '{model_name}' サイズ計算中にエラー: {e}", exc_info=True)
+            calculated_size_mb = 0.0  # Treat as unknown on error
+
+        # 4. Cache and save calculated size (even if 0.0, indicates calculation was attempted)
+        cls._MODEL_SIZES[model_name] = calculated_size_mb
+        if calculated_size_mb > 0:
+            cls._save_size_to_config(model_name, calculated_size_mb)
+
+        return calculated_size_mb
+
+    # --- Internal Helper Methods: Cache/State Management ---
+
+    @staticmethod
+    def _check_memory_before_load(model_size_mb: float, model_name: str) -> bool:
+        """モデルロード前に利用可能なメモリを確認"""
+        if model_size_mb <= 0:
+            logger.debug(
+                f"モデル '{model_name}' サイズ不明/無効 ({model_size_mb})、事前メモリチェックをスキップ。"
+            )
+            return True
 
         available_memory_bytes = psutil.virtual_memory().available
         required_memory_bytes = model_size_mb * 1024 * 1024
@@ -77,1757 +208,856 @@ class BaseModelLoader:
         required_memory_gb = required_memory_bytes / (1024**3)
 
         logger.debug(
-            f"メモリチェック ({self.model_name}): 必要={required_memory_gb:.3f}GB, 利用可能={available_memory_gb:.3f}GB"
+            f"メモリチェック ({model_name}): 必要={required_memory_gb:.3f}GB, 利用可能={available_memory_gb:.3f}GB"
         )
 
         if available_memory_bytes < required_memory_bytes:
-            error_detail = f"メモリ不足警告: モデル '{self.model_name}' ({required_memory_gb:.3f}GB) のロードをスキップします。利用可能なシステムメモリ ({available_memory_gb:.3f}GB) が不足しています。"
+            error_detail = f"メモリ不足警告: モデル '{model_name}' ({required_memory_gb:.3f}GB) ロード不可。空きメモリ ({available_memory_gb:.3f}GB) 不足。"
             logger.warning(error_detail)
-            return False
+            return False  # Indicate failure
         else:
-            logger.debug(f"モデル '{self.model_name}' のロードに必要なメモリは確保されています。")
+            logger.debug(f"モデル '{model_name}' ロードに必要なメモリ確保済み。")
             return True
 
-    def get_model_size(self) -> float | None:
-        """Config からモデルの推定メモリ使用量 (MB単位) を取得。なければ None を返す。"""
-        # This method now ONLY checks the config via the registry.
-        # Calculation is handled elsewhere.
-        try:
-            estimated_size_gb_any = config_registry.get(self.model_name, "estimated_size_gb")
-
-            if estimated_size_gb_any is None:
-                # logger.warning( # No warning here, expected case
-                #     f"モデル '{self.model_name}' の estimated_size_gb が config に見つかりません。"
-                # )
-                return None  # Return None if not found in config
-
-            # Attempt conversion, handle potential error
-            try:
-                estimated_size_gb = float(estimated_size_gb_any)
-                size_mb = estimated_size_gb * 1024
-                # No need to cache here (_MODEL_SIZES is static, handled elsewhere)
-                # self._MODEL_SIZES[self.model_name] = size_mb
-                logger.debug(
-                    f"モデル '{self.model_name}' のサイズを config から読み込みました: {size_mb / 1024:.3f}GB"
-                )
-                return size_mb
-            except (ValueError, TypeError):
-                logger.error(
-                    f"モデル '{self.model_name}' の config 内の estimated_size_gb 値 '{estimated_size_gb_any}' を float に変換できません。"
-                )
-                return None  # Return None if value is invalid
-
-        except KeyError:
-            # Model might not be in the config at all
-            # logger.debug(f"モデル '{self.model_name}' が config に存在しません。")
-            return None
-        except Exception as e:
-            logger.error(
-                f"モデル '{self.model_name}' の config サイズ取得中に予期せぬエラー: {e}", exc_info=True
-            )
-            return None
-
-    def get_max_cache_size(self) -> float:
+    @classmethod
+    def _get_max_cache_size(cls) -> float:
         """システムの最大メモリに基づいてキャッシュサイズを計算"""
         total_memory = psutil.virtual_memory().total / (1024 * 1024)
-        cache_size = total_memory * self._CACHE_RATIO
-        available_memory = psutil.virtual_memory().available / (1024 * 1024)
-        logger.debug(
-            f"システム全体のメモリ: {total_memory:.1f}MB, "
-            f"現在の空きメモリ: {available_memory:.1f}MB, "
-            f"設定キャッシュ容量: {cache_size:.1f}MB"
-        )
-        return float(cache_size)
+        return float(total_memory * cls._CACHE_RATIO)
 
-    def _clear_cache_if_needed(self, model_size: float) -> None:
-        """必要に応じて古いモデルをキャッシュから削除"""
-        max_cache = self.get_max_cache_size()
-        initial_cache_size = sum(self._MEMORY_USAGE.values())
+    @classmethod
+    def _clear_cache_internal(cls, model_name_to_load: str, required_size_mb: float) -> bool:
+        """必要に応じて古いモデルをキャッシュから削除 (内部ヘルパー)。成功/失敗を返す。"""
+        max_cache = cls._get_max_cache_size()
+        initial_cache_size = sum(cls._MEMORY_USAGE.values())
 
-        if initial_cache_size + model_size <= max_cache:
-            return
+        if initial_cache_size + required_size_mb <= max_cache:
+            return True  # Enough space
 
         max_cache_gb = max_cache / 1024
         current_cache_gb = initial_cache_size / 1024
-        model_size_gb = model_size / 1024
+        required_gb = required_size_mb / 1024
         logger.warning(
-            f"キャッシュ容量({max_cache_gb:.3f}GB)を超過します。"
-            f"現在の使用量: {current_cache_gb:.3f}GB + 新規: {model_size_gb:.3f}GB"
+            f"キャッシュ容量({max_cache_gb:.3f}GB)超過。解放試行..."
+            f"(現: {current_cache_gb:.3f}GB + 新: {required_gb:.3f}GB)"
         )
 
-        models_by_age = sorted(self._MODEL_LAST_USED.items(), key=lambda x: x[1])
+        models_by_age = sorted(cls._MODEL_LAST_USED.items(), key=lambda x: x[1])
+        released_something = False
 
         for old_model_name, last_used in models_by_age:
-            current_cache_size = sum(self._MEMORY_USAGE.values())
-            if current_cache_size + model_size <= max_cache:
-                logger.info("必要なキャッシュ容量が確保されたため、解放処理を停止します。")
+            current_cache_size = sum(cls._MEMORY_USAGE.values())
+            if current_cache_size + required_size_mb <= max_cache:
+                logger.info("キャッシュ解放停止: 必要容量確保完了。")
                 break
 
-            if old_model_name == self.model_name:
+            if old_model_name == model_name_to_load:
+                continue
+            if old_model_name not in cls._MODEL_STATES:
                 continue
 
-            freed_memory = self._MEMORY_USAGE.get(old_model_name, 0)
+            freed_memory = cls._MEMORY_USAGE.get(old_model_name, 0)
             logger.info(
-                f"モデル '{old_model_name}' を解放します"
-                f"(最終使用: {time.strftime('%H:%M:%S', time.localtime(last_used))}, "
-                f"解放メモリ: {freed_memory:.1f}MB)"
+                f"モデル '{old_model_name}' を解放 (最終使用: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_used))}, "
+                f"解放メモリ: {freed_memory / 1024:.3f}GB)"
             )
-            self.release_model(old_model_name)
+            cls._release_model_state(old_model_name)  # Release state only
+            released_something = True
 
-        final_cache_size = sum(self._MEMORY_USAGE.values())
-        if final_cache_size + model_size > max_cache:
+        final_cache_size = sum(cls._MEMORY_USAGE.values())
+        if final_cache_size + required_size_mb > max_cache:
             final_cache_gb = final_cache_size / 1024
             logger.error(
-                f"古いモデルを解放しても、モデル '{self.model_name}' ({model_size_gb:.3f}GB) "
-                f"のための十分なキャッシュ容量 ({max_cache_gb:.3f}GB) を確保できませんでした。"
-                f"現在の使用量: {final_cache_gb:.3f}GB"
+                f"キャッシュ解放後もモデル '{model_name_to_load}' ({required_gb:.3f}GB) の容量確保失敗。"
+                f"(最大: {max_cache_gb:.3f}GB, 最終使用量: {final_cache_gb:.3f}GB)"
             )
-
-    def release_model(self, model_name: str) -> None:
-        """モデルの状態とメモリ使用量の記録を削除"""
-        if model_name in self._MODEL_STATES:
-            del self._MODEL_STATES[model_name]
-        if model_name in self._MEMORY_USAGE:
-            del self._MEMORY_USAGE[model_name]
-        if model_name in self._MODEL_LAST_USED:
-            del self._MODEL_LAST_USED[model_name]
-
-    def _calculate_model_size(self, model_file_path: Path, multiplier: float) -> float:
-        """モデルファイルサイズからメモリ使用量を推定(MB単位)"""
-        try:
-            file_size_mb = model_file_path.stat().st_size / (1024 * 1024)
-            return file_size_mb * multiplier
-        except FileNotFoundError:
-            logger.error(f"モデルサイズ計算エラー: ファイルが見つかりません {model_file_path}")
-            return 0.0
-        except Exception as e:
-            logger.error(f"モデルサイズ計算エラー ({model_file_path}): {e}")
-            return 0.0
-
-
-class TransformersLoader(BaseModelLoader):
-    """Transformersモデルのローダー"""
-
-    def _get_or_calculate_model_size(self, model_path: str) -> float:
-        """モデルサイズをキャッシュ、Config、または計算によって取得・保存する。"""
-        # 1. Check static cache
-        if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] > 0:
-            logger.debug(
-                f"モデル '{self.model_name}' サイズをキャッシュから取得: {ModelLoad._MODEL_SIZES[self.model_name]:.2f} MB"
-            )
-            return ModelLoad._MODEL_SIZES[self.model_name]
-
-        # 2. Check config
-        config_size_mb = self.get_model_size()  # Use the updated method
-        if config_size_mb is not None and config_size_mb > 0:
-            ModelLoad._MODEL_SIZES[self.model_name] = config_size_mb  # Cache the value from config
-            return config_size_mb
-
-        # 3. Calculate size (if not found in cache or config)
-        logger.info(f"モデル '{self.model_name}' サイズ不明。計算を試行します... (path: {model_path})")
-        calculated_size_mb = 0.0
-        temp_model = None
-        try:
-            # Temporarily load the model structure on CPU to calculate size
-            logger.debug("サイズ計算のために一時的に モデル を CPU にロードします...")
-            # Consider adding trust_remote_code=True if needed
-            with utils.suppress_logging(level="WARNING"):  # Suppress verbose loading logs
-                temp_model = AutoModelForVision2Seq.from_pretrained(model_path).to("cpu")
-
-            if isinstance(temp_model, torch.nn.Module):
-                calculated_size_mb = self._calculate_transformer_size(temp_model)
-                logger.info(f"モデル '{self.model_name}' サイズ計算成功: {calculated_size_mb:.2f} MB")
-            else:
-                logger.warning(
-                    f"一時ロードした モデル '{self.model_name}' から有効なモデルオブジェクトを取得できませんでした。"
-                )
-        except Exception as e:
-            logger.error(f"モデル '{self.model_name}' のサイズ計算中にエラー: {e}", exc_info=True)
-            calculated_size_mb = 0.0  # Treat as unknown size on error
-        finally:
-            # Clean up the temporary model and release memory
-            if temp_model:
-                del temp_model
-                gc.collect()
-                if torch.cuda.is_available():  # Just in case something moved to GPU
-                    torch.cuda.empty_cache()
-            logger.debug("一時 モデル のクリーンアップ完了。")
-
-        # 4. Cache and save the calculated size (even if 0.0)
-        ModelLoad._MODEL_SIZES[self.model_name] = calculated_size_mb
-        if calculated_size_mb > 0:
-            try:
-                size_gb = calculated_size_mb / 1024
-                config_registry.set_system_value(self.model_name, "estimated_size_gb", round(size_gb, 3))
-                config_registry.save_system_config()
-                logger.debug(
-                    f"モデル '{self.model_name}' の計算サイズ ({size_gb:.3f}GB) をシステム設定に保存しました。"
-                )
-            except Exception as e:
-                logger.error(
-                    f"モデル '{self.model_name}' のサイズをシステム設定に保存中にエラー: {e}", exc_info=True
-                )
-
-        return calculated_size_mb
-
-    def _load_model_and_processor(self, model_path: str) -> TransformersComponents:
-        """実際のモデルとプロセッサのロード処理 (ターゲットデバイス上)"""
-        logger.debug(f"モデル '{self.model_name}' のロード試行 (ターゲットデバイス: {self.device}) ... ")
-        processor = AutoProcessor.from_pretrained(model_path)
-        # Consider adding trust_remote_code=True if needed for some models
-        model = AutoModelForVision2Seq.from_pretrained(model_path).to(self.device)
-        logger.info(f"モデル '{self.model_name}' のロード完了 (ターゲットデバイス: {self.device})")
-        # Ensure the return type matches the TypedDict definition
-        return {"model": model, "processor": processor}
-
-    def _handle_load_success(self, components: TransformersComponents, known_size_mb: float) -> None:
-        """ロード成功時の状態更新、メモリ使用量記録、ログ出力 (サイズ計算は事前に行う)"""
-        # Size calculation and saving is done beforehand
-        final_model_size = known_size_mb if known_size_mb > 0 else 0.0
-
-        # Update state, memory usage, and log
-        self._MODEL_STATES[self.model_name] = f"on_{self.device}"
-        # _MODEL_SIZES should already be updated by _get_or_calculate_model_size
-        self._MEMORY_USAGE[self.model_name] = final_model_size
-        self._MODEL_LAST_USED[self.model_name] = time.time()
-        # Change log level to DEBUG
-        logger.debug(
-            f"モデル '{self.model_name}' のロード後状態更新完了 (デバイス: {self.device}, サイズ: {final_model_size / 1024:.3f}GB)"
-        )
-        # Remove config saving logic
-        # # 4. Save calculated size ...
-        # if calculated_size > 0:
-        #    ...
-
-    def _handle_memory_error(self, e: Exception) -> None:
-        """メモリ関連エラー発生時の処理"""
-        error_detail = f"モデル '{self.model_name}' のロード中にメモリ関連エラーが発生しました (デバイス: {self.device})。詳細: {e}"
-        logger.error(f"メモリ不足エラー: {error_detail}")
-        if (
-            isinstance(e, torch.cuda.OutOfMemoryError)
-            and self.device.startswith("cuda")
-            and torch.cuda.is_available()
-        ):
-            try:
-                logger.error(f"CUDA メモリサマリー ({self.device}):")
-                # Limit summary length if it's too verbose
-                logger.error(torch.cuda.memory_summary(device=self.device, abbreviated=True))
-            except Exception as mem_e:
-                logger.error(f"CUDAメモリ情報取得失敗: {mem_e}")
-        # Clean up state
-        if self.model_name in self._MODEL_STATES:
-            del self._MODEL_STATES[self.model_name]
-        if self.model_name in self._MEMORY_USAGE:
-            del self._MEMORY_USAGE[self.model_name]  # Also clear memory usage record
-        # Also clear potential failed size cache entry if error occurred during calculation
-        if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] == 0.0:
-            del ModelLoad._MODEL_SIZES[self.model_name]
-
-    def _handle_generic_error(self, e: Exception) -> None:
-        """その他の予期せぬエラー発生時の処理"""
-        logger.error(
-            f"モデル '{self.model_name}' のロード中に予期せぬエラーが発生しました: {e}", exc_info=True
-        )
-        # Clean up state
-        if self.model_name in self._MODEL_STATES:
-            del self._MODEL_STATES[self.model_name]
-        if self.model_name in self._MEMORY_USAGE:
-            del self._MEMORY_USAGE[self.model_name]
-        # Also clear potential failed size cache entry
-        if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] == 0.0:
-            del ModelLoad._MODEL_SIZES[self.model_name]
-
-    def load_components(self, model_path: str) -> TransformersComponents | None:
-        """Transformersモデルをロード (早期サイズ計算・キャッシュ管理対応版)"""
-        # --- 0. Check if already loaded --- #
-        if self.model_name in self._MODEL_STATES:
-            logger.debug(
-                f"モデル '{self.model_name}' は既にロード済み、状態: {self._MODEL_STATES[self.model_name]}"
-            )
-            # TODO: Return existing components if needed from a cache
-            return None  # Indicate no load occurred
-
-        # --- 1. Get or Calculate Model Size --- #
-        model_size_mb = self._get_or_calculate_model_size(model_path)
-
-        # --- 2. Memory Check --- #
-        if not self._check_memory_before_load(model_size_mb):
-            # Clean up potentially saved 0.0 size if memory check fails after calculation
-            if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] == 0.0:
-                del ModelLoad._MODEL_SIZES[self.model_name]
-            return None  # Memory check failed
-
-        # --- 3. Clear Cache if Needed --- #
-        if model_size_mb > 0:
-            logger.debug(
-                f"モデル '{self.model_name}' ({model_size_mb:.2f} MB) ロード前にキャッシュクリア実行。"
-            )
-            ModelLoad._clear_cache_if_needed(self.model_name, model_size_mb)
+            return False  # Failed to make enough space
         else:
-            logger.warning(
-                f"モデル '{self.model_name}' サイズ不明または0のため、キャッシュクリアはベストエフォートになります。"
-            )
+            if released_something:
+                logger.info("キャッシュの解放処理完了。")
+            return True  # Enough space now
 
-        # --- 4. Load Actual Components --- #
-        components: TransformersComponents | None = None
-        try:
-            # Load model and processor onto the target device
-            components = self._load_model_and_processor(model_path)
-
-            # --- 5. Handle Load Success (State Update) --- #
-            if components:
-                self._handle_load_success(components, model_size_mb)
-                return components
-            else:
-                # Should not happen if _load_model_and_processor raises errors
-                logger.error(f"モデル '{self.model_name}' のロード内部処理で予期せず失敗しました。")
-                self._handle_generic_error(
-                    Exception(f"_load_model_and_processor for {self.model_name} returned None")
-                )
-                return None
-
-        except (torch.cuda.OutOfMemoryError, MemoryError, OSError) as e:
-            # Check if OSError is likely a memory issue (e.g., "Cannot allocate memory")
-            if isinstance(e, OSError) and "allocate memory" not in str(e).lower():
-                self._handle_generic_error(e)  # Treat as generic if not clearly memory related
-            else:
-                self._handle_memory_error(e)
-            return None
-        except Exception as e:
-            self._handle_generic_error(e)
-            return None
-
-    def _calculate_transformer_size(self, model: torch.nn.Module) -> float:
-        """Transformerモデルのメモリ使用量を計算(MB単位)"""
-        try:
-            param_size = sum(p.numel() * p.element_size() for p in model.parameters()) / (1024 * 1024)
-            buffer_size = sum(b.numel() * b.element_size() for b in model.buffers()) / (1024 * 1024)
-            return param_size + buffer_size
-        except Exception as e:
-            logger.error(f"Transformerモデルサイズ計算エラー: {e}")
-            return 0.0
-
-
-class TransformersPipelineLoader(BaseModelLoader):
-    """TransformersPipelineモデルのローダー"""
-
-    def __init__(self, model_name: str, device: str):
-        super().__init__(model_name, device)
-        # Add a static cache for model sizes if not already present in ModelLoad
-        # Re-use ModelLoad's static cache directly
-        # self._MODEL_SIZES = ModelLoad._MODEL_SIZES # This line caused errors and is removed
-
-    def _get_or_calculate_model_size(self, task: str, model_path: str) -> float:
-        """モデルサイズをキャッシュ、Config、または計算によって取得・保存する。"""
-        # 1. Check static cache
-        if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] > 0:
-            logger.debug(
-                f"Pipeline '{self.model_name}' サイズをキャッシュから取得: {ModelLoad._MODEL_SIZES[self.model_name]:.2f} MB"
-            )
-            return ModelLoad._MODEL_SIZES[self.model_name]
-
-        # 2. Check config
-        config_size_mb = self.get_model_size()  # Use the updated method
-        if config_size_mb is not None and config_size_mb > 0:
-            ModelLoad._MODEL_SIZES[self.model_name] = config_size_mb  # Cache the value from config
-            return config_size_mb
-
-        # 3. Calculate size (if not found in cache or config)
-        logger.info(
-            f"Pipeline '{self.model_name}' サイズ不明。計算を試行します... (task: {task}, path: {model_path})"
-        )
-        calculated_size_mb = 0.0
-        temp_pipeline = None
-        try:
-            # Temporarily load the pipeline structure on CPU to calculate size
-            # Avoid loading full weights if possible, but pipeline() might load them.
-            # Use batch_size=1 for potentially lower memory usage during calculation.
-            # Note: This still might be memory intensive.
-            logger.debug("サイズ計算のために一時的に Pipeline を CPU にロードします...")
-            with utils.suppress_logging(level="WARNING"):  # Suppress verbose loading logs
-                temp_pipeline = pipeline(task, model=model_path, device="cpu", batch_size=1)
-
-            if hasattr(temp_pipeline, "model") and isinstance(temp_pipeline.model, torch.nn.Module):
-                calculated_size_mb = self._calculate_transformer_size(temp_pipeline.model)
-                logger.info(f"Pipeline '{self.model_name}' サイズ計算成功: {calculated_size_mb:.2f} MB")
-            else:
-                logger.warning(
-                    f"一時ロードした Pipeline '{self.model_name}' から有効なモデルオブジェクトを取得できませんでした。"
-                )
-        except Exception as e:
-            logger.error(f"Pipeline '{self.model_name}' のサイズ計算中にエラー: {e}", exc_info=True)
-            calculated_size_mb = 0.0  # Treat as unknown size on error
-        finally:
-            # Clean up the temporary pipeline and release memory
-            if temp_pipeline:
-                del temp_pipeline
-                gc.collect()
-                if torch.cuda.is_available():  # Just in case something moved to GPU
-                    torch.cuda.empty_cache()
-            logger.debug("一時 Pipeline のクリーンアップ完了。")
-
-        # 4. Cache and save the calculated size (even if 0.0)
-        ModelLoad._MODEL_SIZES[self.model_name] = calculated_size_mb
-        if calculated_size_mb > 0:
-            try:
-                size_gb = calculated_size_mb / 1024
-                config_registry.set_system_value(self.model_name, "estimated_size_gb", round(size_gb, 3))
-                config_registry.save_system_config()
-                logger.debug(
-                    f"Pipeline '{self.model_name}' の計算サイズ ({size_gb:.3f}GB) をシステム設定に保存しました。"
-                )
-            except Exception as e:
-                logger.error(
-                    f"Pipeline '{self.model_name}' のサイズをシステム設定に保存中にエラー: {e}",
-                    exc_info=True,
-                )
-
-        return calculated_size_mb
-
-    def load_components(
-        self, task: str, model_path: str, batch_size: int
-    ) -> TransformersPipelineComponents | None:
-        """Pipelineモデルをロード (早期サイズ計算・キャッシュ管理対応版)"""
-        # --- 0. Check if already loaded --- #
-        if self.model_name in self._MODEL_STATES:
-            logger.debug(
-                f"Pipeline '{self.model_name}' は既にロード済み、状態: {self._MODEL_STATES[self.model_name]}"
-            )
-            # TODO: Should we return the existing components here? Need a component cache.
-            # For now, return None to indicate no *new* load occurred.
-            return None
-
-        # --- 1. Get or Calculate Model Size --- #
-        model_size_mb = self._get_or_calculate_model_size(task, model_path)
-
-        # --- 2. Memory Check --- #
-        if not self._check_memory_before_load(model_size_mb):
-            return None  # Memory check failed
-
-        # --- 3. Clear Cache if Needed --- #
-        if model_size_mb > 0:
-            logger.debug(
-                f"Pipeline '{self.model_name}' ({model_size_mb:.2f} MB) ロード前にキャッシュクリア実行。"
-            )
-            ModelLoad._clear_cache_if_needed(self.model_name, model_size_mb)
-        else:
-            # This warning now only appears if size calculation failed or is genuinely 0
-            logger.warning(
-                f"Pipeline '{self.model_name}' サイズ不明または0のため、キャッシュクリアはベストエフォートになります。"
-            )
-
-        # --- 4. Load Actual Components --- #
-        components: TransformersPipelineComponents | None = None
-        try:
-            # Load the pipeline on the target device
-            components = self._load_pipeline(task, model_path, batch_size)
-
-            # --- 5. Handle Load Success (State Update) --- #
-            if components:
-                # Pass the known size to handle_load_success
-                self._handle_load_success(components, model_size_mb)
-                return components
-            else:
-                # _load_pipeline itself might return None or raise error handled below
-                logger.error(f"Pipeline '{self.model_name}' のロード内部処理で失敗しました。")
-                return None
-
-        except (torch.cuda.OutOfMemoryError, MemoryError, OSError) as e:
-            if isinstance(e, OSError) and "allocate memory" not in str(e).lower():
-                self._handle_generic_error(e)
-            else:
-                self._handle_memory_error(e)
-            return None
-        except Exception as e:
-            self._handle_generic_error(e)
-            return None
-
-    def _load_pipeline(self, task: str, model_path: str, batch_size: int) -> TransformersPipelineComponents:
-        """実際の Pipeline オブジェクトのロード処理 (ターゲットデバイス上)"""
-        logger.debug(f"Pipeline '{self.model_name}' のロード試行 (ターゲットデバイス: {self.device}) ... ")
-        pipeline_obj: Pipeline = pipeline(  # Add type hint for clarity
-            task,
-            model=model_path,
-            device=self.device,  # Load directly on the target device
-            batch_size=batch_size,
-        )
-        logger.info(f"Pipeline '{self.model_name}' のロード完了 (ターゲットデバイス: {self.device})")
-        return {"pipeline": pipeline_obj}
-
-    def _handle_load_success(
-        self, components: TransformersPipelineComponents, known_size_mb: float
+    @classmethod
+    def _update_model_state(
+        cls,
+        model_name: str,
+        device: str | None = None,
+        status: str | None = None,  # "loaded", "cached_cpu", "released", or None to just update time
+        size_mb: float | None = None,
     ) -> None:
-        """ロード成功時の状態更新、メモリ使用量記録、ログ出力 (サイズ計算は事前に行う)"""
-        # Size calculation and saving is done beforehand in _get_or_calculate_model_size
-        # We just need to update the state and memory usage based on the known size
+        """モデルの状態、メモリ使用量、最終使用時刻を一元的に更新"""
+        current_time = time.time()
 
-        final_model_size = known_size_mb if known_size_mb > 0 else 0.0
+        if status == "released":
+            if model_name in cls._MODEL_STATES:
+                del cls._MODEL_STATES[model_name]
+            if model_name in cls._MEMORY_USAGE:
+                del cls._MEMORY_USAGE[model_name]
+            if model_name in cls._MODEL_LAST_USED:
+                del cls._MODEL_LAST_USED[model_name]
+            # Don't clear _MODEL_SIZES on release, keep calculated value. Clear on load error.
+            # if model_name in cls._MODEL_SIZES: del cls._MODEL_SIZES[model_name]
+            logger.debug(f"モデル '{model_name}' 状態情報解放。")
+            return
 
-        # Update state, memory usage, and log
-        self._MODEL_STATES[self.model_name] = f"on_{self.device}"
-        # _MODEL_SIZES should already be updated by _get_or_calculate_model_size
-        self._MEMORY_USAGE[self.model_name] = final_model_size
-        self._MODEL_LAST_USED[self.model_name] = time.time()
-        # Change log level from INFO to DEBUG
-        logger.debug(
-            f"Pipeline '{self.model_name}' のロード後状態更新完了 (デバイス: {self.device}, サイズ: {final_model_size / 1024:.3f}GB)"
-        )
-        # Remove config saving logic from here
-        # # 4. Save calculated size to user config if it was calculated
-        # if calculated_size > 0:
-        #    ...
+        if model_name in cls._MODEL_STATES or status:  # Update if exists or status is changing
+            cls._MODEL_LAST_USED[model_name] = current_time
 
-    def _handle_memory_error(self, e: Exception) -> None:
-        """メモリ関連エラー発生時の処理 (Pipeline用)"""
-        error_detail = f"Pipeline '{self.model_name}' のロード中にメモリ関連エラーが発生しました (デバイス: {self.device})。詳細: {e}"
-        logger.error(f"メモリ不足エラー: {error_detail}")
-        if (
-            isinstance(e, torch.cuda.OutOfMemoryError)
-            and self.device.startswith("cuda")
-            and torch.cuda.is_available()
-        ):
+        if status and device:
+            new_state = f"on_{device}" if status == "loaded" else "on_cpu"
+            cls._MODEL_STATES[model_name] = new_state
+            logger.debug(f"モデル '{model_name}' 状態 -> {new_state}")
+
+        if size_mb is not None:
+            if size_mb > 0:
+                cls._MEMORY_USAGE[model_name] = size_mb
+                logger.debug(f"モデル '{model_name}' メモリ使用量 -> {size_mb / 1024:.3f} GB")
+            elif model_name in cls._MEMORY_USAGE:  # size is 0 or invalid
+                del cls._MEMORY_USAGE[model_name]
+                logger.debug(f"モデル '{model_name}' メモリ使用量クリア (サイズ0または無効)")
+
+    @classmethod
+    def _get_model_state(cls, model_name: str) -> str | None:
+        """モデルの現在の状態を取得"""
+        return cls._MODEL_STATES.get(model_name)
+
+    @staticmethod
+    def _move_components_to_device(components: dict[str, Any], target_device: str) -> None:
+        """コンポーネントを指定デバイスに移動 (共通ロジック)"""
+        logger.debug(f"コンポーネントを {target_device} に移動中...")
+        for component_name, component in list(components.items()):
+            moved = False
+            current_device_str = "unknown"
             try:
-                logger.error(f"CUDA メモリサマリー ({self.device}):")
-                logger.error(torch.cuda.memory_summary(device=self.device, abbreviated=True))
-            except Exception as mem_e:
-                logger.error(f"CUDAメモリ情報取得失敗: {mem_e}")
-        # Clean up state
-        if self.model_name in self._MODEL_STATES:
-            del self._MODEL_STATES[self.model_name]
-        if self.model_name in self._MEMORY_USAGE:
-            del self._MEMORY_USAGE[self.model_name]
+                if (
+                    component_name == "pipeline"
+                    and hasattr(component, "model")
+                    and hasattr(component.model, "to")
+                ):
+                    current_device_str = str(getattr(component.model, "device", "unknown"))
+                    if current_device_str != target_device:
+                        component.model.to(target_device)
+                        moved = True
+                elif hasattr(component, "to") and callable(component.to) and hasattr(component, "device"):
+                    current_device_str = str(getattr(component, "device", "unknown"))
+                    if current_device_str != target_device and isinstance(
+                        component, torch.Tensor | torch.nn.Module
+                    ):
+                        component.to(target_device)
+                        moved = True
+                # Add specific handling for ONNX/TF if needed (likely not standard .to method)
 
-    def _handle_generic_error(self, e: Exception) -> None:
-        """その他の予期せぬエラー発生時の処理 (Pipeline用)"""
-        logger.error(
-            f"Pipeline '{self.model_name}' のロード中に予期せぬエラーが発生しました: {e}", exc_info=True
-        )
-        # Clean up state
-        if self.model_name in self._MODEL_STATES:
-            del self._MODEL_STATES[self.model_name]
-        if self.model_name in self._MEMORY_USAGE:
-            del self._MEMORY_USAGE[self.model_name]
-
-    def _calculate_transformer_size(self, model: torch.nn.Module) -> float:
-        """Transformerモデルのメモリ使用量を計算(MB単位)"""
-        try:
-            param_size = sum(p.numel() * p.element_size() for p in model.parameters()) / (1024 * 1024)
-            buffer_size = sum(b.numel() * b.element_size() for b in model.buffers()) / (1024 * 1024)
-            return param_size + buffer_size
-        except Exception as e:
-            logger.error(f"Transformer Pipeline モデルサイズ計算エラー: {e}")
-            return 0.0
-
-
-class ONNXLoader(BaseModelLoader):
-    """ONNXモデルのローダー"""
-
-    def _get_or_calculate_model_size(self, model_path: str) -> float:
-        """モデルサイズをキャッシュ、Config、または計算によって取得・保存する。"""
-        # 1. Check static cache
-        if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] > 0:
-            logger.debug(
-                f"ONNXモデル '{self.model_name}' サイズをキャッシュから取得: {ModelLoad._MODEL_SIZES[self.model_name]:.2f} MB"
-            )
-            return ModelLoad._MODEL_SIZES[self.model_name]
-
-        # 2. Check config
-        config_size_mb = self.get_model_size()
-        if config_size_mb is not None and config_size_mb > 0:
-            ModelLoad._MODEL_SIZES[self.model_name] = config_size_mb  # Cache the value from config
-            return config_size_mb
-
-        # 3. Calculate size from file path (if not found in cache or config)
-        logger.info(
-            f"ONNXモデル '{self.model_name}' サイズ不明。ファイルパスから計算を試行します... (path: {model_path})"
-        )
-        calculated_size_mb = 0.0
-        onnx_file_path: Path | None = None
-        try:
-            # Resolve path to get the actual .onnx file location
-            _, resolved_path = self._resolve_model_path(model_path)
-            if resolved_path and resolved_path.is_file():
-                onnx_file_path = resolved_path
-                logger.debug(
-                    f"ONNXモデル '{self.model_name}' ファイル ({onnx_file_path}) からサイズ計算試行。"
-                )
-                # Use the base class method for file size calculation
-                calculated_size_mb = self._calculate_model_size(
-                    onnx_file_path, 1.5
-                )  # Multiplier specific to ONNX?
-                if calculated_size_mb > 0:
-                    logger.info(
-                        f"ONNXモデル '{self.model_name}' サイズ計算成功: {calculated_size_mb:.2f} MB"
+                if moved:
+                    logger.debug(
+                        f"  - '{component_name}' を {current_device_str} -> {target_device} へ移動完了。"
                     )
-                else:
-                    logger.warning(f"ONNXモデル '{self.model_name}' ファイルからのサイズ計算失敗。")
-            else:
-                logger.warning(
-                    f"ONNXモデル '{self.model_name}' の有効な .onnx ファイルパスが見つかりません ({resolved_path})。サイズ計算スキップ。"
-                )
+                elif current_device_str == target_device:
+                    logger.debug(f"  - '{component_name}' は既に {target_device} にあります。")
 
-        except Exception as e:
-            logger.error(
-                f"ONNXモデル '{self.model_name}' のサイズ計算 (パス解決含む) 中にエラー: {e}", exc_info=True
-            )
-            calculated_size_mb = 0.0  # Treat as unknown size on error
-        # No finally block needed as we don't load the model here
-
-        # 4. Cache and save the calculated size (even if 0.0)
-        ModelLoad._MODEL_SIZES[self.model_name] = calculated_size_mb
-        if calculated_size_mb > 0:
-            try:
-                size_gb = calculated_size_mb / 1024
-                config_registry.set_system_value(self.model_name, "estimated_size_gb", round(size_gb, 3))
-                config_registry.save_system_config()
-                logger.debug(
-                    f"ONNXモデル '{self.model_name}' の計算サイズ ({size_gb:.3f}GB) をシステム設定に保存しました。"
-                )
             except Exception as e:
-                logger.error(
-                    f"ONNXモデル '{self.model_name}' のサイズをシステム設定に保存中にエラー: {e}",
-                    exc_info=True,
+                logger.warning(
+                    f"コンポーネント '{component_name}' デバイス移動中にエラー ({target_device}): {e}",
+                    exc_info=False,
                 )
 
-        return calculated_size_mb
+    @classmethod
+    def _release_model_state(cls, model_name: str) -> None:
+        """モデルの状態情報のみを解放"""
+        cls._update_model_state(model_name, status="released")
 
-    def _resolve_model_path(self, model_path: str) -> tuple[Path | None, Path | None]:
-        """モデルパスを解決し、関連ファイルパスを取得"""
-        logger.debug(
-            f"ONNXモデル '{self.model_name}' のダウンロード/検索開始 (パス/リポジトリ: {model_path})... "
-        )
+    @classmethod
+    def _release_model_internal(cls, model_name: str, components: dict[str, Any] | None = None) -> None:
+        """モデルの状態と関連コンポーネントを解放 (内部ヘルパー)"""
+        logger.info(f"モデル '{model_name}' 解放処理開始...")
+        if components:
+            try:
+                logger.debug("コンポーネント削除試行...")
+                for component_name in list(components.keys()):
+                    component = components[component_name]
+                    if component_name in (
+                        "model",
+                        "pipeline",
+                        "session",
+                        "clip_model",
+                        "processor",
+                    ):  # Add processor
+                        logger.debug(f"  - Deleting component: {component_name}")
+                        del components[component_name]
+                        del component
+                logger.debug("コンポーネント削除完了。")
+            except Exception as e:
+                logger.error(f"コンポーネント削除中にエラー ({model_name}): {e}", exc_info=True)
+
+        cls._release_model_state(model_name)  # Release state regardless
+
         try:
-            # Ensure download function handles errors and returns appropriate values
-            csv_path, model_repo_or_path_obj = utils.download_onnx_tagger_model(model_path)
-            if model_repo_or_path_obj is None:
-                logger.error(
-                    f"ONNX モデル '{self.model_name}' のパス/リポジトリが見つかりません: {model_path}"
-                )
-                return None, None
-            logger.debug(f"ONNXモデルパス解決: {model_repo_or_path_obj}")
-            return csv_path, model_repo_or_path_obj
+            logger.debug("ガベージコレクションとCUDAキャッシュクリア実行...")
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            logger.debug("クリーンアップ完了。")
         except Exception as e:
-            logger.error(f"モデルパス解決中にエラー ({model_path}): {e}", exc_info=True)
-            return None, None
+            logger.error(f"GC/CUDAキャッシュクリア中にエラー: {e}", exc_info=True)
+        logger.info(f"モデル '{model_name}' 解放処理完了。")
 
-    def _prepare_onnx_session(self) -> list[str]:
-        """ONNXセッション作成の準備 (キャッシュクリアとプロバイダー決定)"""
-        logger.debug("ONNXロード前のキャッシュクリア試行...")
-        gc.collect()
-        if self.device.startswith("cuda") and torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        logger.debug("キャッシュクリア完了。")
-
-        providers = (
-            ["CUDAExecutionProvider", "CPUExecutionProvider"]
-            if self.device == "cuda" and "CUDAExecutionProvider" in ort.get_available_providers()
-            else ["CPUExecutionProvider"]
-        )
-        logger.debug(f"ONNX実行プロバイダー: {providers}")
-        return providers
-
-    def _create_onnx_session(self, model_repo_or_path: Path, providers: list[str]) -> ort.InferenceSession:
-        """ONNX InferenceSession を作成"""
-        logger.info(f"ONNXモデル '{self.model_name}' をロード中: '{model_repo_or_path}' on {providers}... ")
-        # Ensure providers list matches expected type for InferenceSession
-        session = ort.InferenceSession(str(model_repo_or_path), providers=providers)
-        logger.info(f"ONNXモデル '{self.model_name}' のロード成功。")
-        return session
-
-    def _handle_load_success(
-        self, session: ort.InferenceSession, csv_path: Path, model_repo_or_path: Path, known_size_mb: float
-    ) -> ONNXComponents:
-        """ロード成功時の状態更新、メモリ使用量記録、ログ出力 (サイズ計算は事前に行う)"""
-        components: ONNXComponents = {"session": session, "csv_path": csv_path}
-        # Size calculation and saving is done beforehand
-        final_model_size = known_size_mb if known_size_mb > 0 else 0.0
-
-        # Update state, memory usage, and log
-        self._MODEL_STATES[self.model_name] = f"on_{self.device}"
-        # _MODEL_SIZES should already be updated by _get_or_calculate_model_size
-        self._MEMORY_USAGE[self.model_name] = final_model_size
-        self._MODEL_LAST_USED[self.model_name] = time.time()
-        # Change log level to DEBUG
-        logger.debug(
-            f"ONNXモデル '{self.model_name}' のロード後状態更新完了 (デバイス: {self.device}, サイズ: {final_model_size / 1024:.3f}GB)"
-        )
-        # Remove config saving logic
-        # # 4. Save calculated size ...
-        # if calculated_size > 0:
-        #    ...
-
-        return components
-
-    def _handle_load_error(self, e: Exception) -> None:
-        """ロード失敗時のエラーハンドリングと状態クリーンアップ"""
+    @classmethod
+    def _handle_load_error(cls, model_name: str, error: Exception) -> None:
+        """ロードエラー処理 (ログ出力と状態クリーンアップ)"""
+        error_msg = str(error)
         is_memory_error = False
-        if isinstance(e, MemoryError | OSError):
-            # Further check OSError for memory allocation patterns
-            if "allocate" in str(e).lower() or "memory" in str(e).lower():
-                is_memory_error = True
-        elif isinstance(e, Exception) and (
-            "Failed to allocate memory" in str(e)
-            or "CUDA error" in str(e)  # General CUDA errors
-            or "AllocateRawInternal" in str(e)
-            or "onnxruntime::BFCArena::AllocateRawInternal" in str(e)
+        if isinstance(error, torch.cuda.OutOfMemoryError | MemoryError | OutOfMemoryError):
+            is_memory_error = True
+        elif isinstance(error, OSError) and "allocate memory" in error_msg.lower():
+            is_memory_error = True
+        elif "onnxruntime" in str(type(error)).lower() and (
+            "Failed to allocate memory" in error_msg or "AllocateRawInternal" in error_msg
         ):
+            is_memory_error = True
+        elif isinstance(error, tf.errors.ResourceExhaustedError):
             is_memory_error = True
 
         if is_memory_error:
-            error_detail = (
-                f"モデル '{self.model_name}' (ONNX) のロード中にメモリ関連エラーが発生しました。詳細: {e}"
-            )
-            logger.error(f"メモリ不足エラー: {error_detail}")
-        elif "onnxruntime" in str(type(e)).lower():
-            logger.error(
-                f"ONNXモデル '{self.model_name}' のロード中にランタイムエラーが発生しました: {e}",
-                exc_info=True,
-            )
-        elif isinstance(e, FileNotFoundError):
-            logger.error(
-                f"ONNXモデル '{self.model_name}' のロードに必要なファイルが見つかりません: {e}",
-                exc_info=False,  # No need for stack trace if file not found
-            )
+            logger.error(f"メモリ不足エラー: モデル '{model_name}' ロード中。詳細: {error_msg}")
+            if isinstance(error, torch.cuda.OutOfMemoryError) and torch.cuda.is_available():
+                try:
+                    device_name = str(error.device) if hasattr(error, "device") else "cuda"
+                    logger.error(f"CUDA メモリサマリー ({device_name}):")
+                    logger.error(torch.cuda.memory_summary(device=device_name, abbreviated=True))
+                except Exception as mem_e:
+                    logger.error(f"CUDAメモリ情報取得失敗: {mem_e}")
+        elif isinstance(error, FileNotFoundError):
+            logger.error(f"ファイル未検出: モデル '{model_name}' ロード中: {error_msg}", exc_info=False)
         else:
-            logger.error(
-                f"ONNXモデル '{self.model_name}' のロード中に予期せぬ汎用エラーが発生しました: {e}",
-                exc_info=True,
+            logger.error(f"予期せぬロードエラー ({model_name}): {error_msg}", exc_info=True)
+
+        # Clean up state and potentially calculated size cache on any load error
+        if model_name in cls._MODEL_SIZES and cls._MODEL_SIZES[model_name] == 0.0:
+            del cls._MODEL_SIZES[model_name]  # Clear failed calculation attempt
+        cls._release_model_state(model_name)
+
+    # --- Internal Loader Base Class ---
+    class _BaseLoaderInternal(ABC):
+        """Internal base loader."""
+
+        def __init__(self, model_name: str, device: str) -> None:
+            self.model_name = model_name
+            self.device = device
+
+        @abstractmethod
+        def _calculate_specific_size(self, model_path: str, **kwargs) -> float:
+            """Abstract: Calculate size for this loader type."""
+            raise NotImplementedError
+
+        @abstractmethod
+        def _load_components_internal(self, model_path: str, **kwargs) -> dict[str, Any]:
+            """Abstract: Load actual components for this loader type."""
+            raise NotImplementedError
+
+        def load_components(self, model_path: str, **kwargs) -> dict[str, Any] | None:
+            """Generic load sequence using ModelLoad helpers."""
+            model_type = self.__class__.__name__.replace("_LoaderInternal", "").lower()
+
+            # 0. Check state
+            if ModelLoad._get_model_state(self.model_name):
+                logger.debug(f"モデル '{self.model_name}' ({model_type}) は既にロード/キャッシュ済み。")
+                ModelLoad._update_model_state(self.model_name)  # Update last used
+                return None  # Indicate no *new* load occurred
+
+            # 1. Get/Calculate Size
+            model_size_mb = ModelLoad._get_or_calculate_size(
+                self.model_name, model_path, model_type, self, **kwargs
             )
 
-        # Clean up state regardless of error type
-        if self.model_name in self._MODEL_STATES:
-            del self._MODEL_STATES[self.model_name]
-        if self.model_name in self._MEMORY_USAGE:
-            del self._MEMORY_USAGE[self.model_name]
-
-    def load_components(self, model_path: str) -> ONNXComponents | None:
-        """ONNXモデルをロード (早期サイズ計算・キャッシュ管理対応版)"""
-        # --- 0. Check if already loaded --- #
-        if self.model_name in self._MODEL_STATES:
-            logger.debug(
-                f"モデル '{self.model_name}' は既にロード済み、状態: {self._MODEL_STATES[self.model_name]}"
-            )
-            return None  # Indicate no load occurred
-
-        # --- 1. Get or Calculate Model Size --- #
-        model_size_mb = self._get_or_calculate_model_size(model_path)
-
-        # --- 2. Memory Check --- #
-        if not self._check_memory_before_load(model_size_mb):
-            # Clean up potentially saved 0.0 size
-            if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] == 0.0:
-                del ModelLoad._MODEL_SIZES[self.model_name]
-            return None  # Memory check failed
-
-        # --- 3. Clear Cache if Needed --- #
-        if model_size_mb > 0:
-            logger.debug(
-                f"ONNXモデル '{self.model_name}' ({model_size_mb:.2f} MB) ロード前にキャッシュクリア実行。"
-            )
-            ModelLoad._clear_cache_if_needed(self.model_name, model_size_mb)
-        else:
-            logger.warning(
-                f"ONNXモデル '{self.model_name}' サイズ不明または0のため、キャッシュクリアはベストエフォートになります。"
-            )
-
-        # --- 4. Load Actual Components --- #
-        csv_path: Path | None = None
-        model_repo_or_path: Path | None = None
-        session: ort.InferenceSession | None = None
-        components: ONNXComponents | None = None
-
-        try:
-            # a. Resolve path (again, necessary for actual loading)
-            csv_path, model_repo_or_path = self._resolve_model_path(model_path)
-            if model_repo_or_path is None or csv_path is None:
-                raise FileNotFoundError(f"モデルパス再解決失敗: {model_path}")
-
-            # b. Prepare session (Cache clear is done above, just get providers)
-            providers = self._prepare_onnx_session()  # Note: this also does gc.collect/empty_cache
-
-            # c. Create session
-            session = self._create_onnx_session(model_repo_or_path, providers)
-
-            # d. Handle success (State update)
-            components = self._handle_load_success(session, csv_path, model_repo_or_path, model_size_mb)
-            return components
-
-        except (MemoryError, OSError, FileNotFoundError, Exception) as e:
-            self._handle_load_error(e)
-            # Clean up potentially saved 0.0 size on load error
-            if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] == 0.0:
-                del ModelLoad._MODEL_SIZES[self.model_name]
-            return None
-
-
-class TensorFlowLoader(BaseModelLoader):
-    """TensorFlowモデルのローダー"""
-
-    def _check_static_cache(self) -> float | None:
-        """静的キャッシュからモデルサイズを取得する。"""
-        if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] > 0:
-            size_mb = ModelLoad._MODEL_SIZES[self.model_name]
-            logger.debug(
-                f"TensorFlowモデル '{self.model_name}' サイズをキャッシュから取得: {size_mb:.2f} MB"
-            )
-            return size_mb
-        return None
-
-    def _check_config_cache(self) -> float | None:
-        """設定ファイルからモデルサイズを取得し、静的キャッシュに保存する。"""
-        config_size_mb = self.get_model_size()
-        if config_size_mb is not None and config_size_mb > 0:
-            ModelLoad._MODEL_SIZES[self.model_name] = config_size_mb  # Cache the value from config
-            return config_size_mb
-        return None
-
-    def _get_h5_calc_params(self, model_dir: Path) -> tuple[Path, float]:
-        """H5モデルのサイズ計算用パスと係数を取得する。"""
-        h5_files = list(model_dir.glob("*.h5"))
-        if not h5_files:
-            raise FileNotFoundError(f"サイズ計算用H5ファイルが見つかりません: {model_dir}")
-        return h5_files[0], 1.2
-
-    def _get_saved_model_calc_params(self, model_dir: Path) -> tuple[Path, float]:
-        """SavedModelのサイズ計算用パスと係数を取得する。"""
-        if not (model_dir / "saved_model.pb").exists() and not (model_dir / "saved_model.pbtxt").exists():
-            raise FileNotFoundError(
-                f"サイズ計算用の有効な SavedModel ディレクトリではありません: {model_dir}"
-            )
-        return model_dir, 1.3
-
-    def _calculate_size_from_path(self, model_path: str, model_format: str) -> float:
-        """ファイル/ディレクトリパスからモデルサイズを計算する。"""
-        logger.info(
-            f"TensorFlowモデル '{self.model_name}' サイズ不明。ファイル/ディレクトリパスから計算を試行します... (path: {model_path}, format: {model_format})"
-        )
-        try:
-            model_dir = self._resolve_model_dir(model_path)
-            if model_dir is None:
-                raise FileNotFoundError(f"サイズ計算のためのモデルディレクトリ解決失敗: {model_path}")
-
-            target_path_for_calc: Path | None = None
-            multiplier_for_calc = 1.0
-
-            if model_format == "h5":
-                target_path_for_calc, multiplier_for_calc = self._get_h5_calc_params(model_dir)
-            elif model_format == "saved_model":
-                target_path_for_calc, multiplier_for_calc = self._get_saved_model_calc_params(model_dir)
-            elif model_format == "pb":
-                raise NotImplementedError("サイズ計算は .pb フォーマット単体ではサポートされていません。")
-            else:
-                raise ValueError(f"サイズ計算で未対応のTensorFlowフォーマット: {model_format}")
-
-            if target_path_for_calc:
-                logger.debug(
-                    f"TensorFlowモデル '{self.model_name}' パス ({target_path_for_calc}) からサイズ計算試行 (係数: {multiplier_for_calc:.1f})。"
+            # 2. Memory Check
+            if not ModelLoad._check_memory_before_load(model_size_mb, self.model_name):
+                ModelLoad._handle_load_error(
+                    self.model_name, MemoryError(f"Pre-load memory check failed for {self.model_name}")
                 )
-                calculated_size_mb = self._calculate_model_size(target_path_for_calc, multiplier_for_calc)
-                if calculated_size_mb > 0:
-                    logger.info(
-                        f"TensorFlowモデル '{self.model_name}' サイズ計算成功: {calculated_size_mb:.2f} MB"
+                return None
+
+            # 3. Clear Cache
+            if model_size_mb > 0:
+                if not ModelLoad._clear_cache_internal(self.model_name, model_size_mb):
+                    # Failed to clear enough space, should we still try loading?
+                    # Let's prevent loading if cache clear fails explicitly.
+                    ModelLoad._handle_load_error(
+                        self.model_name,
+                        MemoryError(f"Failed to clear sufficient cache for {self.model_name}"),
                     )
-                    return calculated_size_mb
-                else:
-                    logger.warning(f"TensorFlowモデル '{self.model_name}' パスからのサイズ計算失敗。")
-                    return 0.0
-            else:
-                logger.warning(f"TensorFlowモデル '{self.model_name}' のサイズ計算用パス特定失敗。")
-                return 0.0
-
-        except (FileNotFoundError, NotImplementedError, ValueError) as e:
-            logger.error(
-                f"TensorFlowモデル '{self.model_name}' のサイズ計算中にエラー: {e}", exc_info=False
-            )
-            return 0.0
-        except Exception as e:
-            logger.error(
-                f"TensorFlowモデル '{self.model_name}' のサイズ計算中に予期せぬエラー: {e}", exc_info=True
-            )
-            return 0.0
-
-    def _cache_and_save_calculated_size(self, calculated_size_mb: float) -> None:
-        """計算されたモデルサイズをキャッシュし、設定ファイルに保存する。"""
-        ModelLoad._MODEL_SIZES[self.model_name] = calculated_size_mb
-        if calculated_size_mb > 0:
-            try:
-                size_gb = calculated_size_mb / 1024
-                config_registry.set_system_value(self.model_name, "estimated_size_gb", round(size_gb, 3))
-                config_registry.save_system_config()
-                logger.debug(
-                    f"TensorFlowモデル '{self.model_name}' の計算サイズ ({size_gb:.3f}GB) をシステム設定に保存しました。"
-                )
-            except Exception as e:
-                logger.error(
-                    f"TensorFlowモデル '{self.model_name}' のサイズをシステム設定に保存中にエラー: {e}",
-                    exc_info=True,
-                )
-
-    # --- Refactored _get_or_calculate_model_size ---
-    def _get_or_calculate_model_size(self, model_path: str, model_format: str) -> float:
-        """モデルサイズをキャッシュ、Config、またはファイル/ディレクトリパスから計算して取得・保存する。"""
-        # 1. Check static cache
-        cached_size = self._check_static_cache()
-        if cached_size is not None:
-            return cached_size
-
-        # 2. Check config
-        config_size = self._check_config_cache()
-        if config_size is not None:
-            return config_size
-
-        # 3. Calculate size from path
-        calculated_size_mb = self._calculate_size_from_path(model_path, model_format)
-
-        # 4. Cache and save the calculated size (even if 0.0)
-        self._cache_and_save_calculated_size(calculated_size_mb)
-
-        return calculated_size_mb
-
-    def _resolve_model_dir(self, model_path: str) -> Path | None:
-        """モデルディレクトリパスを解決する"""
-        logger.debug(f"TensorFlowモデル '{self.model_name}' の検索/ロード開始 (パス: {model_path})... ")
-        try:
-            model_dir_obj = utils.load_file(model_path)
-            if model_dir_obj is None:
-                logger.error(f"TensorFlow モデルディレクトリが見つかりません: {model_path}")
-                return None
-            # Ensure it's a directory
-            if not model_dir_obj.is_dir():
-                logger.error(f"指定されたパスはディレクトリではありません: {model_dir_obj}")
-                return None
-            return model_dir_obj
-        except Exception as e:
-            logger.error(f"モデルディレクトリ解決中にエラー ({model_path}): {e}", exc_info=True)
-            return None
-
-    def _load_model_by_format(
-        self, model_dir: Path, model_format: str
-    ) -> tuple[TensorFlowComponents, Path | None, float]:
-        """指定されたフォーマットに基づいてTensorFlowモデルをロード"""
-        components: TensorFlowComponents = {"model_dir": model_dir, "model": None}  # type: ignore # Initialize model as None temporarily
-        target_path: Path | None = None
-        model_instance: tf.Module | tf.keras.Model | None = None  # Use explicit type
-        multiplier = 1.0
-
-        if model_format == "h5":
-            h5_files = list(model_dir.glob("*.h5"))
-            if not h5_files:
-                raise FileNotFoundError(f"H5ファイルがディレクトリ内に見つかりません: {model_dir}")
-            target_path = h5_files[0]
-            logger.info(f"H5モデルをロード中: {target_path}")
-            model_instance = tf.keras.models.load_model(
-                target_path, compile=False
-            )  # Assign to typed variable
-            multiplier = 1.2
-
-        elif model_format == "saved_model":
-            target_path = model_dir
-            logger.info(f"SavedModelをロード中: {target_path}")
-            if (
-                not (target_path / "saved_model.pb").exists()
-                and not (target_path / "saved_model.pbtxt").exists()
-            ):
-                raise FileNotFoundError(f"有効な SavedModel ディレクトリではありません: {target_path}")
-            # tf.saved_model.load returns a Trackable object, which inherits from tf.Module
-            model_instance = tf.saved_model.load(str(target_path))  # Assign to typed variable
-            multiplier = 1.3
-
-        elif model_format == "pb":
-            # Currently unsupported direct PB loading
-            pb_files = list(model_dir.glob("*.pb"))
-            pb_path_str = pb_files[0] if pb_files else "(見つかりません)"
-            logger.error(
-                f"単体の .pb ファイル ({pb_path_str}) からの直接ロードは現在サポートされていません。SavedModel を使用してください。"
-            )
-            raise NotImplementedError("Direct loading from .pb is not supported. Use SavedModel.")
-
-        else:
-            raise ValueError(f"未対応のTensorFlowモデルフォーマットです: {model_format}")
-
-        if model_instance is None:
-            raise ValueError("モデルインスタンスのロードに失敗しました。")
-
-        components["model"] = model_instance  # Assign loaded model to the dictionary
-
-        return components, target_path, multiplier
-
-    def _handle_load_success(
-        self,
-        components: TensorFlowComponents,
-        target_path: Path | None,
-        multiplier: float,
-        known_size_mb: float,
-    ) -> TensorFlowComponents:
-        """ロード成功時の状態更新、メモリ使用量記録、ログ出力 (サイズ計算は事前に行う)"""
-        # Size calculation and saving is done beforehand
-        final_model_size = known_size_mb if known_size_mb > 0 else 0.0
-
-        # Update state, memory usage, and log
-        self._MODEL_STATES[self.model_name] = f"on_{self.device}"  # TF device mgmt is less explicit here
-        self._MEMORY_USAGE[self.model_name] = final_model_size
-        self._MODEL_LAST_USED[self.model_name] = time.time()
-        # Change log level to DEBUG
-        logger.debug(
-            f"TensorFlowモデル '{self.model_name}' のロード後状態更新完了 (サイズ: {final_model_size / 1024:.3f}GB)"
-        )
-        # Remove config saving logic
-        # # 4. Save calculated size ...
-        # if calculated_size > 0:
-        #    ...
-
-        return components
-
-    def _handle_load_error(self, e: Exception) -> None:
-        """ロード失敗時のエラーハンドリングと状態クリーンアップ"""
-        if isinstance(e, FileNotFoundError):
-            logger.error(
-                f"TensorFlowモデル '{self.model_name}' のロードに必要なファイルが見つかりません: {e}"
-            )
-        elif isinstance(e, NotImplementedError):
-            logger.error(f"TensorFlowモデル '{self.model_name}' のロードに失敗 (未対応の操作): {e}")
-        elif isinstance(e, ValueError):
-            logger.error(f"TensorFlowモデル '{self.model_name}' のロードに失敗 (不正な値): {e}")
-        else:
-            # Check for memory errors (heuristic)
-            is_memory_error = (
-                "OOM" in str(e) or "memory" in str(e).lower() or "resource exhausted" in str(e).lower()
-            )
-            if is_memory_error:
-                error_detail = f"TensorFlowモデル '{self.model_name}' のロード中にメモリ不足が発生した可能性があります: {e}"
-                logger.error(f"メモリ不足エラー: {error_detail}")
-            else:
-                logger.error(
-                    f"TensorFlowモデル '{self.model_name}' のロード中に予期せぬエラーが発生しました: {e}",
-                    exc_info=True,
-                )
-
-        # Clean up state
-        if self.model_name in self._MODEL_STATES:
-            del self._MODEL_STATES[self.model_name]
-        if self.model_name in self._MEMORY_USAGE:
-            del self._MEMORY_USAGE[self.model_name]
-
-    def load_components(self, model_path: str, model_format: str) -> TensorFlowComponents | None:
-        """TensorFlowモデルをロード (早期サイズ計算・キャッシュ管理対応版)"""
-        # --- 0. Check if already loaded --- #
-        if self.model_name in self._MODEL_STATES:
-            logger.debug(
-                f"モデル '{self.model_name}' は既にロード済み、状態: {self._MODEL_STATES[self.model_name]}"
-            )
-            return None  # Indicate no load occurred
-
-        # --- 1. Get or Calculate Model Size --- #
-        model_size_mb = self._get_or_calculate_model_size(model_path, model_format)
-
-        # --- 2. Memory Check --- #
-        if not self._check_memory_before_load(model_size_mb):
-            # Clean up potentially saved 0.0 size
-            if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] == 0.0:
-                del ModelLoad._MODEL_SIZES[self.model_name]
-            return None  # Memory check failed
-
-        # --- 3. Clear Cache if Needed --- #
-        if model_size_mb > 0:
-            logger.debug(
-                f"TensorFlowモデル '{self.model_name}' ({model_size_mb:.2f} MB) ロード前にキャッシュクリア実行。"
-            )
-            ModelLoad._clear_cache_if_needed(self.model_name, model_size_mb)
-        else:
-            logger.warning(
-                f"TensorFlowモデル '{self.model_name}' サイズ不明または0のため、キャッシュクリアはベストエフォートになります。"
-            )
-
-        # --- 4. Load Actual Components --- #
-        model_dir: Path | None = None
-        components: TensorFlowComponents | None = None
-        target_path: Path | None = None
-        multiplier: float = 1.0
-
-        try:
-            # a. Resolve model directory (again, for actual loading)
-            model_dir = self._resolve_model_dir(model_path)
-            if model_dir is None:
-                raise FileNotFoundError(f"モデルディレクトリ再解決失敗: {model_path}")
-
-            # b. Load model based on format
-            # Note: device parameter isn't explicitly used by TF loading funcs here
-            components, target_path, multiplier = self._load_model_by_format(model_dir, model_format)
-
-            # c. Handle success (State update)
-            # Pass the target_path and multiplier determined during load, plus known size
-            components = self._handle_load_success(components, target_path, multiplier, model_size_mb)
-            return components
-
-        except (FileNotFoundError, NotImplementedError, ValueError, MemoryError, Exception) as e:
-            self._handle_load_error(e)
-            # Clean up potentially saved 0.0 size on load error
-            if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] == 0.0:
-                del ModelLoad._MODEL_SIZES[self.model_name]
-            return None
-
-
-class CLIPLoader(BaseModelLoader):
-    """CLIPモデルのローダー"""
-
-    def _calculate_clip_size_via_load(
-        self,
-        base_model: str,
-        model_path: str,
-        activation_type: str | None,
-        final_activation_type: str | None,
-    ) -> float:
-        """一時的なモデルロードによりCLIPモデルサイズを計算する (MB単位)。"""
-        logger.info(
-            f"CLIPモデル '{self.model_name}' サイズ不明。計算を試行します... (base: {base_model}, path: {model_path})"
-        )
-        calculated_size_mb = 0.0
-        temp_model_dict: dict[str, Any] | None = None
-        classifier_model: nn.Module | None = None
-        try:
-            logger.debug("サイズ計算のために一時的に CLIPモデル を CPU にロードします...")
-            with utils.suppress_logging(level="WARNING"):
-                temp_model_dict = create_clip_model(
-                    base_model=base_model,
-                    model_path=model_path,
-                    device="cpu",
-                    activation_type=activation_type,
-                    final_activation_type=final_activation_type,
-                )
-
-            if temp_model_dict and isinstance(temp_model_dict.get("model"), torch.nn.Module):
-                classifier_model = temp_model_dict["model"]
-                assert classifier_model is not None
-                calculated_size_mb = self._calculate_transformer_size(classifier_model)
-                logger.info(f"CLIPモデル '{self.model_name}' サイズ計算成功: {calculated_size_mb:.2f} MB")
+                    return None
             else:
                 logger.warning(
-                    f"一時ロードした CLIPモデル '{self.model_name}' から有効な分類器オブジェクトを取得できませんでした。"
+                    f"モデル '{self.model_name}' サイズ不明/0、キャッシュクリアはベストエフォート。"
                 )
-        except Exception as e:
-            logger.error(f"CLIPモデル '{self.model_name}' のサイズ計算中にエラー: {e}", exc_info=True)
-            calculated_size_mb = 0.0
-        finally:
-            if temp_model_dict:
-                if "model" in temp_model_dict:
-                    del temp_model_dict["model"]
-                if "clip_model" in temp_model_dict:
-                    del temp_model_dict["clip_model"]
-                if "processor" in temp_model_dict:
-                    del temp_model_dict["processor"]
-                del temp_model_dict
-                del classifier_model
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            logger.debug("一時 CLIPモデル のクリーンアップ完了。")
-        return calculated_size_mb
 
-    def _cache_and_save_calculated_size(self, calculated_size_mb: float) -> None:
-        """計算されたモデルサイズをキャッシュし、設定ファイルに保存する。"""
-        ModelLoad._MODEL_SIZES[self.model_name] = calculated_size_mb
-        if calculated_size_mb > 0:
+            # 4. Load Components
+            components: dict[str, Any] | None = None
             try:
-                size_gb = calculated_size_mb / 1024
-                config_registry.set_system_value(self.model_name, "estimated_size_gb", round(size_gb, 3))
-                config_registry.save_system_config()
-                logger.debug(
-                    f"CLIPモデル '{self.model_name}' の計算サイズ ({size_gb:.3f}GB) をシステム設定に保存しました。"
+                logger.info(
+                    f"モデル '{self.model_name}' ({model_type}) ロード開始 (デバイス: {self.device})..."
                 )
+                components = self._load_components_internal(model_path=model_path, **kwargs)
+
+                # 5. Handle Success
+                ModelLoad._update_model_state(self.model_name, self.device, "loaded", model_size_mb)
+                logger.info(
+                    f"モデル '{self.model_name}' ({model_type}) ロード成功 (デバイス: {self.device})。"
+                )
+                return components
+
+            except Exception as e:
+                ModelLoad._handle_load_error(self.model_name, e)
+                return None
+
+    # --- Internal Loader Implementations ---
+
+    class _TransformersLoader(_BaseLoaderInternal):
+        """Internal loader for Transformers models."""
+
+        def _calculate_specific_size(self, model_path: str, **kwargs) -> float:
+            logger.debug(f"一時ロードによる Transformer サイズ計算開始: {model_path}")
+            calculated_size_mb = 0.0
+            temp_model = None
+            try:
+                with utils.suppress_logging(level="WARNING"):
+                    temp_model = AutoModelForVision2Seq.from_pretrained(model_path).to("cpu")
+                if isinstance(temp_model, torch.nn.Module):
+                    calculated_size_mb = ModelLoad._calculate_transformer_size_mb(temp_model)
+            except Exception as e:
+                logger.error(f"一時ロード計算エラー ({self.model_name}): {e}", exc_info=True)
+            finally:
+                if temp_model:
+                    del temp_model
+                    gc.collect()
+            logger.debug(f"一時ロード Transformer サイズ計算完了: {calculated_size_mb:.2f} MB")
+            return calculated_size_mb
+
+        @override
+        def _load_components_internal(self, model_path: str, **kwargs) -> TransformersComponents:
+            processor = AutoProcessor.from_pretrained(model_path)
+            model = AutoModelForVision2Seq.from_pretrained(model_path).to(self.device)
+            return {"model": model, "processor": processor}
+
+    class _TransformersPipelineLoader(_BaseLoaderInternal):
+        """Internal loader for Transformers Pipelines."""
+
+        def _calculate_specific_size(self, model_path: str, **kwargs) -> float:
+            task = cast(str, kwargs.get("task"))
+            if not task:
+                return 0.0  # Task is required
+
+            logger.debug(f"一時ロードによる Pipeline サイズ計算開始: task={task}, path={model_path}")
+            calculated_size_mb = 0.0
+            temp_pipeline = None
+            try:
+                with utils.suppress_logging(level="WARNING"):
+                    temp_pipeline = pipeline(task, model=model_path, device="cpu", batch_size=1)
+                if hasattr(temp_pipeline, "model") and isinstance(temp_pipeline.model, torch.nn.Module):
+                    calculated_size_mb = ModelLoad._calculate_transformer_size_mb(temp_pipeline.model)
+            except Exception as e:
+                logger.error(f"一時ロード Pipeline 計算エラー ({self.model_name}): {e}", exc_info=True)
+            finally:
+                if temp_pipeline:
+                    del temp_pipeline
+                    gc.collect()
+            logger.debug(f"一時ロード Pipeline サイズ計算完了: {calculated_size_mb:.2f} MB")
+            return calculated_size_mb
+
+        @override
+        def _load_components_internal(self, model_path: str, **kwargs) -> TransformersPipelineComponents:
+            task = cast(str, kwargs.get("task"))
+            batch_size = cast(int, kwargs.get("batch_size"))
+            if not task or not batch_size:
+                raise ValueError("Pipeline loader requires 'task' and 'batch_size' kwargs.")
+
+            pipeline_obj: Pipeline = pipeline(
+                task, model=model_path, device=self.device, batch_size=batch_size
+            )
+            return {"pipeline": pipeline_obj}
+
+    class _ONNXLoader(_BaseLoaderInternal):
+        """Internal loader for ONNX models."""
+
+        def _resolve_model_path_internal(self, model_path: str) -> tuple[Path | None, Path | None]:
+            """Resolves ONNX model path and associated CSV path."""
+            try:
+                # TODO: Replace utils.download_onnx_tagger_model if possible
+                csv_path, model_repo_or_path_obj = utils.download_onnx_tagger_model(model_path)
+                if model_repo_or_path_obj is None:
+                    logger.error(f"ONNX モデルパス/リポジトリ解決失敗: {model_path}")
+                    return None, None
+                logger.debug(f"ONNXモデルパス解決: {model_repo_or_path_obj}")
+                return csv_path, model_repo_or_path_obj
+            except Exception as e:
+                logger.error(f"ONNXモデルパス解決中にエラー ({model_path}): {e}", exc_info=True)
+                return None, None
+
+        def _calculate_specific_size(self, model_path: str, **kwargs) -> float:
+            _, resolved_path = self._resolve_model_path_internal(model_path)
+            if resolved_path and resolved_path.is_file():
+                # Use multiplier? Original used 1.5. Keep for now.
+                return ModelLoad._calculate_file_size_mb(resolved_path) * 1.5
+            elif resolved_path and resolved_path.is_dir():
+                logger.warning(
+                    f"ONNX パス {resolved_path} はディレクトリです。サイズ計算はベストエフォート。"
+                )
+                # Calculate directory size * multiplier? Or just file size?
+                # Let's try finding the largest .onnx file in the dir.
+                onnx_files = list(resolved_path.glob("*.onnx"))
+                if onnx_files:
+                    largest_onnx = max(onnx_files, key=lambda p: p.stat().st_size)
+                    return ModelLoad._calculate_file_size_mb(largest_onnx) * 1.5
+                else:
+                    return ModelLoad._calculate_dir_size_mb(resolved_path) * 1.5  # Fallback to dir size
+            else:
+                logger.warning(f"ONNXモデル有効パス見つからず ({resolved_path})。サイズ計算スキップ。")
+                return 0.0
+
+        @override
+        def _load_components_internal(self, model_path: str, **kwargs) -> ONNXComponents:
+            csv_path, resolved_model_path = self._resolve_model_path_internal(model_path)
+            if resolved_model_path is None or csv_path is None:
+                raise FileNotFoundError(f"ONNXモデルパス解決失敗: {model_path}")
+
+            logger.debug("ONNXキャッシュクリア試行...")
+            gc.collect()
+            if self.device.startswith("cuda") and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            providers = (
+                ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                if self.device == "cuda" and "CUDAExecutionProvider" in ort.get_available_providers()
+                else ["CPUExecutionProvider"]
+            )
+            logger.debug(f"ONNX実行プロバイダー: {providers}")
+
+            logger.info(
+                f"ONNXモデル '{self.model_name}' ロード中: '{resolved_model_path}' on {providers}... "
+            )
+            session = ort.InferenceSession(str(resolved_model_path), providers=providers)
+            logger.info(f"ONNXモデル '{self.model_name}' ロード成功。")
+
+            return {"session": session, "csv_path": csv_path}
+
+    class _TensorFlowLoader(_BaseLoaderInternal):
+        """Internal loader for TensorFlow models."""
+
+        def _resolve_model_dir_internal(self, model_path: str) -> Path | None:
+            try:
+                # TODO: Replace utils.load_file if possible
+                model_dir_obj = utils.load_file(model_path)
+                if model_dir_obj is None or not model_dir_obj.is_dir():
+                    logger.error(f"有効な TensorFlow モデルディレクトリが見つかりません: {model_path}")
+                    return None
+                return model_dir_obj
+            except Exception as e:
+                logger.error(f"TFモデルディレクトリ解決中にエラー ({model_path}): {e}", exc_info=True)
+                return None
+
+        def _get_tf_calc_params(self, model_dir: Path, model_format: str) -> tuple[Path, float]:
+            """Get path and multiplier for TF size calculation."""
+            if model_format == "h5":
+                h5_files = list(model_dir.glob("*.h5"))
+                if not h5_files:
+                    raise FileNotFoundError(f"H5ファイルが見つかりません: {model_dir}")
+                return h5_files[0], 1.2  # Path to .h5 file
+            elif model_format == "saved_model":
+                if (
+                    not (model_dir / "saved_model.pb").exists()
+                    and not (model_dir / "saved_model.pbtxt").exists()
+                ):
+                    raise FileNotFoundError(f"有効な SavedModel ディレクトリではありません: {model_dir}")
+                return model_dir, 1.3  # Path to directory
+            elif model_format == "pb":
+                raise NotImplementedError(".pb 単体フォーマットのサイズ計算は未サポート。")
+            else:
+                raise ValueError(f"未対応のTFフォーマット: {model_format}")
+
+        def _calculate_specific_size(self, model_path: str, **kwargs) -> float:
+            model_format = cast(str, kwargs.get("model_format"))
+            if not model_format:
+                return 0.0
+
+            model_dir = self._resolve_model_dir_internal(model_path)
+            if not model_dir:
+                return 0.0
+
+            try:
+                target_path, multiplier = self._get_tf_calc_params(model_dir, model_format)
+                if target_path.is_file():
+                    return ModelLoad._calculate_file_size_mb(target_path) * multiplier
+                elif target_path.is_dir():
+                    # Calculate based on directory size
+                    return ModelLoad._calculate_dir_size_mb(target_path) * multiplier
+                else:
+                    return 0.0
+            except (FileNotFoundError, NotImplementedError, ValueError) as e:
+                logger.error(f"TFモデル '{self.model_name}' サイズ計算エラー: {e}", exc_info=False)
+                return 0.0
             except Exception as e:
                 logger.error(
-                    f"CLIPモデル '{self.model_name}' のサイズをシステム設定に保存中にエラー: {e}",
-                    exc_info=True,
+                    f"TFモデル '{self.model_name}' サイズ計算中に予期せぬエラー: {e}", exc_info=True
                 )
+                return 0.0
 
-        return calculated_size_mb
+        @override
+        def _load_components_internal(self, model_path: str, **kwargs) -> TensorFlowComponents:
+            model_format = cast(str, kwargs.get("model_format"))
+            if not model_format:
+                raise ValueError("TensorFlow loader requires 'model_format' kwarg.")
 
-    def _create_clip_model_internal(
-        self,
-        base_model: str,
-        model_path: str,
-        activation_type: str | None,
-        final_activation_type: str | None,
-    ) -> CLIPComponents | None:
-        """外部の create_clip_model を呼び出し、基本的な検証を行う"""
-        logger.info(
-            f"CLIPモデル '{self.model_name}' のロードを開始します (ベース: {base_model}, パス: {model_path})... "
-        )
-        # Call create_clip_model which returns dict[str, Any] | None
-        model_dict_any = create_clip_model(
-            base_model=base_model,
-            model_path=model_path,
-            device=self.device,
-            activation_type=activation_type,
-            final_activation_type=final_activation_type,
-        )
+            model_dir = self._resolve_model_dir_internal(model_path)
+            if model_dir is None:
+                raise FileNotFoundError(f"TensorFlow モデルディレクトリ解決失敗: {model_path}")
 
-        if model_dict_any is None:
-            # Error logged within create_clip_model
-            return None
+            model_instance: tf.Module | tf.keras.Model | None = None
+            if model_format == "h5":
+                h5_files = list(model_dir.glob("*.h5"))
+                if not h5_files:
+                    raise FileNotFoundError(f"H5ファイルが見つかりません: {model_dir}")
+                target_path = h5_files[0]
+                logger.info(f"H5モデルロード中: {target_path}")
+                model_instance = tf.keras.models.load_model(target_path, compile=False)
+            elif model_format == "saved_model":
+                target_path = model_dir
+                logger.info(f"SavedModelロード中: {target_path}")
+                if (
+                    not (target_path / "saved_model.pb").exists()
+                    and not (target_path / "saved_model.pbtxt").exists()
+                ):
+                    raise FileNotFoundError(f"有効な SavedModel ディレクトリではありません: {target_path}")
+                model_instance = tf.saved_model.load(str(target_path))
+            elif model_format == "pb":
+                raise NotImplementedError("Direct loading from .pb is not supported.")
+            else:
+                raise ValueError(f"未対応のTensorFlowモデルフォーマット: {model_format}")
 
-        # --- Type Safety Check & Cast ---
-        # Check essential keys and their types before casting to TypedDict
-        if not isinstance(model_dict_any.get("model"), torch.nn.Module):
-            logger.error(
-                f"CLIP Loader: create_clip_model の戻り値の 'model' が torch.nn.Module ではありません (型: {type(model_dict_any.get('model'))})。"
+            if model_instance is None:
+                raise ModelLoadError("TensorFlowモデルインスタンスのロード失敗。")
+
+            return {"model_dir": model_dir, "model": model_instance}
+
+    class _CLIPLoader(_BaseLoaderInternal):
+        """Internal loader for CLIP-based models."""
+
+        def _infer_classifier_structure(self, state_dict: dict[str, Any]) -> list[int]:
+            """state_dictから分類器ヘッドの隠れ層サイズを推測する。"""
+            hidden_features = []
+            current_layer = 0
+            while True:
+                weight_key = f"layers.{current_layer}.weight"
+                bias_key = f"layers.{current_layer}.bias"  # bias_keyも確認した方が良い
+                # Look for the next potential layer if current is missing
+                if weight_key not in state_dict or bias_key not in state_dict:
+                    found_next = False
+                    # Look ahead a few layers in case numbering is sparse
+                    for lookahead in range(1, 5):
+                        next_weight_key = f"layers.{current_layer + lookahead}.weight"
+                        if next_weight_key in state_dict:
+                            # Found a subsequent layer, update current_layer index
+                            current_layer += lookahead
+                            weight_key = next_weight_key
+                            found_next = True
+                            break
+                    if not found_next:
+                        # No more layers found within lookahead range
+                        break
+
+                # Check again if the (potentially updated) weight_key exists
+                if weight_key in state_dict:
+                    # Assuming the shape[0] of the weight tensor gives the output size of that layer
+                    hidden_features.append(state_dict[weight_key].shape[0])
+                    current_layer += 1  # Move to check the next sequential layer number
+                else:
+                    # Should not happen if found_next logic worked, but as safety break
+                    break
+
+            # The last feature size is the output layer, hidden sizes are all before that
+            hidden_sizes = hidden_features[:-1] if hidden_features else []
+            if not hidden_sizes:  # Use default if inference failed
+                logger.warning(
+                    f"CLIP分類器 '{self.model_name}' 構造推測失敗。デフォルト [1024, 128, 64, 16] 使用。"
+                )
+                hidden_sizes = [1024, 128, 64, 16]
+            logger.info(f"推測された隠れ層サイズ: {hidden_sizes}")
+            return hidden_sizes
+
+        def _load_base_clip_components(self, base_model: str) -> tuple[CLIPProcessor, CLIPModel, int]:
+            """CLIP プロセッサとベースモデルをロードし、特徴量次元を返す"""
+            logger.debug(f"CLIPプロセッサロード中: {base_model}")
+            clip_processor = CLIPProcessor.from_pretrained(base_model)
+            logger.debug(f"CLIPモデルロード中: {base_model} on {self.device}")
+            clip_model = CLIPModel.from_pretrained(base_model).to(self.device).eval()  # type: ignore
+            input_size = clip_model.config.projection_dim
+            logger.debug(f"CLIPモデル {base_model} 特徴量次元: {input_size}")
+            return clip_processor, clip_model, input_size
+
+        def _create_and_load_classifier_head(
+            self,
+            input_size: int,
+            hidden_sizes: list[int],
+            state_dict: dict[str, Any],
+            activation_type: str | None,
+            final_activation_type: str | None,
+            model_path_for_log: str,  # Logging purpose
+        ) -> nn.Module:
+            """分類器ヘッドを作成し、重みをロードして返す"""
+            activation_map = {"ReLU": nn.ReLU, "GELU": nn.GELU, "Sigmoid": nn.Sigmoid, "Tanh": nn.Tanh}
+            use_activation = activation_type is not None
+            activation_func = (
+                activation_map.get(activation_type, nn.ReLU)
+                if use_activation and activation_type in activation_map
+                else nn.ReLU
             )
-            return None
-        if not isinstance(model_dict_any.get("processor"), CLIPProcessor):
-            logger.error(
-                f"CLIP Loader: create_clip_model の戻り値の 'processor' が CLIPProcessor ではありません (型: {type(model_dict_any.get('processor'))})。"
+            use_final_activation = final_activation_type is not None
+            final_activation_func = (
+                activation_map.get(final_activation_type, nn.Sigmoid)
+                if use_final_activation and final_activation_type in activation_map
+                else nn.Sigmoid
             )
-            return None
-        if not isinstance(model_dict_any.get("clip_model"), CLIPModel):
-            logger.error(
-                f"CLIP Loader: create_clip_model の戻り値の 'clip_model' が CLIPModel ではありません (型: {type(model_dict_any.get('clip_model'))})。"
+
+            logger.info("分類器モデル初期化...")
+            classifier_head = Classifier(
+                input_size=input_size,
+                hidden_sizes=hidden_sizes,
+                output_size=1,
+                use_activation=use_activation,
+                activation=activation_func,
+                use_final_activation=use_final_activation,
+                final_activation=final_activation_func,
             )
-            return None
+            classifier_head.load_state_dict(state_dict, strict=False)
+            classifier_head = classifier_head.to(self.device).eval()
+            logger.debug(f"CLIP分類器ヘッド '{model_path_for_log}' ロード完了 (デバイス: {self.device})")
+            return classifier_head
 
-        # If checks pass, cast the dictionary to the specific TypedDict
-        model_dict: CLIPComponents = cast(CLIPComponents, model_dict_any)
-        return model_dict
-
-    def _handle_load_success(self, model_dict: CLIPComponents, known_size_mb: float) -> CLIPComponents:
-        """ロード成功時の状態更新、メモリ使用量記録、ログ出力 (サイズ計算は事前に行う)"""
-        # Size calculation and saving is done beforehand
-        final_model_size = known_size_mb if known_size_mb > 0 else 0.0
-
-        # Update state, memory usage, and log
-        self._MODEL_STATES[self.model_name] = f"on_{self.device}"
-        self._MEMORY_USAGE[self.model_name] = final_model_size
-        self._MODEL_LAST_USED[self.model_name] = time.time()
-        # Change log level to DEBUG
-        logger.debug(
-            f"CLIPモデル '{self.model_name}' のロード後状態更新完了 (デバイス: {self.device}, サイズ: {final_model_size / 1024:.3f}GB)"
-        )
-        # Remove config saving logic
-        # # 4. Save calculated size ...
-        # if calculated_size > 0:
-        #    ...
-
-        return model_dict
-
-    def _handle_memory_error(self, e: Exception) -> None:
-        """メモリ関連エラー発生時の処理 (CLIP用)"""
-        error_detail = f"CLIPモデル '{self.model_name}' のロード/作成中にメモリ関連エラーが発生しました (デバイス: {self.device})。詳細: {e}"
-        logger.error(f"メモリ不足エラー: {error_detail}")
-        if (
-            isinstance(e, torch.cuda.OutOfMemoryError)
-            and self.device.startswith("cuda")
-            and torch.cuda.is_available()
-        ):
+        # TODO: Refactor create_clip_model structure inference logic (use config).
+        def _create_clip_model_internal(
+            self,
+            base_model: str,
+            model_path: str,  # Path to classifier head weights
+            activation_type: str | None,
+            final_activation_type: str | None,
+        ) -> CLIPComponents | None:
+            """Creates the CLIP processor, base model, and classifier head."""
             try:
-                logger.error(f"CUDA メモリサマリー ({self.device}):")
-                logger.error(torch.cuda.memory_summary(device=self.device, abbreviated=True))
-            except Exception as mem_e:
-                logger.error(f"CUDAメモリ情報取得失敗: {mem_e}")
-        # Clean up state
-        if self.model_name in self._MODEL_STATES:
-            del self._MODEL_STATES[self.model_name]
-        if self.model_name in self._MEMORY_USAGE:
-            del self._MEMORY_USAGE[self.model_name]
+                # 1. Load Base CLIP Model and Processor
+                clip_processor, clip_model, input_size = self._load_base_clip_components(base_model)
 
-    def _handle_generic_error(self, e: Exception) -> None:
-        """その他の予期せぬエラー発生時の処理 (CLIP用)"""
-        logger.error(
-            f"CLIPモデル '{self.model_name}' のロード/作成中に予期せぬエラーが発生しました: {e}",
-            exc_info=True,
-        )
-        # Clean up state
-        if self.model_name in self._MODEL_STATES:
-            del self._MODEL_STATES[self.model_name]
-        if self.model_name in self._MEMORY_USAGE:
-            del self._MEMORY_USAGE[self.model_name]
+                # 2. Load Classifier Head Weights
+                logger.debug(f"分類器ヘッド重みロード中: {model_path}")
+                local_path = utils.load_file(model_path)
+                if local_path is None:
+                    logger.error(f"分類器ヘッドパス '{model_path}' 解決失敗。")
+                    return None
+                state_dict = torch.load(local_path, map_location=self.device)
+                logger.debug("重みロード完了、構造推測開始...")
 
-    def _prepare_load(
-        self,
-        base_model: str,
-        model_path: str,
-        activation_type: str | None,
-        final_activation_type: str | None,
-    ) -> float | None:
-        """ロード前の準備（ロード済みチェック、サイズ取得、メモリチェック、キャッシュクリア）を行い、モデルサイズ(MB)またはNoneを返す。"""
-        # 0. Check if already loaded
-        if self.model_name in self._MODEL_STATES:
-            logger.debug(
-                f"モデル '{self.model_name}' は既にロード済み、状態: {self._MODEL_STATES[self.model_name]}"
-            )
-            return None  # Indicate no load needed
+                # 3. Infer Classifier Structure
+                hidden_sizes_for_classifier = self._infer_classifier_structure(state_dict)
 
-        # 1. Get Model Size (Cache -> Config -> Calculate)
-        model_size_mb: float | None = None
-        # 1a. Check static cache
-        if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] > 0:
-            model_size_mb = ModelLoad._MODEL_SIZES[self.model_name]
-            logger.debug(
-                f"CLIPモデル '{self.model_name}' サイズを静的キャッシュから取得: {model_size_mb:.2f} MB"
-            )
-        # 1b. Check config if not in static cache
-        elif (config_size := self.get_model_size()) is not None and config_size > 0:
-            model_size_mb = config_size
-            ModelLoad._MODEL_SIZES[self.model_name] = model_size_mb  # Cache config value
-            logger.debug(f"CLIPモデル '{self.model_name}' サイズを Config から取得: {model_size_mb:.2f} MB")
-        # 1c. Calculate if not in cache or config
-        else:
-            calculated_size = self._calculate_clip_size_via_load(
-                base_model, model_path, activation_type, final_activation_type
-            )
-            self._cache_and_save_calculated_size(calculated_size)  # Cache and save calculated value
-            model_size_mb = calculated_size  # Use calculated size (might be 0.0)
-
-        # Ensure model_size_mb is float for subsequent checks, default to 0.0 if None
-        effective_model_size = model_size_mb if model_size_mb is not None else 0.0
-
-        # 2. Memory Check
-        if not self._check_memory_before_load(effective_model_size):
-            # Clean up potentially saved 0.0 size if calc happened but mem check failed
-            if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] == 0.0:
-                del ModelLoad._MODEL_SIZES[self.model_name]
-            return None  # Memory check failed
-
-        # 3. Clear Cache if Needed (Use effective_model_size)
-        if effective_model_size > 0:
-            logger.debug(
-                f"CLIPモデル '{self.model_name}' ({effective_model_size:.2f} MB) ロード前にキャッシュクリア実行。"
-            )
-            ModelLoad._clear_cache_if_needed(self.model_name, effective_model_size)
-        else:
-            logger.warning(
-                f"CLIPモデル '{self.model_name}' サイズ不明または0のため、キャッシュクリアはベストエフォートになります。"
-            )
-
-        # Return the effective size if > 0, otherwise None
-        return effective_model_size if effective_model_size > 0 else None
-
-    def load_components(
-        self,
-        base_model: str,
-        model_path: str,
-        activation_type: str | None = None,
-        final_activation_type: str | None = None,
-    ) -> CLIPComponents | None:
-        """CLIPモデルをロード (早期サイズ計算・キャッシュ管理対応版) - リファクタリング版"""
-        # --- Prepare Load (Steps 0-3) ---
-        model_size_mb = self._prepare_load(base_model, model_path, activation_type, final_activation_type)
-
-        if model_size_mb is None:
-            # Preparation failed (already loaded, mem check failed, etc.)
-            # Errors/logs handled within _prepare_load or its helpers
-            return None
-
-        # --- Load Actual Components (Steps 4-7) ---
-        components: CLIPComponents | None = None
-        try:
-            # Create CLIP model components using the external function on the target device
-            model_dict = self._create_clip_model_internal(
-                base_model, model_path, activation_type, final_activation_type
-            )
-            if model_dict is None:
-                # Error already logged in helper
-                self._handle_generic_error(
-                    Exception(f"_create_clip_model_internal for {self.model_name} returned None")
+                # 4. Create and Load Classifier Head
+                classifier_head = self._create_and_load_classifier_head(
+                    input_size=input_size,
+                    hidden_sizes=hidden_sizes_for_classifier,
+                    state_dict=state_dict,
+                    activation_type=activation_type,
+                    final_activation_type=final_activation_type,
+                    model_path_for_log=model_path,
                 )
-                return None  # Creation failed
 
-            # --- 5. Handle success (state update) --- #
-            components = self._handle_load_success(model_dict, model_size_mb)
+                # 5. Type safety checks
+                if not isinstance(classifier_head, nn.Module):
+                    raise TypeError("Classifier head not a Module")
+                if not isinstance(clip_processor, CLIPProcessor):
+                    raise TypeError("Processor not a CLIPProcessor")
+                if not isinstance(clip_model, CLIPModel):
+                    raise TypeError("Base model not a CLIPModel")
+
+                result: CLIPComponents = {
+                    "model": classifier_head,
+                    "processor": clip_processor,
+                    "clip_model": clip_model,
+                }
+                return result
+
+            except FileNotFoundError as e:
+                logger.error(f"CLIPモデル作成エラー: ファイル未検出: {e}")
+                return None
+            except KeyError as e:
+                logger.error(f"CLIPモデル作成エラー: state_dict キーエラー: {e}")
+                return None
+            except Exception as e:
+                logger.error(
+                    f"CLIPモデル作成中に予期せぬエラー ({base_model}/{model_path}): {e}", exc_info=True
+                )
+                return None
+
+        def _calculate_specific_size(self, model_path: str, **kwargs) -> float:
+            """Calculate size by temporarily loading CLIP model + head."""
+            base_model = cast(str, kwargs.get("base_model"))
+            activation_type = cast(str | None, kwargs.get("activation_type"))
+            final_activation_type = cast(str | None, kwargs.get("final_activation_type"))
+            if not base_model:
+                return 0.0
+
+            logger.debug(f"一時ロードによる CLIP サイズ計算開始: base={base_model}, head={model_path}")
+            calculated_size_mb = 0.0
+            temp_components: CLIPComponents | None = None
+            try:
+                with utils.suppress_logging(level="WARNING"):
+                    # Temporarily create on CPU
+                    temp_components = self._create_clip_model_internal(
+                        base_model,
+                        model_path,
+                        activation_type,
+                        final_activation_type,
+                        # Override device to CPU for calculation
+                        # Need to modify _create_clip_model_internal to accept device override or create on CPU first
+                        # For now, let's assume _create_clip_model_internal handles CPU creation if device='cpu'
+                        # self.device = 'cpu' # This would modify the instance state - bad.
+                        # --> Let's call helper directly with device='cpu'
+                    )
+                    # Need a way to call the helper with device='cpu' without modifying self.device
+                    # Simplest for now: create a temporary instance or pass device explicitly if helper allows
+                    temp_helper_instance = ModelLoad._CLIPLoader(self.model_name, "cpu")  # Temp instance
+                    temp_components = temp_helper_instance._create_clip_model_internal(
+                        base_model, model_path, activation_type, final_activation_type
+                    )
+
+                if temp_components and isinstance(temp_components.get("model"), torch.nn.Module):
+                    # Calculate size of the classifier head only? Or base + head?
+                    # Original calculation seemed to be based on the classifier head. Let's stick to that.
+                    classifier_model = temp_components["model"]
+                    calculated_size_mb = ModelLoad._calculate_transformer_size_mb(classifier_model)
+                else:
+                    logger.warning(f"一時ロード CLIP '{self.model_name}' から有効な分類器取得失敗。")
+            except Exception as e:
+                logger.error(f"一時ロード CLIP 計算エラー ({self.model_name}): {e}", exc_info=True)
+            finally:
+                if temp_components:
+                    # Manual cleanup of components in the temporary dict
+                    if "model" in temp_components:
+                        del temp_components["model"]
+                    if "processor" in temp_components:
+                        del temp_components["processor"]
+                    if "clip_model" in temp_components:
+                        del temp_components["clip_model"]
+                    del temp_components
+                    del temp_helper_instance  # Delete the temporary instance
+                    gc.collect()
+            logger.debug(f"一時ロード CLIP サイズ計算完了: {calculated_size_mb:.2f} MB")
+            return calculated_size_mb
+
+        @override
+        def _load_components_internal(self, model_path: str, **kwargs) -> CLIPComponents:
+            base_model = cast(str, kwargs.get("base_model"))
+            activation_type = cast(str | None, kwargs.get("activation_type"))
+            final_activation_type = cast(str | None, kwargs.get("final_activation_type"))
+            if not base_model:
+                raise ValueError("CLIP loader requires 'base_model' kwarg.")
+
+            components = self._create_clip_model_internal(
+                base_model, model_path, activation_type, final_activation_type
+            )
+            if components is None:
+                raise ModelLoadError(f"CLIPモデル '{self.model_name}' のコンポーネント作成失敗。")
             return components
 
-        except (torch.cuda.OutOfMemoryError, MemoryError, OSError) as e:
-            # Specific memory/OS error handling
-            if isinstance(e, OSError) and "allocate memory" not in str(e).lower():
-                self._handle_generic_error(e)
-            else:
-                self._handle_memory_error(e)
-            # Clean up potentially saved 0.0 size on load error
-            if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] == 0.0:
-                del ModelLoad._MODEL_SIZES[self.model_name]
-            return None
-        except Exception as e:
-            # Generic error handling
-            self._handle_generic_error(e)
-            # Clean up potentially saved 0.0 size on load error
-            if self.model_name in ModelLoad._MODEL_SIZES and ModelLoad._MODEL_SIZES[self.model_name] == 0.0:
-                del ModelLoad._MODEL_SIZES[self.model_name]
-            return None
-
-    def _calculate_transformer_size(self, model: torch.nn.Module) -> float:
-        """Transformerモデルのメモリ使用量を計算(MB単位)"""
-        try:
-            param_size = sum(p.numel() * p.element_size() for p in model.parameters()) / (1024 * 1024)
-            buffer_size = sum(b.numel() * b.element_size() for b in model.buffers()) / (1024 * 1024)
-            return param_size + buffer_size
-        except Exception as e:
-            logger.error(f"CLIPモデルサイズ計算エラー: {e}")
-            return 0.0
-
-
-class ModelLoad:
-    """
-    ModelLoadクラスの実装
-
-    このモジュールは、モデルのロード、メモリ管理、およびキャッシュ制御を担当します。
-    二階層のローダー構造により、各モデルタイプの特性に応じた効率的なモデル管理を実現します。
-    """
-
-    _MODEL_STATES: ClassVar[dict[str, str]] = {}
-    _MEMORY_USAGE: ClassVar[dict[str, float]] = {}
-    _MODEL_LAST_USED: ClassVar[dict[str, float]] = {}
-    _CACHE_RATIO: ClassVar[float] = 0.5
-    # _MODEL_SIZES is now the single source of truth for cached sizes
-    _MODEL_SIZES: ClassVar[dict[str, float]] = {}  # Defined static cache here
+    # --- Public Static Methods (Interface Preservation) ---
 
     @staticmethod
     def get_model_size(model_name: str) -> float | None:
-        """Config からモデルの推定メモリ使用量 (MB単位) を取得。なければ None を返す。"""
-        # This method now ONLY checks the config via the registry.
-        # Calculation is handled elsewhere.
-        try:
-            estimated_size_gb_any = config_registry.get(model_name, "estimated_size_gb")
-
-            if estimated_size_gb_any is None:
-                # logger.warning( # No warning here, expected case
-                #     f"モデル '{model_name}' の estimated_size_gb が config に見つかりません。"
-                # )
-                return None  # Return None if not found in config
-
-            # Attempt conversion, handle potential error
-            try:
-                estimated_size_gb = float(estimated_size_gb_any)
-                size_mb = estimated_size_gb * 1024
-                # No need to cache here (_MODEL_SIZES is static, handled elsewhere)
-                # self._MODEL_SIZES[model_name] = size_mb
-                logger.debug(
-                    f"モデル '{model_name}' のサイズを config から読み込みました: {size_mb / 1024:.3f}GB"
-                )
-                return size_mb
-            except (ValueError, TypeError):
-                logger.error(
-                    f"モデル '{model_name}' の config 内の estimated_size_gb 値 '{estimated_size_gb_any}' を float に変換できません。"
-                )
-                return None  # Return None if value is invalid
-
-        except KeyError:
-            # Model might not be in the config at all
-            # logger.debug(f"モデル '{model_name}' が config に存在しません。")
-            return None
-        except Exception as e:
-            logger.error(
-                f"モデル '{model_name}' の config サイズ取得中に予期せぬエラー: {e}", exc_info=True
-            )
-            return None
+        """Config からモデルの推定メモリ使用量 (MB単位) を取得。"""
+        return ModelLoad._get_model_size_from_config(model_name)
 
     @staticmethod
     def get_max_cache_size() -> float:
         """システムの最大メモリに基づいてキャッシュサイズを計算"""
-        base_loader = BaseModelLoader("", "cpu")
-        return base_loader.get_max_cache_size()
-
-    @staticmethod
-    def _clear_cache_if_needed(model_name: str, model_size: float) -> None:
-        """必要に応じて古いモデルをキャッシュから削除"""
-        base_loader = BaseModelLoader(model_name, "cpu")
-        base_loader._clear_cache_if_needed(model_size)
-
-    @staticmethod
-    def _prepare_cache_for_cpu(model_name: str) -> float | None:
-        """CPUキャッシュの準備: サイズ取得と必要に応じたキャッシュクリア"""
-        model_size = ModelLoad.get_model_size(model_name)
-        if model_size is None or model_size <= 0:
-            logger.warning(
-                f"モデル '{model_name}' のサイズが不明または無効 ({model_size}) なため、"
-                f"キャッシュサイズチェックをスキップしてキャッシュ試行します。"
-            )
-            # Return None to indicate unknown/invalid size
-            return None
-        # Now we know model_size is a valid float > 0
-        else:
-            # Proceed only if model_size is a valid float > 0
-            model_size_gb = model_size / 1024
-            logger.info(f"モデル '{model_name}' の推定サイズ: {model_size_gb:.3f}GB")
-            # Pass the valid float to _clear_cache_if_needed
-            ModelLoad._clear_cache_if_needed(model_name, model_size)
-            return model_size
-
-    @staticmethod
-    def _move_components_to_cpu(components: dict[str, Any]) -> None:
-        """コンポーネントをCPUに移動させる"""
-        for component_name, component in components.items():
-            if component_name == "pipeline":
-                if hasattr(component, "model") and hasattr(component.model, "to"):
-                    component.model.to("cpu")
-            elif hasattr(component, "to") and not isinstance(
-                component,
-                str | Path | int | float | bool | None,  # Avoid simple types
-            ):
-                # Check if it's already on CPU to avoid unnecessary moves/warnings
-                # This requires checking the device attribute if available
-                current_device = getattr(component, "device", None)
-                if current_device and str(current_device) == "cpu":
-                    continue  # Already on CPU
-                component.to("cpu")
-            # Add specific handling for ONNX sessions or TF models if needed
-            # (Currently, they don't have a standard `.to('cpu')` method)
-            # For TF, models are often implicitly on CPU unless configured otherwise
-            # For ONNX, the session provider determines the device
-
-    @staticmethod
-    def _update_state_after_cpu_cache(model_name: str, model_size: float | None) -> None:
-        """CPUキャッシュ成功後の状態更新とログ出力"""
-        ModelLoad._MODEL_STATES[model_name] = "on_cpu"
-        known_size = model_size if model_size and model_size > 0 else 0.0
-        if known_size > 0:
-            ModelLoad._MEMORY_USAGE[model_name] = known_size
-        else:
-            # If size became known during load but wasn't passed, re-fetch?
-            # Or simply don't record usage if size is unknown.
-            # Current: Don't record if size is 0 or None.
-            if model_name in ModelLoad._MEMORY_USAGE:
-                # Remove potentially stale entry if size is now unknown
-                del ModelLoad._MEMORY_USAGE[model_name]
-
-        ModelLoad._MODEL_LAST_USED[model_name] = time.time()
-
-        # Remove redundant max_cache calculation for logging
-        # max_cache = ModelLoad.get_max_cache_size()
-        current_usage = sum(ModelLoad._MEMORY_USAGE.values())
-        size_log = f"{known_size / 1024:.3f}GB" if known_size > 0 else "不明"
-        logger.info(
-            f"モデル '{model_name}' をキャッシュしました "
-            f"(サイズ: {size_log}, "
-            f"現在のキャッシュ使用量: {current_usage / 1024:.3f}GB)"  # Removed max_cache display
-            # f"現在のキャッシュ使用量: {current_usage / 1024:.3f}GB/{max_cache / 1024:.3f}GB)"
-        )
+        return ModelLoad._get_max_cache_size()
 
     @staticmethod
     def cache_to_main_memory(model_name: str, components: dict[str, Any]) -> dict[str, Any]:
-        """メモリ管理を行いながらモデルをキャッシュ (複雑度削減版)"""
-        if model_name in ModelLoad._MODEL_STATES and ModelLoad._MODEL_STATES[model_name] == "on_cpu":
-            logger.debug(f"モデル '{model_name}' は既にCPUにあります。")
-            ModelLoad._MODEL_LAST_USED[model_name] = time.time()
-            return components  # Return unmodified components
+        """モデルコンポーネントをメインメモリ (CPU) にキャッシュ。"""
+        state = ModelLoad._get_model_state(model_name)
+        if state == "on_cpu":
+            logger.debug(f"モデル '{model_name}' は既にCPUキャッシュにあります。")
+            ModelLoad._update_model_state(model_name)  # Update last used time
+            return components
 
-        # Prepare cache (get size, clear if needed)
-        model_size = ModelLoad._prepare_cache_for_cpu(model_name)
-        # model_size can be float > 0 or 0.0 if unknown
+        model_size = ModelLoad._MODEL_SIZES.get(model_name, 0.0)
+        can_cache = True
+        if model_size <= 0:
+            logger.warning(f"モデル '{model_name}' サイズ不明/0、CPUキャッシュ前の容量確認スキップ。")
+        else:
+            # Check if space is available BEFORE moving
+            # Use a different check: Does current cache + this model exceed limit?
+            # _clear_cache_internal checks and clears, but here we only want to check.
+            max_cache = ModelLoad._get_max_cache_size()
+            current_usage = sum(ModelLoad._MEMORY_USAGE.values())
+            # Temporarily remove the model's usage if it was loaded on GPU
+            usage_without_model = current_usage - ModelLoad._MEMORY_USAGE.get(model_name, 0.0)
+            if usage_without_model + model_size > max_cache:
+                logger.warning(
+                    f"CPUキャッシュ不可: モデル '{model_name}' ({model_size / 1024:.3f}GB) を追加するとキャッシュ容量超過。解放試行..."
+                )
+                # Try clearing space for it
+                if not ModelLoad._clear_cache_internal(model_name, model_size):
+                    can_cache = False  # Still not enough space after clearing
+
+        if not can_cache:
+            logger.error(f"モデル '{model_name}' CPUキャッシュ失敗: 十分な空き容量なし。")
+            # Should we release the model state if caching fails? Yes.
+            ModelLoad._release_model_state(model_name)
+            return {}  # Return empty dict on failure?
 
         try:
-            # Move components to CPU
-            ModelLoad._move_components_to_cpu(components)
-
-            # Update state and log
-            ModelLoad._update_state_after_cpu_cache(model_name, model_size)
-
+            ModelLoad._move_components_to_device(components, "cpu")
+            ModelLoad._update_model_state(model_name, "cpu", "cached_cpu", model_size)
+            logger.info(f"モデル '{model_name}' をCPUにキャッシュしました。")
             return components
-
         except Exception as e:
-            logger.error(f"モデル '{model_name}' のCPUへのキャッシュに失敗しました: {e!s}", exc_info=True)
-            # Clean up potential inconsistent state if move failed partially
-            if model_name in ModelLoad._MODEL_STATES and ModelLoad._MODEL_STATES[model_name] == "on_cpu":
-                del ModelLoad._MODEL_STATES[model_name]
-            if model_name in ModelLoad._MEMORY_USAGE:
-                del ModelLoad._MEMORY_USAGE[model_name]
-            # Return the original components dict as caching failed
-            return components
-
-    @staticmethod
-    def _check_cuda_restore_preconditions(model_name: str, device: str) -> bool:
-        """CUDA復元の事前条件を確認する"""
-        if model_name not in ModelLoad._MODEL_STATES:
-            logger.warning(f"モデル '{model_name}' の状態が不明です。CUDAへの復元をスキップします。")
-            return False  # Cannot restore if state unknown
-
-        if ModelLoad._MODEL_STATES[model_name] == f"on_{device}":
-            logger.debug(f"モデル '{model_name}' は既に {device} にあります。")
-            ModelLoad._MODEL_LAST_USED[model_name] = time.time()  # Update last used time
-            return False  # Already on target device
-
-        # If state is known and not on the target device, proceed
-        return True
-
-    @staticmethod
-    def _move_components_to_cuda(device: str, components: dict[str, Any]) -> None:
-        """コンポーネントをCUDAデバイスに移動させる"""
-        logger.info(f"コンポーネントを {device} に移動中...")
-        for component_name, component in components.items():
-            if component_name == "pipeline":
-                if hasattr(component, "model") and hasattr(component.model, "to"):
-                    component.model.to(device)
-            elif hasattr(component, "to") and not isinstance(
-                component, str | Path | int | float | bool | None
-            ):  # Avoid trying .to on simple types
-                # Check device before moving if possible
-                current_device = getattr(component, "device", None)
-                if current_device and str(current_device) == device:
-                    continue  # Already on target device
-                component.to(device)
-            # Add specific handling for ONNX/TF if needed for CUDA placement
-
-    @staticmethod
-    def _handle_cuda_restore_success(model_name: str, device: str) -> None:
-        """CUDA復元成功時の状態更新とログ出力"""
-        ModelLoad._MODEL_STATES[model_name] = f"on_{device}"
-        ModelLoad._MODEL_LAST_USED[model_name] = time.time()
-        logger.info(f"モデル '{model_name}' を {device} に復元完了。")
-
-    @staticmethod
-    def _handle_cuda_restore_memory_error(model_name: str, device: str, e: Exception) -> None:
-        """CUDA復元中のメモリ関連エラー処理"""
-        error_detail = f"モデル '{model_name}' の CUDA デバイス '{device}' への復元中にメモリ関連エラーが発生しました。詳細: {e}"
-        logger.error(f"メモリ不足エラー: {error_detail}")
-        if (
-            isinstance(e, torch.cuda.OutOfMemoryError)
-            and device.startswith("cuda")
-            and torch.cuda.is_available()
-        ):
-            try:
-                logger.error(f"CUDA メモリサマリー ({device}):")
-                logger.error(torch.cuda.memory_summary(device=device, abbreviated=True))
-            except Exception as mem_e:
-                logger.error(f"CUDAメモリサマリーの取得に失敗: {mem_e}")
-        # Revert state on failure - assume it ends up back on CPU or in an unusable state
-        # Reverting to 'on_cpu' might be optimistic if the move failed badly.
-        # Consider introducing an 'error' state or removing the state entry.
-        # For now, revert to 'on_cpu' as per original logic.
-        if model_name in ModelLoad._MODEL_STATES:  # Only update if state was previously known
-            ModelLoad._MODEL_STATES[model_name] = "on_cpu"
-            logger.warning(f"CUDA復元失敗のため、モデル '{model_name}' の状態を 'on_cpu' に戻しました。")
-
-    @staticmethod
-    def _handle_cuda_restore_generic_error(model_name: str, device: str, e: Exception) -> None:
-        """CUDA復元中のその他のエラー処理"""
-        logger.error(
-            f"モデル '{model_name}' の {device} への復元中に予期せぬエラーが発生しました: {e}",
-            exc_info=True,
-        )
-        # Revert state on failure, similar to memory error
-        if model_name in ModelLoad._MODEL_STATES:
-            ModelLoad._MODEL_STATES[model_name] = "on_cpu"
-            logger.warning(
-                f"CUDA復元中の予期せぬエラーのため、モデル '{model_name}' の状態を 'on_cpu' に戻しました。"
-            )
-
-    @staticmethod
-    def restore_model_to_cuda(
-        model_name: str, device: str, components: dict[str, Any]
-    ) -> dict[str, Any] | None:
-        """モデルをCUDAデバイスに復元 (複雑度削減版)"""
-        if not ModelLoad._check_cuda_restore_preconditions(model_name, device):
-            # If already on device, return original components
-            # If state is unknown, return None (or components? Needs clarification)
-            # Let's return `components` if already on device, `None` if state unknown, aligning with checks.
-            if (
-                model_name in ModelLoad._MODEL_STATES
-                and ModelLoad._MODEL_STATES[model_name] == f"on_{device}"
-            ):
-                return components  # Already there
-            else:
-                return None  # State unknown or other precondition failed
-
-        logger.info(f"モデル '{model_name}' を {device} に復元中...")
-        try:
-            # Move components
-            ModelLoad._move_components_to_cuda(device, components)
-
-            # Handle success
-            ModelLoad._handle_cuda_restore_success(model_name, device)
-            return components
-
-        except (torch.cuda.OutOfMemoryError, MemoryError, OSError) as e:
-            # Check if OSError is memory related
-            if isinstance(e, OSError) and "allocate memory" not in str(e).lower():
-                ModelLoad._handle_cuda_restore_generic_error(model_name, device, e)
-            else:
-                ModelLoad._handle_cuda_restore_memory_error(model_name, device, e)
-            # Return None as restoration failed
-            return None
-        except Exception as e:
-            ModelLoad._handle_cuda_restore_generic_error(model_name, device, e)
-            # Return None as restoration failed
-            return None
-
-    @staticmethod
-    def release_model(model_name: str) -> None:
-        """モデルの状態とメモリ使用量の記録を削除"""
-        base_loader = BaseModelLoader(model_name, "cpu")
-        base_loader.release_model(model_name)
-
-    @staticmethod
-    def release_model_components(model_name: str, components: dict[str, Any]) -> dict[str, Any]:
-        """モデルのコンポーネントを解放"""
-        logger.info(f"モデル '{model_name}' のコンポーネント解放試行...")
-        try:
-            for component_name, component in list(components.items()):  # Iterate over copy
-                if (
-                    component_name == "model"
-                    or component_name == "pipeline"
-                    or component_name == "session"
-                    or component_name == "clip_model"
-                ):
-                    logger.debug(f"Deleting component: {component_name}")
-                    del components[component_name]
-                    del component  # Try deleting the reference too
-                elif hasattr(component, "cpu"):
-                    logger.debug(f"Moving component {component_name} to CPU (if applicable)")
-                    component.cpu()
-                    if hasattr(component, "to"):
-                        component.to("cpu")
-            # More aggressive memory release
-            logger.debug("Running garbage collection and emptying CUDA cache...")
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            logger.debug("Garbage collection and cache empty finished.")
-
-            # Clear state and memory usage from manager
-            ModelLoad.release_model(model_name)
-            logger.info(f"モデル '{model_name}' のコンポーネント解放完了。")
-            return components  # Return modified components dict (or empty?)
-
-        except Exception as e:
-            logger.error(
-                f"モデル '{model_name}' のコンポーネント解放中にエラーが発生しました: {e!s}", exc_info=True
-            )
-            # Attempt to clear state even if release failed partially
-            ModelLoad.release_model(model_name)
-            return components
-
-    # --- Static Load Methods --- #
-    # These methods now correctly return Optional[TypedDict]
+            logger.error(f"モデル '{model_name}' CPUキャッシュ中にエラー: {e}", exc_info=True)
+            ModelLoad._release_model_state(model_name)
+            return {}
 
     @staticmethod
     def load_transformers_components(
         model_name: str, model_path: str, device: str
     ) -> TransformersComponents | None:
-        """Transformersモデルをロード"""
-        loader = TransformersLoader(model_name, device)
-        return loader.load_components(model_path)
+        """Transformersモデルをロード (静的インターフェース)"""
+        loader = ModelLoad._TransformersLoader(model_name, device)
+        # Cast the result to the specific TypedDict or None
+        result = loader.load_components(model_path)
+        return cast(TransformersComponents | None, result)
 
     @staticmethod
     def load_transformers_pipeline_components(
         task: str, model_name: str, model_path: str, device: str, batch_size: int
     ) -> TransformersPipelineComponents | None:
         """TransformersPipelineモデルをロード"""
-        loader = TransformersPipelineLoader(model_name, device)
-        return loader.load_components(task, model_path, batch_size)
+        loader = ModelLoad._TransformersPipelineLoader(model_name, device)
+        result = loader.load_components(model_path, task=task, batch_size=batch_size)
+        return cast(TransformersPipelineComponents | None, result)
 
     @staticmethod
     def load_onnx_components(model_name: str, model_path: str, device: str) -> ONNXComponents | None:
         """ONNXモデルをロード"""
-        loader = ONNXLoader(model_name, device)
-        return loader.load_components(model_path)
+        loader = ModelLoad._ONNXLoader(model_name, device)
+        result = loader.load_components(model_path)
+        return cast(ONNXComponents | None, result)
 
     @staticmethod
     def load_tensorflow_components(
         model_name: str,
         model_path: str,
-        device: str,  # Device might not be directly used by TF loader but kept for consistency
+        device: str,  # TF device handling is implicit usually
         model_format: str,
     ) -> TensorFlowComponents | None:
         """TensorFlowモデルをロード"""
-        loader = TensorFlowLoader(model_name, device)
-        return loader.load_components(model_path, model_format)
+        loader = ModelLoad._TensorFlowLoader(model_name, device)
+        result = loader.load_components(model_path, model_format=model_format)
+        return cast(TensorFlowComponents | None, result)
 
     @staticmethod
     def load_clip_components(
@@ -1839,23 +1069,75 @@ class ModelLoad:
         final_activation_type: str | None = None,
     ) -> CLIPComponents | None:
         """CLIPモデルをロード"""
-        loader = CLIPLoader(model_name, device)
-        return loader.load_components(base_model, model_path, activation_type, final_activation_type)
+        loader = ModelLoad._CLIPLoader(model_name, device)
+        result = loader.load_components(
+            model_path,  # model_path is head weights path
+            base_model=base_model,
+            activation_type=activation_type,
+            final_activation_type=final_activation_type,
+        )
+        return cast(CLIPComponents | None, result)
+
+    @staticmethod
+    def restore_model_to_cuda(
+        model_name: str, device: str, components: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """モデルをCUDAデバイスに復元 (インターフェース維持)"""
+        state = ModelLoad._get_model_state(model_name)
+        if not state:
+            logger.warning(f"モデル '{model_name}' 状態不明。CUDA復元スキップ。")
+            return None
+        if state == f"on_{device}":
+            logger.debug(f"モデル '{model_name}' は既に {device} にあります。")
+            ModelLoad._update_model_state(model_name)  # Update last used
+            return components
+
+        logger.info(f"モデル '{model_name}' を {device} に復元中...")
+        model_size = ModelLoad._MODEL_SIZES.get(model_name, 0.0)
+
+        # Check memory BEFORE attempting move
+        if not ModelLoad._check_memory_before_load(model_size, model_name):
+            logger.error(f"CUDA復元失敗: メモリ不足 ({model_name} -> {device})")
+            return None  # Keep state as is (likely on_cpu)
+
+        # Try clearing cache needed for this model size on the target device
+        if model_size > 0:
+            if not ModelLoad._clear_cache_internal(model_name, model_size):
+                logger.error(f"CUDA復元失敗: キャッシュ解放失敗 ({model_name} -> {device})")
+                return None  # Keep state as is
+
+        try:
+            ModelLoad._move_components_to_device(components, device)
+            ModelLoad._update_model_state(model_name, device, "loaded", model_size)
+            logger.info(f"モデル '{model_name}' を {device} に復元完了。")
+            return components
+        except Exception as e:
+            logger.error(f"モデル '{model_name}' の {device} への復元中にエラー: {e}", exc_info=True)
+            try:  # Attempt fallback to CPU
+                logger.warning(f"CUDA復元エラー後、CPUへのフォールバック試行 ({model_name})...")
+                ModelLoad._move_components_to_device(components, "cpu")
+                ModelLoad._update_model_state(model_name, "cpu", "cached_cpu", model_size)
+                logger.warning(f"CUDA復元エラーのため、モデル '{model_name}' をCPUに戻しました。")
+            except Exception as fallback_e:
+                logger.error(f"CPUフォールバック中にエラー ({model_name}): {fallback_e}", exc_info=True)
+                ModelLoad._release_model_state(model_name)  # Release if fallback fails
+            return None  # Indicate restore failed
+
+    @staticmethod
+    def release_model(model_name: str) -> None:
+        """指定されたモデルをキャッシュから解放 (インターフェース維持)"""
+        ModelLoad._release_model_internal(model_name, components=None)
+
+    @staticmethod
+    def release_model_components(model_name: str, components: dict[str, Any]) -> dict[str, Any]:
+        """モデルコンポーネントリソースを解放 (インターフェース維持)"""
+        ModelLoad._release_model_internal(model_name, components)
+        return {}  # Return empty dict
 
 
+# --- Classifier and create_clip_model (Keep at module level for now) ---
 class Classifier(nn.Module):
-    """画像特徴量を入力として、分類スコアを出力する柔軟な分類器。
-
-    Args:
-        input_size (int): 入力特徴量の次元数
-        hidden_sizes (list[int], optional): 各隠れ層のユニット数のリスト
-        output_size (int, optional): 出力層のユニット数 (通常は1)
-        dropout_rates (list[float], optional): 各隠れ層のドロップアウト率
-        use_activation (bool, optional): 活性化関数を使用するかどうか
-        activation (Type[nn.Module], optional): 使用する活性化関数
-        use_final_activation (bool, optional): 最終層に活性化関数を使用するかどうか
-        final_activation (Type[nn.Module], optional): 最終層に使用する活性化関数
-    """
+    """画像特徴量を入力として、分類スコアを出力する柔軟な分類器。"""
 
     def __init__(
         self,
@@ -1869,173 +1151,28 @@ class Classifier(nn.Module):
         final_activation: type[nn.Module] = nn.Sigmoid,
     ) -> None:
         super().__init__()
-
-        # Default values
         hidden_sizes = hidden_sizes if hidden_sizes is not None else [1024, 128, 64, 16]
         dropout_rates = dropout_rates if dropout_rates is not None else [0.2, 0.2, 0.1, 0.0]
-
-        # Adjust dropout list length
         if len(dropout_rates) < len(hidden_sizes):
             dropout_rates.extend([0.0] * (len(hidden_sizes) - len(dropout_rates)))
 
-        # Build layers
         layers: list[nn.Module] = []
         prev_size = input_size
-
-        for _, (size, drop) in enumerate(zip(hidden_sizes, dropout_rates, strict=False)):
+        for size, drop in zip(hidden_sizes, dropout_rates, strict=False):
             layers.append(nn.Linear(prev_size, size))
-
             if use_activation:
                 layers.append(activation())
-
             if drop > 0:
                 layers.append(nn.Dropout(drop))
-
             prev_size = size
-
-        # Output layer
         layers.append(nn.Linear(prev_size, output_size))
-
-        # Final activation
         if use_final_activation:
             layers.append(final_activation())
-
         self.layers = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """ネットワークの順伝播を実行します。"""
         return self.layers(x)
 
 
-def create_clip_model(  # noqa: C901
-    base_model: str,
-    model_path: str,
-    device: str,
-    activation_type: str | None = None,
-    final_activation_type: str | None = None,
-) -> dict[str, Any] | None:  # Allow returning None on failure
-    """どの CLIP モデルでも使用可能なモデルを作成します。"""
-    try:
-        # Common CLIP model and processor initialization
-        logger.debug(f"CLIPプロセッサロード中: {base_model}")
-        clip_processor = CLIPProcessor.from_pretrained(base_model)
-        logger.debug(f"CLIPモデルロード中: {base_model} on {device}")
-        # Ignore potential incorrect type hint from transformers for this call
-        clip_model = CLIPModel.from_pretrained(base_model).to(device).eval()  # type: ignore
-
-        # Auto-detect input size
-        input_size = clip_model.config.projection_dim
-        logger.debug(f"CLIPモデル {base_model} の特徴量次元: {input_size}")
-
-        # Load model weights
-        logger.debug(f"モデル重みロード中: {model_path}")
-        local_path = utils.load_file(model_path)
-        if local_path is None:
-            logger.error(f"モデルパス '{model_path}' の解決に失敗しました。")
-            return None
-        # Specify map_location to avoid issues if model was saved on GPU but loading on CPU
-        state_dict = torch.load(local_path, map_location=device)
-        logger.debug("重みロード完了、構造推測開始...")
-
-        # Infer hidden_features structure from state_dict
-        hidden_features = []
-        current_layer = 0
-        while True:
-            # Try different naming conventions
-            weight_key = f"layers.{current_layer}.weight"
-            bias_key = f"layers.{current_layer}.bias"
-            if weight_key not in state_dict or bias_key not in state_dict:
-                # Try alternative naming (e.g., if layers list includes non-Linear)
-                found_next = False
-                for lookahead in range(1, 5):  # Look ahead a few steps
-                    next_weight_key = f"layers.{current_layer + lookahead}.weight"
-                    if next_weight_key in state_dict:
-                        current_layer += lookahead
-                        weight_key = next_weight_key
-                        bias_key = f"layers.{current_layer}.bias"
-                        found_next = True
-                        break
-                if not found_next:
-                    break  # Stop if no linear layer found ahead
-
-            if weight_key in state_dict:
-                weight = state_dict[weight_key]
-                hidden_features.append(weight.shape[0])
-                current_layer += 1  # Move to next potential layer index
-            else:
-                break  # Should not happen if found_next logic is correct
-
-        # Exclude the final output layer if it was captured
-        # The last appended size corresponds to the output size of the *last hidden layer*
-        # We need the sizes *leading up to* the final Linear layer
-        # The final Linear layer's input size is the last element of hidden_features
-        if len(hidden_features) > 0:
-            # The features list contains the output dimensions of each linear layer
-            # The Classifier expects sizes of hidden layers, not the final output layer
-            hidden_sizes_for_classifier = hidden_features[
-                :-1
-            ]  # Exclude the size of the final layer's output
-        else:
-            hidden_sizes_for_classifier = []
-
-        if not hidden_sizes_for_classifier:
-            logger.warning(f"CLIP分類器 {base_model} の構造推測失敗。デフォルト値を使用。")
-            hidden_sizes_for_classifier = [1024, 128, 64, 16]
-
-        logger.info(f"推測された隠れ層サイズ: {hidden_sizes_for_classifier}")
-
-        # Activation function mapping
-        activation_map = {
-            "ReLU": nn.ReLU,
-            "GELU": nn.GELU,
-            "Sigmoid": nn.Sigmoid,
-            "Tanh": nn.Tanh,
-        }
-
-        # Get activation parameters from config
-        use_activation = activation_type is not None
-        activation_func = (
-            activation_map.get(activation_type, nn.ReLU) if activation_type is not None else nn.ReLU
-        )
-
-        use_final_activation = final_activation_type is not None
-        final_activation_func = (
-            activation_map.get(final_activation_type, nn.Sigmoid)
-            if final_activation_type is not None
-            else nn.Sigmoid
-        )
-
-        # Initialize the Classifier model
-        logger.info("分類器モデル初期化...")
-        model = Classifier(
-            input_size=input_size,
-            hidden_sizes=hidden_sizes_for_classifier,
-            output_size=1,
-            use_activation=use_activation,
-            activation=activation_func,
-            use_final_activation=use_final_activation,
-            final_activation=final_activation_func,
-        )
-        logger.debug("分類器初期化完了、重みロード...")
-        model.load_state_dict(state_dict, strict=False)  # Use strict=False for flexibility
-        logger.debug("重みロード完了、デバイス転送...")
-        model = model.to(device).eval()  # Set to eval mode
-        logger.debug(f"CLIP分類器モデル '{model_path}' のロード完了 (デバイス: {device})")
-
-        # Return type matches CLIPComponents structure, but keep Any annotation for the function itself
-        return {"model": model, "processor": clip_processor, "clip_model": clip_model}
-
-    except FileNotFoundError as e:
-        logger.error(f"CLIPモデル作成エラー: ファイルが見つかりません: {e}")
-        return None
-    except KeyError as e:
-        logger.error(
-            f"CLIPモデル作成エラー: state_dict に予期しないキーまたは不足しているキーがあります: {e}"
-        )
-        return None
-    except Exception as e:
-        logger.error(
-            f"CLIPモデル '{base_model}' / '{model_path}' の作成中に予期せぬエラーが発生しました: {e}",
-            exc_info=True,
-        )
-        return None
+# Note: create_clip_model is now effectively handled within ModelLoad._CLIPLoader._create_clip_model_internal
+# We keep the Classifier class definition here as it's used by the CLIPLoader.

@@ -154,3 +154,22 @@ graph LR
     - `set` メソッドはユーザー設定のみを更新する。
     - モデルローダーによるサイズ自動保存はシステム設定ファイル (`resources/system/annotator_config.toml`) に反映される。
     - ユーザーは `save_user_config` で自身のカスタム設定を保存できる。
+
+#### [リファクタリング] `model_factory._CLIPLoader._create_clip_model_internal` の複雑度削減 (Ruff C901 対応)
+
+- **発生日:** 2025-04-20 (推定)
+- **対象:** `src/image_annotator_lib/core/model_factory.py` 内の `_CLIPLoader._create_clip_model_internal` メソッド
+- **背景:** `_create_clip_model_internal` メソッドが、CLIP プロセッサ/モデルのロード、分類器ヘッドの重みロード、構造推測、活性化関数設定、分類器インスタンス生成・ロードなど、多数の責務を担っており、複雑度が高く (Ruff C901 違反)、保守性に課題があった。
+- **内容:**
+    1.  **構造推測の分離:** 分類器ヘッドの隠れ層サイズを `state_dict` から推測するロジックを、独立したヘルパーメソッド `_infer_classifier_structure` に抽出。
+    2.  **ベースコンポーネントロードの分離:** CLIP プロセッサとベース CLIP モデルのロード処理を、独立したヘルパーメソッド `_load_base_clip_components` に抽出。
+    3.  **分類器ヘッド作成/ロードの分離:** `Classifier` インスタンスの生成、活性化関数の設定、`state_dict` からの重みロード処理を、独立したヘルパーメソッド `_create_and_load_classifier_head` に抽出。
+    4.  **本体メソッドの単純化:** 元の `_create_clip_model_internal` は、上記ヘルパーメソッドを順番に呼び出す形にリファクタリング。
+- **理由:**
+    - メソッドの複雑度を低減し、Ruff C901 違反を解消するため。
+    - 各処理ステップの責務を明確にし、可読性と保守性を向上させるため。
+    - 単体テストを容易にするため（ヘルパーメソッド単位でのテストが可能に）。
+- **影響:**
+    - `_create_clip_model_internal` のコードが大幅に簡潔化された。
+    - CLIP モデルロード処理全体の機能的な変更はない。
+    - 将来的な設定ファイルによる構造定義への移行など、さらなる改善が容易になった。
