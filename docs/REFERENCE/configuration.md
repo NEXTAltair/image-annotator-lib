@@ -9,11 +9,12 @@
 
 ## ファイルの場所
 
-設定ファイルは、通常、ライブラリの `resources` ディレクトリ内に配置されます。
+設定ファイルは、以下のデフォルトパスから読み込まれます。`ModelConfigRegistry` の `load` メソッドでパスを明示的に指定することも可能です。
 
-*   **システム設定 (必須):** `src/image_annotator_lib/resources/system/annotator_config.toml`
+*   **システム設定 (デフォルト):** `<プロジェクトルート>/config/annotator_config.toml`
     *   ライブラリがデフォルトで読み込む基本設定ファイルです。
-*   **ユーザー設定 (任意):** `src/image_annotator_lib/resources/user/annotator_config.toml`
+    *   **注意:** このファイルが存在しない場合、ライブラリは初回ロード時にパッケージ内部のテンプレート (`src/image_annotator_lib/resources/system/template_config.toml`) からこのパスに設定ファイルを自動的にコピーします。
+*   **ユーザー設定 (デフォルト, 任意):** `<プロジェクトルート>/config/user_config.toml`
     *   このファイルが存在する場合、システム設定の内容を上書き・追加できます。特定のモデルの設定を変更したり、独自モデルを追加したりする場合に使用します。
 
 ライブラリは起動時にこれらのパスから設定を読み込みます (`config_registry.load()` 経由)。

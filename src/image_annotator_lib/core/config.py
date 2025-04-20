@@ -1,19 +1,27 @@
+import copy
+import importlib.resources
+import shutil
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import toml
 
-from .constants import DEFAULT_PATHS
+from .constants import (
+    AVAILABLE_API_MODELS_CONFIG_PATH,
+    DEFAULT_PATHS,
+    TEMPLATE_SYSTEM_CONFIG_PATH,
+)
 from .utils import logger
 
 
 @lru_cache
-def _load_config_from_file(config_path: str | Path) -> dict[str, dict[str, Any]]:
+def _load_config_from_file(config_path: Path) -> dict[str, dict[str, Any]]:
     """設定ファイルをTOML形式で読み込む内部ヘルパー関数。"""
     try:
         logger.debug(f"構成ファイルを読み込みます: {config_path}")
-        config_data = toml.load(config_path)
+        with open(config_path, encoding="utf-8") as f:
+            config_data = toml.load(f)
         if not isinstance(config_data, dict):
             logger.error(f"設定ファイル {config_path} の形式が不正です。辞書形式である必要があります。")
             raise TypeError("構成データは辞書である必要があります")
@@ -26,81 +34,124 @@ def _load_config_from_file(config_path: str | Path) -> dict[str, dict[str, Any]]
         logger.exception(f"設定ファイル {config_path} の読み込み中に予期せぬエラーが発生しました: {e}")
         raise  # 予期せぬエラーは再送出
 
-
-# save_model_size 関数は ModelConfigRegistry に統合するため削除またはコメントアウトを検討
-# def save_model_size(model_name: str, size_mb: float, config_path: str | Path | None = None) -> None:
-#     ...
-
-
 class ModelConfigRegistry:
     """設定ファイル全体を管理し、設定値へのアクセスを提供します。"""
 
     def __init__(self) -> None:
         """初期化時に設定データを空の辞書で初期化します。"""
-        self._system_config_data: dict[str, dict[str, Any]] = {}  # System config
-        self._user_config_data: dict[str, dict[str, Any]] = {}  # User overrides/additions
-        self._merged_config_data: dict[str, dict[str, Any]] = {}  # Merged view
+        self._system_config_data: dict[str, dict[str, Any]] = {}
+        self._user_config_data: dict[str, dict[str, Any]] = {}
+        self._merged_config_data: dict[str, dict[str, Any]] = {}
         self._system_config_path: Path | None = None
         self._user_config_path: Path | None = None
 
-    def load(
-        self, config_path: str | Path | None = None, user_config_path: str | Path | None = None
+    def _determine_config_paths(
+        self,
+        config_path: str | Path | None = None,
+        user_config_path: str | Path | None = None,
     ) -> None:
-        """システム設定ファイルとユーザー設定ファイルを読み込み、内部データを更新します。
-        ユーザー設定はシステム設定を上書きします。
-        """
-        # Determine paths and ensure they are Path objects
-        # Cast Traversable from DEFAULT_PATHS to str before creating Path
-        sys_path_arg = config_path if config_path else str(DEFAULT_PATHS["config_toml"])
-        user_path_arg = user_config_path if user_config_path else str(DEFAULT_PATHS["user_config_toml"])
+        """システム設定とユーザー設定のパスを決定し、インスタンス変数に格納する。"""
+        self._system_config_path = Path(config_path if config_path else DEFAULT_PATHS["config_toml"])
+        self._user_config_path = Path(
+            user_config_path if user_config_path else DEFAULT_PATHS["user_config_toml"]
+        )
+        logger.debug(f"システム設定パスを決定: {self._system_config_path}")
+        logger.debug(f"ユーザー設定パスを決定: {self._user_config_path}")
 
-        self._system_config_path = Path(sys_path_arg) if sys_path_arg else None
-        self._user_config_path = Path(user_path_arg) if user_path_arg else None
+    def _ensure_system_config_exists(self) -> None:
+        """システム設定ファイルが存在しない場合、テンプレートからコピーする。"""
+        if not self._system_config_path or not self._system_config_path.exists():
+            logger.info(
+                f"システム設定ファイルが見つかりません: {self._system_config_path}。テンプレートからのコピーを試みます。"
+            )
+            try:
+                # TEMPLATE_SYSTEM_CONFIG_PATH を config モジュール経由で参照
+                with importlib.resources.as_file(TEMPLATE_SYSTEM_CONFIG_PATH) as template_path:
+                    if template_path.is_file():
+                        if self._system_config_path:
+                            self._system_config_path.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copyfile(template_path, self._system_config_path)
+                            logger.info(
+                                f"テンプレートから設定ファイルをコピーしました: {self._system_config_path}"
+                            )
+                        else:
+                            logger.error(
+                                f"テンプレートから設定ファイルをコピーしましたが、システム設定パスが指定されていません: {self._system_config_path}"
+                            )
+                    else:
+                        logger.error(f"テンプレートパスが無効です: {template_path}")
+            except FileNotFoundError:
+                logger.error(
+                    f"パッケージ内のテンプレート設定ファイルが見つかりません: {TEMPLATE_SYSTEM_CONFIG_PATH}"
+                )
+            except Exception as e:
+                logger.error(f"設定ファイルの自動コピー中にエラー: {e}", exc_info=True)
+        else:
+            logger.debug(f"システム設定ファイルが存在します: {self._system_config_path}")
 
-        # Load system config
-        if self._system_config_path:
+    def _load_and_set_system_config(self) -> None:
+        """システム設定ファイルを読み込み、内部状態を更新する。"""
+        if self._system_config_path and self._system_config_path.is_file():
             try:
                 self._system_config_data = _load_config_from_file(self._system_config_path)
-                logger.info(
-                    f"設定マネージャーがシステム設定を {self._system_config_path} から読み込みました。"
-                )
+                logger.info(f"システム設定を {self._system_config_path} から読み込みました。")
             except Exception as e:
                 logger.error(
                     f"システム設定ファイル {self._system_config_path} の読み込みに失敗しました: {e}"
                 )
                 self._system_config_data = {}
         else:
-            logger.error("システム設定ファイルのパスが決定できませんでした。")
+            logger.error(
+                f"システム設定ファイル {self._system_config_path} が見つからないか、ファイルではありません。読み込みをスキップします。"
+            )
             self._system_config_data = {}
 
-        # Load user config (if exists)
+    def _load_and_set_user_config(self) -> None:
+        """ユーザー設定ファイルを読み込み、内部状態を更新する。"""
         self._user_config_data = {}
         if self._user_config_path is not None and self._user_config_path.exists():
-            try:
-                self._user_config_data = _load_config_from_file(self._user_config_path)
-                logger.info(f"ユーザー設定を {self._user_config_path} から読み込みました。")
-            except Exception as e:
+            # is_file チェックを追加
+            if self._user_config_path.is_file():
+                try:
+                    self._user_config_data = _load_config_from_file(self._user_config_path)
+                    logger.info(f"ユーザー設定を {self._user_config_path} から読み込みました。")
+                except Exception as e:
+                    logger.warning(
+                        f"ユーザー設定ファイル {self._user_config_path} の読み込み中にエラー: {e}"
+                    )
+                    self._user_config_data = {}
+            else:
                 logger.warning(
-                    f"ユーザー設定ファイル {self._user_config_path} の読み込み中にエラーが発生しました: {e}"
+                    f"ユーザー設定パス {self._user_config_path} はファイルではありません。読み込みをスキップします。"
                 )
-                self._user_config_data = {}
         else:
             logger.debug(
                 f"ユーザー設定ファイル {self._user_config_path} が存在しないかパスが指定されていません。"
             )
 
-        # Merge configs (user overrides system)
+    def load(
+        self,
+        config_path: str | Path | None = None,
+        user_config_path: str | Path | None = None,
+    ) -> None:
+        """システム設定ファイルとユーザー設定ファイルを読み込み、内部データを更新します。"""
+        logger.info("設定ファイルの読み込みを開始します...")
+        self._determine_config_paths(config_path, user_config_path)
+        self._ensure_system_config_exists()
+        self._load_and_set_system_config()
+        self._load_and_set_user_config()
         self._merge_configs()
+        logger.info("設定ファイルの読み込みが完了しました。")
 
     def _merge_configs(self) -> None:
-        """システム設定とユーザー設定をマージして _merged_config_data を作成"""
-        self._merged_config_data = self._system_config_data.copy()
+        """システム設定とユーザー設定をマージして _merged_config_data を作成 (Deep Copyを使用)"""
+        self._merged_config_data = copy.deepcopy(self._system_config_data)
         for model_name, user_model_config in self._user_config_data.items():
             if model_name in self._merged_config_data:
-                self._merged_config_data[model_name].update(user_model_config)
+                self._merged_config_data[model_name].update(copy.deepcopy(user_model_config))
             else:
-                self._merged_config_data[model_name] = user_model_config
-        logger.debug("システム設定とユーザー設定をマージしました。")
+                self._merged_config_data[model_name] = copy.deepcopy(user_model_config)
+        logger.debug("システム設定とユーザー設定をディープコピーでマージしました。")
 
     def get(self, model_name: str, key: str, default: Any = None) -> Any | None:
         """指定されたモデルとキーに対応するマージ済みの設定値を取得します。"""
@@ -193,3 +244,71 @@ try:
     config_registry.load()
 except Exception:
     logger.exception("共有設定レジストリの初期ロード中にエラーが発生しました。")
+
+# --- available_api_models.toml 用のスタンドアロン関数 --- #
+
+
+@lru_cache(maxsize=1)
+def load_available_api_models() -> dict[str, Any]:
+    """`available_api_models.toml` を読み込み、モデルデータを辞書として返す。
+
+    ファイルが存在しない場合や読み込みエラー時は空の辞書を返す。
+    """
+    file_path = AVAILABLE_API_MODELS_CONFIG_PATH
+    try:
+        logger.debug(f"動的 API モデル情報を読み込みます: {file_path}")
+        # ファイルが存在しない場合でもエラーにならないように先にチェック
+        if not file_path.is_file():
+            logger.info(
+                f"{file_path} が見つかりません。初回実行の可能性があります。空のデータで開始します。"
+            )
+            return {}
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = toml.load(f)
+        if not isinstance(data, dict) or "available_vision_models" not in data:
+            logger.warning(
+                f"{file_path} の形式が不正か、[available_vision_models] セクションがありません。"
+            )
+            return {}
+        model_data = data.get("available_vision_models", {})
+        if not isinstance(model_data, dict):
+            logger.warning(f"{file_path} の [available_vision_models] が辞書形式ではありません。")
+            return {}
+        logger.debug(f"動的 API モデル情報を正常に読み込みました: {file_path}")
+        return model_data
+    except toml.TomlDecodeError as e:
+        logger.error(f"{file_path} の TOML 解析に失敗しました: {e}")
+        return {}
+    except OSError as e:
+        logger.error(f"{file_path} の読み込み中に I/O エラーが発生しました: {e}")
+        return {}
+    except Exception as e:
+        logger.exception(f"{file_path} の読み込み中に予期せぬエラーが発生しました: {e}")
+        return {}
+
+
+def save_available_api_models(data: dict[str, Any]) -> None:
+    """与えられたモデルデータを `available_api_models.toml` に書き込む。
+
+    Args:
+        data: 保存するモデルデータ辞書 (available_vision_models セクションの内容)。
+    """
+    file_path = AVAILABLE_API_MODELS_CONFIG_PATH
+    try:
+        # ディレクトリが存在しない場合に作成
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # 書き込むデータ全体を構築
+        full_data_to_save = {"available_vision_models": data}
+
+        logger.debug(f"動的 API モデル情報を書き込みます: {file_path}")
+        with open(file_path, "w", encoding="utf-8") as f:
+            toml.dump(full_data_to_save, f)
+        # キャッシュをクリア (次の load 呼び出しで再読み込みさせる)
+        load_available_api_models.cache_clear()
+        logger.debug(f"動的 API モデル情報を正常に書き込みました: {file_path}")
+
+    except OSError as e:
+        logger.error(f"{file_path} への書き込み中に I/O エラーが発生しました: {e}")
+    except Exception as e:
+        logger.exception(f"{file_path} への書き込み中に予期せぬエラーが発生しました: {e}")

@@ -152,7 +152,7 @@ graph LR
 - **影響:**
     - 設定値の取得 (`get`) は、システムとユーザー設定がマージされた結果を返す。
     - `set` メソッドはユーザー設定のみを更新する。
-    - モデルローダーによるサイズ自動保存はシステム設定ファイル (`resources/system/annotator_config.toml`) に反映される。
+    - モデルローダーによるサイズ自動保存は、デフォルトのシステム設定ファイル (`<プロジェクトルート>/config/annotator_config.toml`) に反映される。
     - ユーザーは `save_user_config` で自身のカスタム設定を保存できる。
 
 #### [リファクタリング] `model_factory._CLIPLoader._create_clip_model_internal` の複雑度削減 (Ruff C901 対応)
