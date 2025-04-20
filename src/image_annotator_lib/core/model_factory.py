@@ -684,10 +684,10 @@ class ModelLoad:
                 ModelLoad._handle_load_error(
                     self.model_name, MemoryError(f"Pre-load memory check failed for {self.model_name}")
                 )
-                return None
+                return None  # Indent this return
 
             # 3. Clear Cache
-            if model_size_mb > 0:
+            if model_size_mb > 0:  # Align this block
                 if not ModelLoad._clear_cache_internal(self.model_name, model_size_mb):
                     # Failed to clear enough space, should we still try loading?
                     # Let's prevent loading if cache clear fails explicitly.
@@ -695,15 +695,15 @@ class ModelLoad:
                         self.model_name,
                         MemoryError(f"Failed to clear sufficient cache for {self.model_name}"),
                     )
-                    return None
-            else:
-                logger.warning(
+                    return None  # Indent this return
+            else:  # Align this else
+                logger.warning(  # Indent this logger call
                     f"モデル '{self.model_name}' サイズ不明/0、キャッシュクリアはベストエフォート。"
                 )
 
             # 4. Load Components
             components: LoaderComponents | None = None
-            try:
+            try:  # Align try
                 logger.info(
                     f"モデル '{self.model_name}' ({model_type}) ロード開始 (デバイス: {self.device})..."
                 )
@@ -714,11 +714,11 @@ class ModelLoad:
                 logger.info(
                     f"モデル '{self.model_name}' ({model_type}) ロード成功 (デバイス: {self.device})。"
                 )
-                return components
+                return components  # Indent this return inside try
 
-            except Exception as e:
-                ModelLoad._handle_load_error(self.model_name, e)
-                return None
+            except Exception as e:  # Align except
+                ModelLoad._handle_load_error(self.model_name, e)  # Indent this
+                return None  # Indent this
 
     # --- Internal Loader Implementations ---
 
@@ -1155,14 +1155,14 @@ class ModelLoad:
             except FileNotFoundError as e:
                 logger.error(f"CLIPモデル作成エラー: ファイル未検出: {e}")
                 return None
-            except KeyError as e:
-                logger.error(f"CLIPモデル作成エラー: state_dict キーエラー: {e}")
-                return None
-            except Exception as e:
-                logger.error(
+            except KeyError as e:  # Fix: Align indentation with try
+                logger.error(f"CLIPモデル作成エラー: state_dict キーエラー: {e}")  # Fix: Indent content
+                return None  # Fix: Indent content
+            except Exception as e:  # Fix: Align indentation with try
+                logger.error(  # Fix: Indent content
                     f"CLIPモデル作成中に予期せぬエラー ({base_model}/{model_path}): {e}", exc_info=True
                 )
-                return None
+                return None  # Fix: Indent content
 
         def _calculate_specific_size(self, model_path: str, **kwargs) -> float:
             """Calculates size by temporarily creating the CLIP components on CPU.
@@ -1182,7 +1182,7 @@ class ModelLoad:
             calculated_size_mb = 0.0
             temp_components: CLIPComponents | None = None
             temp_helper_instance = None  # Initialize temp_helper_instance
-            try:
+            try:  # Fix: Ensure except/finally exist and are aligned
                 # Temporarily create on CPU
                 temp_helper_instance = ModelLoad._CLIPLoader(self.model_name, "cpu")  # Temp instance
                 temp_components = temp_helper_instance._create_clip_model_internal(
@@ -1194,22 +1194,31 @@ class ModelLoad:
                     # Original calculation seemed to be based on the classifier head. Let's stick to that.
                     classifier_model = temp_components["model"]
                     calculated_size_mb = ModelLoad._calculate_transformer_size_mb(classifier_model)
-                else:
-                    logger.warning(f"一時ロード CLIP '{self.model_name}' から有効な分類器取得失敗。")
-            except Exception as e:
-                logger.warning(f"一時ロード CLIP 計算中にエラー: {e}", exc_info=False)
-            finally:
-                if temp_components:
+                else:  # Fix: Align else with if
+                    logger.warning(
+                        f"一時ロード CLIP '{self.model_name}' から有効な分類器取得失敗。"
+                    )  # Fix: Indent
+            except Exception as e:  # Fix: Align except with try
+                logger.warning(f"一時ロード CLIP 計算中にエラー: {e}", exc_info=False)  # Fix: Indent
+                # Ensure calculated_size_mb is defined in case of early error
+                if "calculated_size_mb" not in locals():  # Fix: Indent
+                    calculated_size_mb = 0.0  # Fix: Indent
+            finally:  # Fix: Align finally with try
+                # Clean up temporary resources if they were created
+                if temp_components:  # Fix: Indent
                     # Manual cleanup of components in the temporary dict
-                    # del temp_components["model"] # Cannot delete keys from TypedDict
-                    # del temp_components["processor"] # Cannot delete keys from TypedDict
-                    # del temp_components["clip_model"] # Cannot delete keys from TypedDict
-                    del temp_components
-                if temp_helper_instance:  # Check if temp_helper_instance was created
-                    del temp_helper_instance  # Delete the temporary instance
-                gc.collect()
-            logger.debug(f"一時ロード CLIP サイズ計算完了: {calculated_size_mb:.2f} MB")
-            return calculated_size_mb
+                    # Cannot delete keys from TypedDict, just delete the dict ref
+                    temp_components = None  # Fix: Indent
+                if temp_helper_instance:  # Check if temp_helper_instance was created # Fix: Indent
+                    temp_helper_instance = None  # Release reference # Fix: Indent
+                gc.collect()  # Optional garbage collection attempt # Fix: Indent
+                if torch.cuda.is_available():  # Fix: Indent
+                    torch.cuda.empty_cache()  # If temp load used GPU # Fix: Indent
+
+            logger.debug(
+                f"一時ロード CLIP サイズ計算完了: {calculated_size_mb:.2f} MB"
+            )  # Fix: Align logger with try
+            return calculated_size_mb  # Fix: Align return
 
         @override
         def _load_components_internal(self, model_path: str, **kwargs) -> CLIPComponents:
@@ -1280,11 +1289,13 @@ class ModelLoad:
             # Temporarily remove the model's usage if it was loaded on GPU
             usage_without_model = current_usage - ModelLoad._get_model_memory_usage(model_name)
             if usage_without_model + model_size > max_cache:
-                logger.warning(
+                logger.warning(  # Fix: Indent logger under if
                     f"CPUキャッシュ不可: モデル '{model_name}' ({model_size / 1024:.3f}GB) を追加するとキャッシュ容量超過。解放試行..."
                 )
                 # Try clearing space for it
-                if not ModelLoad._clear_cache_internal(model_name, model_size):
+                if not ModelLoad._clear_cache_internal(
+                    model_name, model_size
+                ):  # Fix: Indent if under logger block
                     can_cache = False  # Still not enough space after clearing
 
         if not can_cache:
