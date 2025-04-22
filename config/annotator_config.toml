@@ -1,0 +1,532 @@
+[aesthetic_shadow_v1]
+model_path = "shadowlilac/aesthetic-shadow"
+device = "cuda"
+class = "AestheticShadow"
+estimated_size_gb = 4.065
+
+[aesthetic_shadow_v2]
+model_path = "NEXTAltair/cache_aestheic-shadow-v2"
+device = "cuda"
+class = "AestheticShadow"
+estimated_size_gb = 4.065
+
+[cafe_aesthetic]
+model_path = "cafeai/cafe_aesthetic"
+device = "cuda"
+class = "CafePredictor"
+estimated_size_gb = 0.32
+
+[ImprovedAesthetic]
+model_path = "https://github.com/christophschuhmann/improved-aesthetic-predictor/raw/main/sac+logos+ava1-l14-linearMSE.pth"
+base_model = "openai/clip-vit-large-patch14"
+device = "cuda"
+class = "ImprovedAesthetic"
+estimated_size_gb = 0.003
+
+[WaifuAesthetic]
+model_path = "https://huggingface.co/hakurei/waifu-diffusion-v1-4/resolve/main/models/aes-B32-v0.pth"
+base_model = "openai/clip-vit-base-patch32"
+device = "cuda"
+class = "WaifuAesthetic"
+activation_type = "ReLU"
+final_activation_type = "Sigmoid"
+estimated_size_gb = 0.002
+
+[idolsankaku-eva02-large-tagger-v1]
+model_path = "deepghs/idolsankaku-eva02-large-tagger-v1"
+class = "WDTagger"
+estimated_size_gb = 1.695
+
+[idolsankaku-swinv2-tagger-v1]
+model_path = "deepghs/idolsankaku-swinv2-tagger-v1"
+class = "WDTagger"
+estimated_size_gb = 0.587
+
+[Z3D-E621-Convnext]
+model_path = "toynya/Z3D-E621-Convnext"
+class = "Z3D_E621Tagger"
+estimated_size_gb = 0.544
+
+[wd-v1-4-convnext-tagger-v2]
+model_path = "SmilingWolf/wd-v1-4-convnext-tagger-v2"
+class = "WDTagger"
+estimated_size_gb = 0.542
+
+[wd-v1-4-convnextv2-tagger-v2]
+model_path = "SmilingWolf/wd-v1-4-convnextv2-tagger-v2"
+class = "WDTagger"
+estimated_size_gb = 0.543
+
+[wd-v1-4-moat-tagger-v2]
+model_path = "SmilingWolf/wd-v1-4-moat-tagger-v2"
+class = "WDTagger"
+estimated_size_gb = 0.456
+
+[wd-v1-4-swinv2-tagger-v2]
+model_path = "SmilingWolf/wd-v1-4-swinv2-tagger-v2"
+class = "WDTagger"
+estimated_size_gb = 0.636
+
+[wd-vit-tagger-v3]
+model_path = "SmilingWolf/wd-vit-tagger-v3"
+class = "WDTagger"
+estimated_size_gb = 0.529
+
+[wd-convnext-tagger-v3]
+model_path = "SmilingWolf/wd-convnext-tagger-v3"
+class = "WDTagger"
+estimated_size_gb = 0.552
+
+[wd-swinv2-tagger-v3]
+model_path = "SmilingWolf/wd-swinv2-tagger-v3"
+class = "WDTagger"
+estimated_size_gb = 0.653
+
+[wd-vit-large-tagger-v3]
+model_path = "SmilingWolf/wd-vit-large-tagger-v3"
+class = "WDTagger"
+estimated_size_gb = 1.761
+
+[wd-eva02-large-tagger-v3]
+model_path = "SmilingWolf/wd-eva02-large-tagger-v3"
+class = "WDTagger"
+estimated_size_gb = 1.761
+
+[BLIPLargeCaptioning]
+model_path = "Salesforce/blip-image-captioning-large"
+class = "BLIPTagger"
+estimated_size_gb = 1.75
+
+["blip2-opt-2.7b"]
+model_path = "Salesforce/blip2-opt-2.7b"
+class = "BLIP2Tagger"
+device = "cpu"
+estimated_size_gb = 16.74
+
+["blip2-opt-2.7b-coco"]
+model_path = "Salesforce/blip2-opt-2.7b-coco"
+class = "BLIP2Tagger"
+device = "cpu"
+estimated_size_gb = 16.743
+
+["blip2-opt-6.7b"]
+model_path = "Salesforce/blip2-opt-6.7b"
+class = "BLIP2Tagger"
+device = "cpu"
+estimated_size_gb = 34.658
+
+["blip2-opt-6.7b-coco"]
+model_path = "Salesforce/blip2-opt-6.7b-coco"
+class = "BLIP2Tagger"
+device = "cpu"
+estimated_size_gb = 34.661
+
+[blip2-flan-t5-xl]
+model_path = "Salesforce/blip2-flan-t5-xl"
+class = "BLIP2Tagger"
+device = "cpu"
+estimated_size_gb = 17.624
+
+[blip2-flan-t5-xl-coco]
+model_path = "Salesforce/blip2-flan-t5-xl-coco"
+class = "BLIP2Tagger"
+device = "cpu"
+estimated_size_gb = 17.627
+
+[blip2-flan-t5-xxl]
+model_path = "Salesforce/blip2-flan-t5-xxl"
+class = "BLIP2Tagger"
+device = "cpu"
+
+[GITLargeCaptioning]
+model_path = "microsoft/git-large-coco"
+class = "GITTagger"
+estimated_size_gb = 1.762
+device = "cpu"
+
+["ToriiGate-v0.3"]
+model_path = "Minthy/ToriiGate-v0.3"
+class = "ToriiGateTagger"
+device = "cpu"
+estimated_size_gb = 37.828
+
+[deepdanbooru-v3-20211112-sgd-e28]
+model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v3-20211112-sgd-e28/deepdanbooru-v3-20211112-sgd-e28.zip"
+class = "DeepDanbooruTagger"
+estimated_size_gb = 0.723
+
+[deepdanbooru-v4-20200814-sgd-e30]
+model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v4-20200814-sgd-e30/deepdanbooru-v4-20200814-sgd-e30.zip"
+class = "DeepDanbooruTagger"
+estimated_size_gb = 0.327
+
+[deepdanbooru-v3-20200915-sgd-e30]
+model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v3-20200915-sgd-e30/deepdanbooru-v3-20200915-sgd-e30.zip"
+class = "DeepDanbooruTagger"
+estimated_size_gb = 0.698
+
+[deepdanbooru-v3-20200101-sgd-e30]
+model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v3-20200101-sgd-e30/deepdanbooru-v3-20200101-sgd-e30.zip"
+class = "DeepDanbooruTagger"
+estimated_size_gb = 0.687
+
+[deepdanbooru-v1-20191108-sgd-e30]
+model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v1-20191108-sgd-e30/deepdanbooru-v1-20191108-sgd-e30.zip"
+class = "DeepDanbooruTagger"
+estimated_size_gb = 0.66
+
+["Gemini 2.5 Pro Preview"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["Gemini 2.5 Flash Preview"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["Gemini 2.5 Flash Preview (thinking)"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["o4 Mini High"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+[o3]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["o4 Mini"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["GPT-4.1"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["GPT-4.1 Mini"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["GPT-4.1 Nano"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["Kimi VL A3B Thinking (free)"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Llama 4 Maverick (free)"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Llama 4 Maverick"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Llama 4 Scout (free)"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Llama 4 Scout"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Molmo 7B D (free)"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["UI-TARS 72B  (free)"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Qwen2.5 VL 3B Instruct (free)"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Gemini 2.5 Pro Experimental (free)"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["Qwen2.5 VL 32B Instruct (free)"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Qwen2.5 VL 32B Instruct"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+[o1-pro]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["Mistral Small 3.1 24B (free)"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Mistral Small 3.1 24B"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Gemma 3 1B (free)"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["Gemma 3 4B (free)"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["Gemma 3 4B"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["Gemma 3 12B (free)"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["Gemma 3 12B"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["GPT-4o-mini Search Preview"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["GPT-4o Search Preview"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["Gemma 3 27B (free)"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["Gemma 3 27B"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["Phi 4 Multimodal Instruct"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["GPT-4.5 (Preview)"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["Gemini 2.0 Flash Lite"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3.7 Sonnet"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3.7 Sonnet (thinking)"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3.7 Sonnet (self-moderated)"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Gemini 2.0 Flash"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["Qwen VL Plus"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Qwen VL Max"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Qwen2.5 VL 72B Instruct (free)"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Qwen2.5 VL 72B Instruct"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Gemini 2.0 Flash Thinking Experimental 01-21 (free)"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+[MiniMax-01]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Gemini 2.0 Flash Thinking Experimental (free)"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+[o1]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["Grok 2 Vision 1212"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Gemini 2.0 Flash Experimental (free)"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["Nova Lite 1.0"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Nova Pro 1.0"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["LearnLM 1.5 Pro Experimental (free)"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["GPT-4o (2024-11-20)"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["Pixtral Large 2411"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Grok Vision Beta"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3.5 Haiku (self-moderated)"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3.5 Haiku"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3.5 Haiku (2024-10-22) (self-moderated)"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3.5 Haiku (2024-10-22)"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3.5 Sonnet (self-moderated)"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3.5 Sonnet"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Gemini 1.5 Flash 8B"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["Llama 3.2 11B Vision Instruct (free)"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Llama 3.2 11B Vision Instruct"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Llama 3.2 90B Vision Instruct"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Qwen2.5-VL 72B Instruct"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Pixtral 12B"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Qwen2.5-VL 7B Instruct (free)"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Qwen2.5-VL 7B Instruct"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Gemini 1.5 Flash 8B Experimental"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+[ChatGPT-4o]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["GPT-4o (2024-08-06)"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["GPT-4o-mini (2024-07-18)"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+[GPT-4o-mini]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3.5 Sonnet (2024-06-20) (self-moderated)"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3.5 Sonnet (2024-06-20)"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Gemini 1.5 Flash"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["GPT-4o (2024-05-13)"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+[GPT-4o]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["GPT-4o (extended)"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["Gemini 1.5 Pro"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
+
+["GPT-4 Turbo"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3 Haiku (self-moderated)"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3 Haiku"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3 Opus (self-moderated)"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3 Opus"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3 Sonnet (self-moderated)"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3 Sonnet"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
+["Gemini Pro Vision 1.0"]
+class = "GoogleApiAnnotator"
+max_output_tokens = 1800
