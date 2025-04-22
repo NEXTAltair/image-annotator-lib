@@ -1,22 +1,32 @@
 import gc
+import os
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, ClassVar, TypedDict, Union, cast, override
 
+import dotenv
 import onnxruntime as ort
 import psutil
 import tensorflow as tf
 import torch
 import torch.nn as nn
+from anthropic import Anthropic
+from google import genai
+from openai import OpenAI
 from transformers.models.auto.modeling_auto import AutoModelForVision2Seq
 from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.clip import CLIPModel, CLIPProcessor
 from transformers.pipelines import pipeline
 from transformers.pipelines.base import Pipeline
 
-from ..exceptions.errors import ModelLoadError, OutOfMemoryError
-from . import utils
+from ..exceptions.errors import (
+    ApiAuthenticationError,
+    ConfigurationError,
+    ModelLoadError,
+    OutOfMemoryError,
+)
+from . import config, utils
 from .config import config_registry
 from .utils import logger
 
@@ -47,6 +57,14 @@ class CLIPComponents(TypedDict):
     clip_model: CLIPModel
 
 
+class WebApiComponents(TypedDict):
+    """Web API アノテーターが `__enter__` で準備するコンポーネント。"""
+
+    client: Any  # 各プロバイダーのAPIクライアント (型は異なる)
+    api_model_id: str  # APIコールに使用する加工済みモデルID
+    provider_name: str  # プロバイダー名を追加
+
+
 # Union type for all possible loader component results
 LoaderComponents = Union[  # noqa: UP007
     TransformersComponents,
@@ -54,7 +72,221 @@ LoaderComponents = Union[  # noqa: UP007
     ONNXComponents,
     TensorFlowComponents,
     CLIPComponents,
+    WebApiComponents,
 ]
+
+# --- Web API Component Preparation ---
+
+
+def _find_model_entry_by_name(
+    model_name_short: str, available_models: dict[str, dict[str, Any]]
+) -> tuple[str, dict[str, Any]] | None:
+    """available_models 辞書から model_name_short に一致するエントリを探す。
+
+    Args:
+        model_name_short: 検索する短いモデル名。
+        available_models: `available_api_models.toml` からロードされたモデル情報。
+
+    Returns:
+        (model_id_on_provider, model_data) のタプル、または見つからない場合は None。
+    """
+    for model_id, data in available_models.items():
+        if data.get("model_name_short") == model_name_short:
+            return model_id, data
+    return None
+
+
+def _get_api_key(provider_name: str) -> str:
+    """プロバイダー名に基づいて環境変数からAPIキーを取得する。
+
+    .env ファイルのロードを試みる。
+
+    Args:
+        provider_name: プロバイダー名 (e.g., "Google", "OpenAI", "Anthropic", "OpenRouter").
+
+    Returns:
+        APIキー文字列。
+
+    Raises:
+        ApiAuthenticationError: 対応する環境変数が見つからない場合。
+        ConfigurationError: サポートされていないプロバイダー名の場合。
+    """
+    dotenv.load_dotenv()  # .env ファイルをロード
+
+    env_var_map = {
+        "Google": "GOOGLE_API_KEY",
+        "OpenAI": "OPENAI_API_KEY",
+        "Anthropic": "ANTHROPIC_API_KEY",
+        "OpenRouter": "OPENROUTER_API_KEY",
+    }
+    env_var_name = env_var_map.get(provider_name)
+
+    if not env_var_name:
+        # マップにないプロバイダーの場合は OpenRouter のキーを使用
+        logger.debug(
+            f"プロバイダー '{provider_name}' はマッピングされていません。OpenRouterのAPIキーを試みます。"
+        )
+        env_var_name = "OPENROUTER_API_KEY"
+
+    # 最終的に決まった環境変数名でAPIキーを取得
+    api_key = os.getenv(env_var_name)
+    if not api_key:
+        # フォールバックした場合も考慮し、provider_name をエラーメッセージに含める
+        raise ApiAuthenticationError(
+            provider_name=provider_name,
+            message=f"環境変数 '{env_var_name}' が設定されていないか、空です。 (プロバイダー: {provider_name})",
+        )
+
+    return api_key
+
+
+def _process_model_id(model_id_on_provider: str, provider_name: str) -> str:
+    """プロバイダーに応じてモデルIDのプレフィックスを除去する。
+
+    Args:
+        model_id_on_provider: TOMLから取得した元のモデルID。
+        provider_name: プロバイダー名。
+
+    Returns:
+        加工済みのモデルID。
+    """
+    processed_id = model_id_on_provider
+    prefix_to_remove = ""
+
+    if provider_name == "OpenAI" and model_id_on_provider.startswith("openai/"):
+        prefix_to_remove = "openai/"
+    elif provider_name == "Google" and model_id_on_provider.startswith("google/"):
+        # Google の場合は genai ライブラリがプレフィックスなしを期待するため除去
+        prefix_to_remove = "google/"
+    elif provider_name == "Anthropic" and model_id_on_provider.startswith("anthropic/"):
+        prefix_to_remove = "anthropic/"
+    # OpenRouter は通常プレフィックス付きで渡すので、除去しない
+
+    if prefix_to_remove:
+        processed_id = model_id_on_provider.removeprefix(prefix_to_remove)
+        logger.debug(
+            f"{provider_name} モデル ID のプレフィックスを除去: '{model_id_on_provider}' -> '{processed_id}'"
+        )
+
+    return processed_id
+
+
+def _initialize_api_client(provider_name: str, api_key: str) -> Any:
+    """プロバイダー名とAPIキーに基づいてAPIクライアントを初期化する。
+
+    Args:
+        provider_name: プロバイダー名。
+        api_key: APIキー。
+
+    Returns:
+        初期化されたAPIクライアントオブジェクト。
+
+    Raises:
+        ConfigurationError: サポートされていないプロバイダー名の場合、または必要なライブラリがインストールされていない場合。
+    """
+    if provider_name == "Google":
+        if not _GOOGLE_GENAI_AVAILABLE:
+            raise ConfigurationError(
+                "Google Generative AI SDK (google-generativeai) がインストールされていません。"
+            )
+        if genai is None:  # 追加: genaiがNoneの場合のエラーハンドリング
+            raise ConfigurationError("Google Generative AI SDK のインポートに失敗しました。")
+        genai.configure(api_key=api_key)
+        # Google の場合、特定のモデルを指定せずクライアントを初期化
+        # モデル名は API コール時に指定するため、ここでは `GenerativeModel` を返さない
+        return genai  # genai モジュール自体を返す
+    elif provider_name == "OpenAI":
+        return OpenAI(api_key=api_key)
+    elif provider_name == "Anthropic":
+        return Anthropic(api_key=api_key)
+    elif provider_name == "OpenRouter":
+        # OpenRouter は OpenAI 互換クライアントを使用することが多い
+        # 必要に応じて base_url を設定
+        openrouter_base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+        return OpenAI(api_key=api_key, base_url=openrouter_base_url)
+    else:
+        # 他のプロバイダー (Meta, Qwen など) のクライアント初期化を追加
+        logger.warning(f"プロバイダー '{provider_name}' のAPIクライアント初期化は未実装です。")
+        return None  # 今は None を返す
+
+
+def prepare_web_api_components(model_name: str) -> WebApiComponents:
+    """指定されたモデル名に基づいてWeb APIコンポーネントを準備する。
+
+    available_api_models.toml を読み込み、モデル情報を検索し、
+    環境変数からAPIキーを取得して、APIクライアントを初期化する。
+
+    Args:
+        model_name: ユーザーが指定した短いモデル名 (e.g., "Gemini 1.5 Pro")。
+
+    Returns:
+        準備されたコンポーネントを含む WebApiComponents TypedDict。
+
+    Raises:
+        ConfigurationError: モデル情報が見つからない、APIキーが見つからない、
+                         またはクライアント初期化に失敗した場合。
+        ApiAuthenticationError: APIキーの取得に失敗した場合。
+    """
+    logger.debug(f"Web API コンポーネント準備開始: model_name='{model_name}'")
+
+    # 1. available_api_models.toml をロード
+    available_models_data = config.load_available_api_models()
+    if not available_models_data:
+        raise ConfigurationError(
+            "利用可能なAPIモデル情報 (available_api_models.toml) がロードされていません。"
+        )
+
+    # 2. モデルエントリを検索
+    model_entry = _find_model_entry_by_name(model_name, available_models_data)
+    if not model_entry:
+        raise ConfigurationError(
+            f"モデル名 '{model_name}' に対応するエントリが available_api_models.toml に見つかりません。"
+        )
+    model_id_on_provider, model_data = model_entry
+    provider_name = model_data.get("provider")
+    if not provider_name:
+        raise ConfigurationError(f"モデル '{model_name}' のエントリに 'provider' が含まれていません。")
+
+    logger.debug(f"モデル情報発見: id='{model_id_on_provider}', provider='{provider_name}'")
+
+    # 3. API キーを取得
+    try:
+        api_key = _get_api_key(provider_name)
+    except ApiAuthenticationError as e:
+        # エラーメッセージにモデル名を追加して再送出
+        raise ApiAuthenticationError(
+            provider_name=e.provider_name, message=f"{e.message} (モデル: {model_name})"
+        ) from e
+    except ConfigurationError as e:  # ConfigurationError も捕捉
+        raise ConfigurationError(f"APIキー取得設定エラー ({model_name}): {e}") from e
+
+    # 4. モデル ID を加工
+    api_model_id = _process_model_id(model_id_on_provider, provider_name)
+
+    # 5. API クライアントを初期化
+    try:
+        client = _initialize_api_client(provider_name, api_key)
+        # Google以外でクライアントがNoneはエラーとする (Googleはgenaiモジュール自体を返すためNoneにならない想定)
+        if client is None and provider_name != "Google":
+            raise ConfigurationError(
+                f"プロバイダー '{provider_name}' のAPIクライアント初期化に失敗しました (未実装またはライブラリ不足)。"
+            )
+    except ConfigurationError as e:
+        raise ConfigurationError(f"APIクライアント初期化エラー ({model_name}): {e}") from e
+    except Exception as e:
+        raise ConfigurationError(f"APIクライアント初期化中に予期せぬエラー ({model_name}): {e}") from e
+
+    logger.info(
+        f"Web API コンポーネント準備完了: provider='{provider_name}', api_model_id='{api_model_id}'"
+    )
+
+    # 6. WebApiComponents を作成して返す
+    components: WebApiComponents = {
+        "client": client,
+        "api_model_id": api_model_id,
+        "provider_name": provider_name,
+    }
+    return components
 
 
 # --- ModelLoad Refactoring ---
@@ -532,7 +764,7 @@ class ModelLoad:
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            logger.debug("クリーンアップ完了。")
+                logger.debug("クリーンアップ完了。")
         except Exception as e:
             logger.error(f"GC/CUDAキャッシュクリア中にエラー: {e}", exc_info=True)
         logger.info(f"モデル '{model_name}' 解放処理完了。")
