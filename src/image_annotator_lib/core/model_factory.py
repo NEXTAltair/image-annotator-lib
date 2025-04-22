@@ -96,14 +96,14 @@ def _find_model_entry_by_name(
     return None
 
 
-def _get_api_key(provider_name: str) -> str:
+def _get_api_key(provider_name: str, api_model_id: str) -> str:
     """プロバイダー名に基づいて環境変数からAPIキーを取得する。
 
     .env ファイルのロードを試みる。
 
     Args:
         provider_name: プロバイダー名 (e.g., "Google", "OpenAI", "Anthropic", "OpenRouter").
-
+        api_model_id: モデルID (e.g., "gemini-1.5-pro", "gemma-3-27b-it:free").
     Returns:
         APIキー文字列。
 
@@ -121,8 +121,8 @@ def _get_api_key(provider_name: str) -> str:
     }
     env_var_name = env_var_map.get(provider_name)
 
-    if not env_var_name:
-        # マップにないプロバイダーの場合は OpenRouter のキーを使用
+    if not env_var_name or ":" in api_model_id:
+        # マップにないプロバイダーか `:` が含まれている場合は OpenRouter のキーを使用
         logger.debug(
             f"プロバイダー '{provider_name}' はマッピングされていません。OpenRouterのAPIキーを試みます。"
         )
@@ -185,29 +185,16 @@ def _initialize_api_client(provider_name: str, api_key: str) -> Any:
         ConfigurationError: サポートされていないプロバイダー名の場合、または必要なライブラリがインストールされていない場合。
     """
     if provider_name == "Google":
-        if not _GOOGLE_GENAI_AVAILABLE:
-            raise ConfigurationError(
-                "Google Generative AI SDK (google-generativeai) がインストールされていません。"
-            )
-        if genai is None:  # 追加: genaiがNoneの場合のエラーハンドリング
-            raise ConfigurationError("Google Generative AI SDK のインポートに失敗しました。")
-        genai.configure(api_key=api_key)
-        # Google の場合、特定のモデルを指定せずクライアントを初期化
-        # モデル名は API コール時に指定するため、ここでは `GenerativeModel` を返さない
-        return genai  # genai モジュール自体を返す
+        return genai.Client(api_key=api_key)
     elif provider_name == "OpenAI":
         return OpenAI(api_key=api_key)
     elif provider_name == "Anthropic":
         return Anthropic(api_key=api_key)
-    elif provider_name == "OpenRouter":
-        # OpenRouter は OpenAI 互換クライアントを使用することが多い
-        # 必要に応じて base_url を設定
-        openrouter_base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-        return OpenAI(api_key=api_key, base_url=openrouter_base_url)
     else:
-        # 他のプロバイダー (Meta, Qwen など) のクライアント初期化を追加
-        logger.warning(f"プロバイダー '{provider_name}' のAPIクライアント初期化は未実装です。")
-        return None  # 今は None を返す
+        # ほかは全部OpenRouter
+        # base_url を設定
+        openrouter_base_url = "https://openrouter.ai/api/v1"
+        return OpenAI(api_key=api_key, base_url=openrouter_base_url)
 
 
 def prepare_web_api_components(model_name: str) -> WebApiComponents:
@@ -249,9 +236,12 @@ def prepare_web_api_components(model_name: str) -> WebApiComponents:
 
     logger.debug(f"モデル情報発見: id='{model_id_on_provider}', provider='{provider_name}'")
 
-    # 3. API キーを取得
+    # 3. モデル ID を加工 "provider/" のプレフィックスを除去
+    api_model_id = _process_model_id(model_id_on_provider, provider_name)
+
+    # 4. API キーを取得
     try:
-        api_key = _get_api_key(provider_name)
+        api_key = _get_api_key(provider_name, api_model_id)
     except ApiAuthenticationError as e:
         # エラーメッセージにモデル名を追加して再送出
         raise ApiAuthenticationError(
@@ -260,17 +250,9 @@ def prepare_web_api_components(model_name: str) -> WebApiComponents:
     except ConfigurationError as e:  # ConfigurationError も捕捉
         raise ConfigurationError(f"APIキー取得設定エラー ({model_name}): {e}") from e
 
-    # 4. モデル ID を加工
-    api_model_id = _process_model_id(model_id_on_provider, provider_name)
-
     # 5. API クライアントを初期化
     try:
         client = _initialize_api_client(provider_name, api_key)
-        # Google以外でクライアントがNoneはエラーとする (Googleはgenaiモジュール自体を返すためNoneにならない想定)
-        if client is None and provider_name != "Google":
-            raise ConfigurationError(
-                f"プロバイダー '{provider_name}' のAPIクライアント初期化に失敗しました (未実装またはライブラリ不足)。"
-            )
     except ConfigurationError as e:
         raise ConfigurationError(f"APIクライアント初期化エラー ({model_name}): {e}") from e
     except Exception as e:

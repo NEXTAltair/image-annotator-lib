@@ -4,8 +4,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import TypeVar
 
+from . import api_model_discovery
 from .base import BaseAnnotator
-from .config import config_registry
+from .config import AVAILABLE_API_MODELS_CONFIG_PATH, config_registry, load_available_api_models
 from .utils import logger
 
 T = TypeVar("T", bound=BaseAnnotator)
@@ -164,9 +165,6 @@ def _register_models(
                             f"モデル名 '{model_name}' は既に登録されています。クラス '{model_cls.__name__}' で上書きします。"
                         )
                     registry[model_name] = model_cls
-                    logger.info(
-                        f"{model_type_name} モデルを登録しました: '{model_name}' -> {model_cls.__name__}"
-                    )
                 else:
                     logger.error(
                         f"モデル '{model_name}' のクラス '{desired_class_name}' が見つかりましたが、{base_class.__name__} を継承しておらず predict メソッドも持ちません。スキップします。"
@@ -210,14 +208,6 @@ def register_annotators() -> dict[str, ModelClass]:
     return _MODEL_CLASS_OBJ_REGISTRY
 
 
-# TODO[DESIGN]: レジストリの責務分離を検討
-# - 現状: クラス登録とインスタンス管理が分離している(_MODEL_CLASS_OBJ_REGISTRYとapi.pyの_MODEL_INSTANCE_REGISTRY)
-# - 課題:
-#   1. レジストリ関連の機能が複数箇所に分散
-#   2. get_cls_obj_registry()が内部実装を直接露出
-# - 改善案:
-#   - レジストリ機能の一元管理を検討
-#   - ただし、既存コードへの影響が大きいため、メジャーバージョンアップ時に対応
 def get_cls_obj_registry() -> dict[str, ModelClass]:
     """モデルクラスオブジェクトのレジストリを取得
 
@@ -237,14 +227,130 @@ def list_available_annotators() -> list[str]:
     return list(_MODEL_CLASS_OBJ_REGISTRY.keys())
 
 
+def _find_annotator_class_by_provider(provider: str, available_classes: dict[str, ModelClass]) -> str:
+    """プロバイダー名に基づいてアノテータークラス名を検索する。
+
+    - provider が google, openai, anthropic の場合、名前に provider が含まれるクラスを探す。
+    - それ以外の場合、または一致するクラスが見つからない場合は OpenRouterApiAnnotator を返す。
+    """
+    provider_lower = provider.lower()
+    specific_providers = {"google", "openai", "anthropic"}
+
+    if provider_lower in specific_providers:
+        # 特定プロバイダーの場合のみクラス名検索
+        for class_name in available_classes:
+            if provider_lower in class_name.lower():
+                logger.debug(f"プロバイダー '{provider}' に一致するクラスが見つかりました: {class_name}")
+                return class_name
+        # 特定プロバイダーだが一致するクラスがなかった場合もフォールバック
+        logger.warning(
+            f"プロバイダー '{provider}' に一致するクラスが見つかりません。OpenRouterApiAnnotator を使用します。"
+        )
+        return "OpenRouterApiAnnotator"
+    else:
+        # 特定プロバイダー以外は OpenRouter を使用
+        logger.debug(
+            f"プロバイダー '{provider}' は特定プロバイダーではないため、OpenRouterApiAnnotator を使用します。"
+        )
+        return "OpenRouterApiAnnotator"
+
+
+def _update_config_with_api_models() -> None:
+    """available_api_models.toml を読み込み、annotator_config.toml にデフォルト設定を追加する。"""
+    logger.debug("Web API モデルに基づいて annotator_config.toml の更新を開始します...")
+    try:
+        # 利用可能なAPIモデル情報をロード
+        api_models = load_available_api_models()
+        if not api_models:
+            logger.debug("利用可能な Web API モデル情報が見つかりません。設定の更新をスキップします。")
+            return
+
+        logger.debug(f"{len(api_models)} 件の利用可能な Web API モデル情報をロードしました。")
+
+        # 利用可能なアノテータークラスを収集
+        available_classes = _gather_available_classes("model_class")
+        if not available_classes:
+            logger.warning(
+                "利用可能なアノテータークラスが見つかりません。クラス名のマッピングができません。"
+            )
+            # 続行するが、クラス名は OpenRouterApiAnnotator にフォールバックされる
+
+        # 各APIモデルについて設定を追加
+        for model_id, model_info in api_models.items():
+            if not isinstance(model_info, dict):
+                logger.warning(
+                    f"モデルID '{model_id}' の情報形式が不正です (辞書ではありません)。スキップします。"
+                )
+                continue
+
+            model_name_short = model_info.get("model_name_short")
+            provider = model_info.get("provider")
+
+            if not model_name_short or not provider:
+                logger.warning(
+                    f"モデルID '{model_id}' の情報に model_name_short または provider がありません。スキップします。"
+                )
+                continue
+
+            # プロバイダー名からクラス名を決定
+            if ":" in model_id:  # モデルIDに `:` が含まれている場合は、`OpenRouterApiAnnotator` を使用する
+                target_class_name = "OpenRouterApiAnnotator"
+            else:
+                target_class_name = _find_annotator_class_by_provider(provider, available_classes)
+
+            # デフォルト設定を追加 (class と max_output_tokens)
+            # add_default_setting はキーが存在しない場合のみ追加し、自動保存する
+            config_registry.add_default_setting(model_name_short, "class", target_class_name)
+            config_registry.add_default_setting(model_name_short, "max_output_tokens", 1800)
+
+        logger.debug("annotator_config.toml の Web API モデル設定の更新が完了しました。")
+
+    except Exception as e:
+        logger.error(
+            f"annotator_config.toml の自動更新中に予期せぬエラーが発生しました: {e}", exc_info=True
+        )
+
+
 def initialize_registry() -> None:
     """
     loggerとレジストリの初期化を明示的に行う関数。
     必ずlogger初期化後に呼び出すこと。
+    Web API モデル情報の取得と設定ファイルの自動更新も行う。
     """
-    from .utils import init_logger
+    from .utils import init_logger  # init_logger はここでインポート
 
     init_logger()
-    logger.debug("アノテータレジストリを初期化中...")
+    logger.debug("レジストリ初期化プロセスを開始します...")
+
+    # --- Web API モデル情報の取得と設定ファイルの自動更新 --- #
+    try:
+        if not AVAILABLE_API_MODELS_CONFIG_PATH.exists():
+            logger.info(
+                f"{AVAILABLE_API_MODELS_CONFIG_PATH} が見つかりません。APIから最新情報を取得します..."
+            )
+            try:
+                # APIから取得してtomlファイルを生成/更新
+                api_model_discovery._fetch_and_update_vision_models()
+                logger.info(
+                    f"API からモデル情報を取得し、{AVAILABLE_API_MODELS_CONFIG_PATH} を更新しました。"
+                )
+            except Exception as api_e:
+                # API取得に失敗しても、処理は続行する（ログには残す）
+                logger.error(f"API からのモデル情報取得中にエラーが発生しました: {api_e}", exc_info=True)
+                logger.warning(
+                    "APIからのモデル情報取得に失敗したため、Web API モデルの自動設定は行われない可能性があります。"
+                )
+        else:
+            logger.debug(f"{AVAILABLE_API_MODELS_CONFIG_PATH} が存在します。既存のファイルを使用します。")
+
+        # available_api_models.toml を読み込み、annotator_config.toml を更新
+        _update_config_with_api_models()
+
+    except Exception as e:
+        # このステップ全体でエラーが発生しても初期化は続行する
+        logger.error(f"Web API モデル情報の処理中にエラーが発生しました: {e}", exc_info=True)
+    # --- ここまで --- #
+
+    logger.debug("アノテータ登録を開始します...")
     register_annotators()
     logger.debug(f"レジストリの初期化が完了しました。登録済みアノテータ: {len(_MODEL_CLASS_OBJ_REGISTRY)}")
