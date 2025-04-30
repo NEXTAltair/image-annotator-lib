@@ -1,0 +1,464 @@
+---
+description: ALWAYS INCLUDE to HAVE Project Context
+globs:
+alwaysApply: false
+---
+---
+description: ALWAYS INCLUDE to HAVE Project Context.
+globs:
+alwaysApply: true
+---
+# メモリファイル構成と参照ルール (AI向け指示)
+
+これは、ファイルシステム用いドキュメント化·メモリ維持行うための基本原則、必要ファイル、ワークフロー構成、重要手順まとめたもの。
+メモリファイルは、必須コアファイルと任意コンテキストファイルで構成。ファイルは明確階層構造で積上げ。
+
+```mermaid
+flowchart TD
+    PB[ [product_requirement_docs.md](mdc:docs/product_requirement_docs.md) ] --> PC[ [technical.md](mdc:docs/technical.md) ]
+    PB --> SP[ [architecture.md](mdc:docs/architecture.md) ]
+
+    SP --> TC[ [tasks_plan.md](mdc:tasks/tasks_plan.md) ]
+    PC --> TC
+    PB --> TC
+
+    TC --> AC[ [active_context.md](mdc:tasks/active_context.md) ]
+
+    AC --> ER[ [error-documentation.mdc](mdc:.cursor/rules/error-documentation.mdc)]
+    AC --> LL[ [lessons-learned.mdc](mdc:.cursor/rules/lessons-learned.mdc) ]
+
+    subgraph LIT[ @docs/literature ]
+        L1[...]
+        L2[...]
+    end
+
+    subgraph RFC[ @tasks/rfc/ ]
+        R1[...]
+        R2[...]
+    end
+
+    PC --o LIT
+    TC --o RFC
+```
+
+## 1. コアファイル(必須)
+
+7ファイル:
+
+1. [product_requirement_docs.md](mdc:docs/product_requirement_docs.md) (docs/product_requirement_docs.md): プロジェクトPRD(製品要求仕様書)/SOP。
+   - プロジェクト存在理由
+   - 解決問題
+   - コア要件·目標定義
+   - 他ファイル形成基礎文書
+   - ここ記載ルールが何より優先ルール
+   - 不存在時、プロジェクト開始時作成
+
+2. [architecture.md](mdc:docs/architecture.md) (docs/architecture.md): システムアーキテクチャ
+   - 動作方法
+   - コンポーネント間関係
+   - 依存関係
+   - ソリューションワークフロー
+   - Mermaidによるソリューション概要図:各コンポーネント·コードフロー
+
+3. [technical.md](mdc:docs/technical.md) (docs/technical.md): 開発環境·スタック
+   - 使用技術
+   - 開発セットアップ
+   - 主要技術決定
+   - 使用中デザインパターン
+   - 技術制約
+
+4. [tasks_plan.md](mdc:tasks/tasks_plan.md) (tasks/tasks_plan.md): 詳細タスクバックログ
+
+   - 詳細タスクリスト·進行状況
+   - 完了事項
+   - 残存構築作業
+   - 現状
+   - 既知問題点
+
+5. [active_context.md](mdc:tasks/active_context.md) (tasks/active_context.md): 開発現状
+   - 現作業焦点
+   - 進行中決定·検討事項
+   - 最近変更
+   - 次ステップ
+
+6. [error-documentation.mdc](mdc:.cursor/rules/error-documentation.mdc) (.cursor/rules/error-documentation.mdc):
+   - プロジェクト中発見修正·再利用可能修正は @error-documentation.mdc に記録、同ミス繰返防止。
+   - 既知問題:状態、背景、解決策
+
+7. [lessons-learned.mdc](mdc:.cursor/rules/lessons-learned.mdc) (.cursor/rules/lessons-learned.mdc): 各プロジェクト学習記録
+   - 重要パターン、好み、プロジェクト知識収集
+   - @lessons-learned.mdc に詳細記載
+
+
+## 2. コンテキストファイル (任意)
+
+- **`docs/literature/`**: 文献調査·研究記録用。
+- **`tasks/rfc/`**: Request for Comments (RFC) 保存用。特定機能詳細仕様·議論。
+- **追加コンテキスト:** 必要応じ `docs/` または `tasks/` に追加ファイル·フォルダ作成可 (統合仕様、テスト戦略、ベンチマーク等)。
+
+## 3. ドキュメント参照ルール
+
+### 3.1. 基本原則
+- **ドキュメント参照義務化:** コード実装·変更時は、必ず関連ドキュメント参照。
+- **参照順序 (推奨):**
+  1.  `tasks/active_context.md` (現在の作業内容)
+  2.  `tasks/tasks_plan.md` (タスク全体像)
+  3.  `docs/architecture.md` (システム構造)
+  4.  `docs/technical.md` (技術詳細)
+  5.  `docs/product_requirement_docs.md` (プロジェクト目標・要件)
+  6.  `.cursor/rules/lessons-learned.mdc` (過去の知見)
+  7.  `.cursor/rules/error-documentation.mdc` (既知の問題)
+  8.  `tasks/rfc/` (特定のRFC)
+  9.  `docs/literature/` (関連研究)
+
+### 3.2. ドキュメント参照チェックリスト
+- [ ] 実装前に仕様書([product_requirement_docs.md](mdc:docs/product_requirement_docs.md))確認したか?
+- [ ] 計画書([tasks_plan.md](mdc:tasks/tasks_plan.md))と実装内容整合しているか?
+- [ ] アーキテクチャ([architecture.md](mdc:docs/architecture.md))に準拠しているか?
+- [ ] 技術仕様([technical.md](mdc:docs/technical.md))に準拠しているか?
+- [ ] 関連する過去の知見([lessons-learned.mdc](mdc:.cursor/rules/lessons-learned.mdc))やエラー([error-documentation.mdc](mdc:.cursor/rules/error-documentation.mdc))を参照したか?
+
+## 4. ドキュメント更新ルール
+
+### 4.1. 基本原則
+- **ドキュメント更新義務化:** コード変更時は、関連ドキュメントも適切更新。
+
+### 4.2. 更新タイミング
+- コード変更時
+- 仕様変更時
+- 計画変更時
+- 新パターン発見時
+- 重要変更後
+- ユーザーが**メモリファイル更新**依頼時(全コアファイルレビュー)
+- コンテキスト明確化必要時
+- 計画主要部分検証時
+
+### 4.3. 更新内容
+- 変更点詳細
+- 変更理由
+- 影響範囲
+- 関連他ドキュメントへの影響
+
+### 4.4. 更新プロセス (推奨)
+```mermaid
+flowchart TD
+    Start[Update Process]
+
+    subgraph Process
+        P1[Review Core Files]
+        P2[Document Current State in [active_context.md](mdc:tasks/active_context.md) and [tasks_plan.md](mdc:tasks/tasks_plan.md) ]
+        P3[Clarify Next Steps and document in [tasks_plan.md](mdc:tasks/tasks_plan.md) ]
+        P4[Update [lessons-learned.mdc](mdc:.cursor/rules/lessons-learned.mdc), [error-documentation.mdc](mdc:.cursor/rules/error-documentation.mdc)]
+        P5[Update [architecture.md](mdc:docs/architecture.md), [technical.md](mdc:docs/technical.md), [product_requirement_docs.md](mdc:docs/product_requirement_docs.md) as needed]
+
+        P1 --> P2 --> P3 --> P4 --> P5
+    end
+
+    Start --> Process
+```
+
+注: **メモリファイル更新**発生時は、必ず全コアファイルレビュー。特に [active_context.md](mdc:tasks/active_context.md), [tasks_plan.md](mdc:tasks/tasks_plan.md), [architecture.md](mdc:docs/architecture.md) 重点チェック。
+
+### 4.5. ドキュメント更新チェックリスト
+- [ ] 関連ドキュメント更新したか?
+- [ ] 更新ドキュメントは他ドキュメント同フォーマット記載か?
+- [ ] ドキュメント間情報整合性確認したか?
+
+## 5. ライブラリ情報: image-annotator-lib
+
+# image-annotator-lib 内部実装ルール・設計概要 (AI 向け指示)
+
+このドキュメントは、`image-annotator-lib` ライブラリの内部実装に関するルール、設計概要、および統合による主要な変更点を記述する。AI はコードを実装・変更する際に [coding-rules.mdc](mdc:.cursor/rules/coding-rules.mdc) を守ったうえでこれらの指示に従うこと。
+
+## 1. 内部実装ルール (AI 向け指示)
+
+### 1.1. クラス責務
+
+AI は `image-annotator-lib` の内部クラスを実装・変更する際、以下の責務分担に従うこと。
+
+- **`BaseAnnotator` (`core/base.py`)**:
+  - すべてのアノテーターの共通インターフェース（抽象メソッド）を定義すること。
+  - 共通の `predict()` メソッド（チャンク処理、エラーハンドリング含む）を実装すること。
+  - 標準化された結果 (`AnnotationResult`) を生成する `_generate_result()` メソッドを提供すること。
+- **フレームワーク別基底クラス (`core/base.py` 内、例: `TransformersBaseAnnotator`)**:
+  - フレームワーク固有の初期化処理 (`__init__`)、リソース管理 (`__enter__`, `__exit__`) を実装すること。
+  - フレームワーク固有の画像前処理 (`_preprocess_images`)、推論実行 (`_run_inference`)、出力フォーマット (`_format_predictions`) の**デフォルト実装**を提供すること。
+- **具象モデルクラス (`models/` 配下)**:
+  - モデル固有の初期化（設定読み込み、タグ/ラベルロードなど）を行うこと。
+  - フレームワーク別基底クラスのメソッドを必要に応じてオーバーライドし、モデル固有の処理（特に `_generate_tags`）を実装すること。
+- **`ModelLoad` (`core/model_factory.py`)**:
+  - 各フレームワークに対応したモデルのロード、キャッシュ管理（LRU、CPU 退避）、メモリ使用量推定、リソース解放の責務を担うこと。
+- **`core/registry.py` モジュール**:
+  - モジュールレベルの関数と辞書を用いて、`models/` ディレクトリ内の具象モデルクラスを動的に検出し、設定ファイル に基づいてモデル名とクラスを紐付けて登録する責務を担うこと。
+
+### 1.2. オーバーライドルール
+
+- **禁止:**
+  - `BaseAnnotator.predict()`: 共通実装を使用し、**絶対にオーバーライドしないこと**。(.clinerules も参照)
+  - `BaseAnnotator._generate_result()`: 標準の結果生成処理を使用し、**オーバーライドしないこと**。
+- **必須:**
+  - `_preprocess_images()`: フレームワーク別基底クラスまたは具象モデルクラスで**必ず実装すること**。
+  - `_run_inference()`: フレームワーク別基底クラスまたは具象モデルクラスで**必ず実装すること**。
+  - `_format_predictions()`: フレームワーク別基底クラスまたは具象モデルクラスで**必ず実装すること**。
+  - `_generate_tags()`: 具象モデルクラスで**必ず実装すること**。
+- **推奨:**
+  - `__enter__()`, `__exit__()`: フレームワーク別基底クラスで実装することを推奨する。
+
+### 1.3. 参照
+
+- クラス間のアクセス制御（カプセル化）については を参照すること。
+
+## 2. 設計概要と変更のポイント
+
+### 2.1. 目的
+
+- コードの重複削減、API の統一、メンテナンス性の向上、機能拡張の容易化を図ること。特にモデル管理 (`ModelLoad`) とクラス登録 (`registry.py`) の共通化を重視すること。
+
+### 2.2. 主要な機能
+
+- 画像タギング､キャプショニング､スコアリング機能 (Annotator)
+- 設定ファイル [annotator_config.toml](mdc:src/image_annotator_lib/resources/system/annotator_config.toml) 駆動のモデル選択・設定。
+- 統一された高機能モデル管理 (動的登録、メモリ管理、エラーハンドリング)。
+- 統一された API インターフェース (`Annotator` クラス経由、または直接モデルクラス利用)。
+
+### 2.3. 統合による主な変更点と理由
+
+- **`BaseAnnotator` への統一:**
+  - **変更:** Tagger と Scorer の基底クラスを `BaseAnnotator` に統一した。
+  - **理由:** 異なる種類のアノテーターを共通のインターフェースで扱えるようにし、ポリモーフィズムを実現するため。共通処理を集約しやすくするため。
+- **`predict` メソッドの共通化:**
+  - **変更:** 予測処理のメインロジック（チャンク分割、エラーハンドリング）を `BaseAnnotator.predict()` に実装し、サブクラスでのオーバーライドを禁止した。サブクラスはコア処理（前処理、推論、フォーマット、タグ生成）の抽象メソッド実装に集中する。
+  - **理由:** 冗長な実装を排除し、エラーハンドリングやバッチ処理のロジックを一元化するため。サブクラスの実装を簡略化するため。
+- **`ModelLoad` の導入・強化:**
+  - **変更:** モデルのロード、キャッシュ管理（LRU、CPU 退避）、メモリ使用量推定、リソース解放の責務を `ModelLoad` クラス (`core/model_factory.py`) に集約した。フレームワークごとのローダークラスを内部で使用する構造に変更した。
+  - **理由:** リソース管理ロジックをアノテータークラスから分離し、責務を明確にするため。より高度で一貫性のあるメモリ管理を実現するため。
+- **`registry.py` モジュールの導入:**
+  - **変更:** `models/` ディレクトリ内のモデルクラスを動的に検出し、設定ファイルに基づいて登録する機能を `core/registry.py` モジュールとして実装した。
+  - **理由:** モデルクラスの追加・変更時にコードの修正を不要にし、拡張性を高めるため。設定ファイル駆動の柔軟なモデル管理を実現するため。
+- **`AnnotationResult` への統一:**
+  - **変更:** `predict()` の戻り値形式を `list[AnnotationResult]` TypedDict に統一した。
+  - **理由:** ライブラリの出力形式を標準化し、利用側での処理を容易にするため。エラー情報なども含められるようにするため。
+
+## 3. 補足情報 (参考)
+
+### 3.2. 主要クラス/モジュール
+
+- **`Annotator` (`annotator.py`)**: ユーザー向け統合 API。
+- **`BaseAnnotator` (`core/base.py`)**: 共通抽象基底クラス。
+- **`ModelLoad` (`core/model_factory.py`)**: モデルロード/キャッシュ管理。
+- **`core/registry.py`**: モデルクラス登録モジュール。
+- **`core/config.py`**: 設定管理クラス `ModelConfigRegistry` (設定ファイル全体の読み込み・保持、設定値へのアクセス提供) と共有インスタンス `config_registry`、関連定数を定義。
+- **`core/utils.py`**: ロギング設定 (`setup_logger`) および汎用ユーティリティ (ファイルI/O、ネットワーク、画像処理など)。
+- **各種 Tagger/Scorer 実装クラス (`models/`)**: `BaseAnnotator` 継承クラス。
+- **共通例外クラス (`exceptions/errors.py`)**: `AnnotatorError` など。
+
+### 3.3. コーディング規約/開発環境 (主要ツール)
+
+(詳細は [coding-rules.mdc](mdc:.cursor/rules/coding-rules.mdc) を参照)
+
+
+## 6. コアワークフロー (参考)
+
+システムは明確モード動作:(PLAN/ACT)、別名(Architect/Code)。モードはユーザー入力/リクエスト内容決定。入力に「MODE = PLAN MODE / Architect MODE」や「MODE = ACT MODE / Code MODE」明示あればそれに従う。不明確時はモード質問。
+
+### 6.1. PLANまたはArchitect MODE
+```mermaid
+flowchart TD
+    Start[Start] --> ReadFiles[Read Memory Files ("docs/": (a)"docs/architecture.md" (b)"docs/product_requirement_docs.md" (c)"docs/technical.md". "tasks/" : (a)"tasks/active_context.md" (b)"tasks/tasks_plan.md". if needed further: "docs/literature" and "tasks/rfc") ]
+    ReadFiles --> CheckFiles{Files Complete?}
+
+    CheckFiles -->|No| Plan[Create Plan]
+    Plan --> DocumentChat[Document in Chat]
+
+    CheckFiles -->|Yes| VerifyContext[Verify Context]
+    VerifyContext --> Strategy[Develop Strategy]
+    Strategy --> Present[Present Approach]
+
+    Present --> Verification{Approach Verified?}
+
+    Verification -->|No| Clarify[Seek Clarification]
+    Clarify --> Strategy[Develop Strategy]
+
+    Verification -->|Yes| DocumentMemory[Document in Memory Files ("docs/": (a)"docs/architecture.md" (b)"docs/product_requirement_docs.md" (c)"docs/technical.md". "tasks/" : (a)"tasks/active_context.md" (b)"tasks/tasks_plan.md" if needed further: "docs/literature" and "tasks/rfc")]
+```
+
+### 6.2. ACTまたはCode MODE
+```mermaid
+flowchart TD
+    Start[Start] --> Context[Check Memory Files (Core Files always ("docs/": (a)"docs/architecture.md" (b)"docs/product_requirement_docs.md" (c)"docs/technical.md". "tasks/" : (a)"tasks/active_context.md" (b)"tasks/tasks_plan.md"), rest based on context (if needed further: "docs/literature" and "tasks/rfc")) ]
+    Context --> Update[Update Documentation]
+    Update --> Rules[Update [lessons-learned.mdc](mdc:.cursor/rules/lessons-learned.mdc), [error-documentation.mdc](mdc:.cursor/rules/error-documentation.mdc) if needed]
+    Rules --> Execute[Execute Task]
+    Execute --> Document[Document Changes in Memory Files ("docs/": (a)"docs/architecture.md" (b)"docs/product_requirement_docs.md" (c)"docs/technical.md". "tasks/" : (a)"tasks/active_context.md" (b)"tasks/tasks_plan.md" if needed further: "docs/literature" and "tasks/rfc") ]
+```
+
+# ドキュメント更新
+
+メモリファイル更新は以下時発生。
+
+1. 新パターン発見時
+2. 重要変更後
+3. ユーザーが**メモリファイル更新**依頼時(全コアファイルレビュー)
+4. コンテキスト明確化必要時
+5. 計画主要部分検証時
+
+```mermaid
+flowchart TD
+    Start[Update Process]
+
+    subgraph Process
+        P1[Review Core Files]
+        P2[Document Current State in [active_context.md](mdc:tasks/active_context.md) and [tasks_plan.md](mdc:tasks/tasks_plan.md) ]
+        P3[Clarify Next Steps and document in [tasks_plan.md](mdc:tasks/tasks_plan.md) ]
+        P4[Update [lessons-learned.mdc](mdc:.cursor/rules/lessons-learned.mdc), [error-documentation.mdc](mdc:.cursor/rules/error-documentation.mdc)]
+        P5 Update [ [architecture.md](mdc:docs/architecture.md) ]
+
+        P1 --> P2 --> P3 --> P4
+    end
+
+    Start --> Process
+```
+
+注: **メモリファイル更新**発生時は、必ず全コアファイルレビュー。特に  [active_context.md](mdc:tasks/active_context.md)  [tasks_plan.md](mdc:tasks/tasks_plan.md)  [architecture.md](mdc:docs/architecture.md) 重点チェック。
+
+# プロジェクト知識 ( [lessons-learned.mdc](mdc:.cursor/rules/lessons-learned.mdc) [.cursor/rules/lessons-learned.mdc] )
+
+[lessons-learned.mdc](mdc:.cursor/rules/lessons-learned.mdc) は各プロジェクト学習記録。
+コードから見えない重要知見記録、今後作業効率化役立。
+
+### 7.1. 学習プロセス
+```mermaid
+flowchart TD
+    Start{Discover New Pattern}
+
+    subgraph Learn [Learning Process]
+        D1[Identify Pattern]
+        D2[Validate with User]
+        D3[Document in [lessons-learned.mdc](mdc:.cursor/rules/lessons-learned.mdc) ]
+    end
+
+    subgraph Apply [Usage]
+        A1[Read [lessons-learned.mdc](mdc:.cursor/rules/lessons-learned.mdc) ]
+        A2[Apply Learned Patterns]
+        A3[Improve Future Work]
+    end
+
+    Start --> Learn
+    Learn --> Apply
+```
+
+### 7.2. 記録事項
+- 重要実装パス
+- ユーザー好み·ワークフロー
+- プロジェクト特有パターン
+- 既知課題
+- プロジェクト決定推移
+- ツール使用パターン
+
+フォーマット柔軟。効果的プロジェクト進行役立知見中心記録。@lessons-learned.md は作業が重なる毎賢く成長「生きたドキュメント」
+
+## 8. エラー記録
+
+### 8.1. Mypy エラー: `config.py` と `base.py` 関連 (過去解決済)
+
+#### エラー内容
+
+-   `Item "None" of "dict[str, Any] | None" has no attribute "get"Mypyunion-attr` (`config.py` `get` メソッド内)
+-   `Argument 3 to "load_transformers_components" of "ModelLoad" has incompatible type "str | float"; expected "str"` (`base.py` で `self.device` 渡す箇所)
+
+#### 原因
+
+-   エラー 1: `config.py` `get` メソッド内で、`model_config` 変数が `None` になる可能性があり、`None` に対し `.get()` 呼出。
+-   エラー 2: `config.py` `get` メソッド戻り値型ヒント広すぎたため、`base.py` で `self.device` が `str | float` と推論され、`str` 期待関数に渡されていた。
+
+#### 解決策
+
+`src/image_annotator_lib/core/config.py` `ModelConfigRegistry.get` メソッド修正:
+
+1.  **KeyError 処理:** `self._config_data[model_name]` 使用、`model_name` 不存在時 `KeyError` 発生させ、`model_config` が `None` になる可能性排除。
+2.  **型ヒント精緻化:** 戻り値型ヒントを実際返しうる `str | float | None` に修正。`default` 引数型も `None` に限定。
+
+#### 影響
+
+-   上記 Mypy エラー解消。
+-   `config.py` `get` メソッド堅牢性向上。
+
+---
+
+### 8.2. ルールとドキュメント間矛盾点 (過去指摘)
+
+過去、定義ルールとドキュメント内容間に複数矛盾点指摘あり。以下要約。
+
+-   **`Any` 型扱い:** ドキュメント内 `Any` 型理由コメント無使用箇所あり。 -> **推奨対応:** 理由コメント必須、可能限り具体的型へ置換。
+-   **ドキュメント更新徹底:** ドキュメント統合・削減後リンク切れ・古情報残存可能性あり。 -> **推奨対応:** 変更後全ファイルリンク・内容再点検。
+-   **`predict()` オーバーライド禁止:** ルール禁止だが、ドキュメントサンプルコード等で誤解招く表現無か注意必要だった。
+-   **命名規則:** クラス名「*er」禁止ルールに対し、既存有名モデル (`WDTagger` 等) 例外であることドキュメント明記必要あった。
+-   **設定ファイルパス:** ドキュメント間設定ファイルパス表記 (`config/` vs `src/.../resources/system/`) 不統一だった。 -> **推奨対応:** パス表記統一。
+-   **テストディレクトリ構造:** ルール定義厳密構造が、ドキュメントで十分説明・統一されていなかった。 -> **推奨対応:** 説明統一、ルールへのリンク明記。
+
+**現状:** これら指摘事項多くは、その後開発や今回ドキュメント整理で解消可能性あるが、引続き注意必要。
+
+---
+
+### 8.3. モデルロード時CUDAエラー及び関連TypeError (過去解決済, 2025-04-19)
+
+#### 問題
+
+CUDA非対応環境で `device="cuda"` 指定モデル (例: `aesthetic_shadow_v1`) ロード試行時、`Torch not compiled with CUDA enabled` エラー発生、後続処理で `TypeError` 発生。
+
+#### 現象 (ログより)
+
+-   `ERROR: Pipeline 'aesthetic_shadow_v1' ロード中予期せぬエラー発生: Torch not compiled with CUDA enabled`
+-   `ERROR: Pipeline 推論中エラー発生: 'NoneType' object is not subscriptable` (モデルロード失敗による)
+-   `ERROR: モデル 'aesthetic_shadow_v1' CPUキャッシュ失敗: 'NoneType' object has no attribute 'items'` (モデルロード失敗による)
+
+#### 原因
+
+-   インストール済 PyTorch が CUDA 非対応 (CPU版) であったため、`device="cuda"` でのモデルロード失敗。
+
+#### 解決策
+
+-   **CUDA利用不可時CPUフォールバック:**
+    -   `core/utils.py` に `determine_effective_device` 関数追加。`torch.cuda.is_available()` が `False` かつ設定で `device="cuda"` 要求時、警告ログ出力しつつ内部的にデバイスを `"cpu"` に切替ロジック実装。
+    -   `BaseAnnotator.__init__` 等で本関数使用修正。
+
+#### 影響
+
+-   CUDA非対応環境でも `device="cuda"` 指定モデルがCPUでロード・実行されるようになった。
+-   関連 `TypeError` 解消。
+-   フォールバック時警告ログ出力されるようになった。
+
+---
+
+### 8.4. ログ出力多重化問題 (過去解決済, 2025-04-19)
+
+#### 問題
+
+ログ出力多重(同内容2回以上出力)。
+
+#### 原因
+
+-   `core/utils.py` logger 初期化処理 (`logger.add` 等) が、モジュール import 経路違い等により複数回実行され、logger sink (出力先) 重複登録。
+
+#### 解決策
+
+-   **初期化明示化:**
+    -   logger 初期化処理を `init_logger` 関数として分離、多重初期化防止ガード追加。
+    -   logger 初期化は `__init__.py` でプロセス起動時1回のみ明示呼出変更。
+    -   `core/registry.py` import 時自動初期化(ログ出力、`register_annotators()` 呼出)も廃止、エントリーポイント等で明示実行設計変更。
+
+#### 影響
+
+-   ログ出力正常化(1回のみ出力)、可読性・運用性向上。
+-   import 時副作用排除、テスト・再利用性・保守性向上。
+
+
+-   logger/レジストリ初期化はエントリーポイント等で明示呼出必要生じた。
+
+## 9. 違反時対応
+
+- **違反検出時:** 作業中断、ユーザー報告。
+- **違反内容:**
+  - ドキュメント未参照
+  - ドキュメント未更新
+  - ドキュメント間不整合

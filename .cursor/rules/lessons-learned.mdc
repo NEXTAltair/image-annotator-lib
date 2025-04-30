@@ -1,0 +1,66 @@
+---
+description: captures important patterns, preferences, and project intelligence, living document that grows smarter as progress happens
+globs: 
+alwaysApply: false
+---
+---
+description: Stores important patterns, preferences, and project intelligence, living document that grows smarter as progress happens
+globs:
+alwaysApply: true
+---
+
+# Lessons Learned & Project History
+
+## プロジェクト初期 (2023-10-27頃)
+
+- **初期ドキュメント:** プロジェクト開始時、`memory-bank` ディレクトリ内にプロジェクトコンテキスト、進捗、決定ログを記録する方針決定。一貫情報追跡と後開発支援目的。
+- **決定ログ形式:** 日付、決定内容、理由、代替案、影響記録形式採用。
+- **初期マイルストーン:** プロジェクトセットアップ(構造定義、memory-bank初期化、環境設定、バージョン管理)→ コアライブラリ実装 → 初期機能セット、段階的開発計画立案。
+
+## ドキュメント整理経緯
+
+- **統合計画 (日付不明):** リファクタリング後ドキュメント更新計画立案。既存構造把握、リファクタリング詳細確認、更新計画作成、実施、確認、完了ステップ定義。
+- **削減計画 (2025-04-18):** ドキュメントファイル数多すぎ (11ファイル) フィードバック受け、約7ファイルへ削減計画立案。必須ドキュメント維持しつつ、解説・設計関連ドキュメントを `docs/EXPLANATION/integrated_architecture.md` (当時) に統合、不要ファイル削除方針決定。
+- **現状整理 (2025-04-29~):** 設定ドキュメント (V2: Updates) 基盤、`memory-bank` 内容を推奨メモリファイル (`docs/product_requirement_docs.md`, `docs/architecture.md`, `docs/technical.md`, `tasks/tasks_plan.md`, `tasks/active_context.md`, `.cursor/rules/lessons-learned.mdc`, `.cursor/rules/error-documentation.mdc`) へ移行・統合中。
+
+## 主要完了済作業 (過去記録より)
+
+- **設計アウトライン定義:** 統合ライブラリ基本構造、クラス階層、主要コンポーネント方針定義。
+- **コアモジュール実装:** `BaseAnnotator`, フレームワーク別基底クラス, `ModelLoad`, `ModelRegistry`, 設定/ユーティリティ関数, カスタム例外, `annotate` API 関数実装。
+- **モデルクラス移植:** 各種 Tagger/Scorer モデルクラスを新クラス階層適合。
+- **コードリネーム:** API 関数名 (`evaluate`->`annotate`), 設定ファイル名 (`models.toml`->`annotator_config.toml`) 変更。
+- **ドキュメント整理 (Diátaxis):** `docs/` ディレクトリを Diátaxis フレームワーク基盤整理・統合 (当時)。
+- **Memory Bank 更新 (当時):** 開発中情報を `memory-bank` 内各ファイル記録。
+
+## 主要技術決定 (詳細は architecture.md, technical.md 参照)
+
+- ログ出力多重化問題修正 (2025-04-19)
+- レジストリ・logger初期化明示化 (2025-04-19)
+- CUDA非対応環境CPUフォールバック実装 (2025-04-19)
+- 全モデルローダーへ早期サイズ計算・メモリ管理強化 (2025-04-20頃)
+- ModelConfigRegistry システム/ユーザー設定分離 (2025-04-20頃)
+- CLIPLoader リファクタリング (2025-04-20頃)
+- ModelLoad 状態変数カプセル化 (2025-04-21頃)
+- `annotator_config.toml` キー設計維持決定 (2024-07-28)
+- Web API アノテーター初期化フロー変更 (2024-07-28)
+- **API利用モデル動的取得機能実装 (日付不明):**
+    - `annotator_config.toml` ハードコーディングAPIモデル名を、OpenRouter API等から動的取得・更新機能 (`core/api_model_discovery.py`) 実装。
+    - 取得情報は `config/available_api_models.toml` にキャッシュ・永続化。
+
+## 旧ライブラリ情報 (統合元)
+
+現状 `image-annotator-lib` は、旧ライブラリ `scorer_wrapper_lib` と `tagger_wrapper_lib` 統合版。
+
+- **概要:** 統合前、画像スコアリング機能と画像タギング機能は各々独立ライブラリ開発。
+- **基本アーキテクチャ共通点:** 両ライブラリ共、基底クラス、モデルタイプ別中間クラス、具象モデルクラス、設定ファイル、レジストリ、主要 API 関数 (`evaluate` 関数等)、モデル管理といった共通設計要素保有。ただし実装詳細・命名規則差異あり。
+- **統合経緯:** 機能的重複多く、特にモデル管理・コア基底クラス設計で共通化メリット大と判断され、単一ライブラリへ統合実施。API 統一で利用者両機能シームレス扱えるようにすることも目的。
+
+## リファレンス実装経緯
+
+本ライブラリは、`scorer_wrapper_lib` と `tagger_wrapper_lib` 統合・改良で作成。複数主要変更点は以下。
+
+1.  **クラス階層最適化**: 以前個別モデルクラスで相当重複あったコードを、基底クラス集約。
+2.  **結果形式統一**: 異形式だった Tagger/Scorer 結果を統一フォーマット返却変更。
+3.  **メモリ管理改善**: より洗練モデルキャッシュ戦略実装。
+
+4.  **エラーハンドリング強化**: より詳細・一貫エラー報告導入。

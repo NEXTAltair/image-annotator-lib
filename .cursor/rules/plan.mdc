@@ -1,0 +1,76 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+---
+description: Always include these rules.
+globs:
+alwaysApply: true
+---
+プランニング/アーキテクトタスク前に**必ず**3つのこと実行:
+a. `docs/` 内既存ドキュメント読込: i. `docs/architecture.md`、ii. `docs/product_requirement_docs.md`、iii. `docs/technical.md`
+b. `tasks/` 内計画・関連タスクコンテキスト読込: i. `tasks/active_context.md`、ii. `tasks/tasks_plan.md`
+c. `src` 及び他場所コードから、必要ソリューションコンテキスト取得。
+---
+- 以下は従うべきプランニングワークフロー:
+
+1. 要件理解:
+<CLARIFICATION>
+- 常時不明点確認・追加質問実行。
+- 十分記述不足要件特定、詳細情報要求。
+- 問題全側面完全理解、精緻・明確形へ集約。
+- 仮定すべき全事項質問、不明瞭さ・不確実性排除。
+- 私が思いつかないような解決策も提案(先回りニーズ充足)。
+- 100%明確さ・自信得た後のみ、ソリューション作成へ進む。
+</CLARIFICATION>
+
+2. ソリューション策定:
+<STEP BY STEP REASONING>
+<DECOMPOSE>
+- ソリューション用メタアーキテクチャプラン持つ。
+- 問題を主要概念・小サブ問題へ分解。
+</DECOMPOSE>
+a. 問題解く全可能方法考慮。
+b. 評価基準・トレードオフ設定、ソリューション優劣判断。
+c. 最適解・最適理由、トレードオフ明確化。
+<WEB USE> 必要応じウェブ検索利用可(use_mcp_toolコマンド使用、Perplexity検索ツール推奨)。例:
+<use_mcp_tool>
+<server_name>perplexity-mcp</server_name>
+<tool_name>search</tool_name>
+<arguments>
+{
+  "param1": "value1",
+  "param2": "value2"
+}
+</arguments>
+</use_mcp_tool>
+</WEB USE>
+
+<MULTI ATTEMPTS>
+a. ソリューション最適性徹底検証。
+b. 全仮定・推論疑い、包括的論拠で支持。
+c. 現案より優案を、異ソリューション強み組合せ考慮。
+d. <MULTI ATTEMPTS>プロセス繰返し、異案洗練・統合、強力ソリューション発見。
+d. 必要応じ<WEB USE>で調査。
+</MULTI ATTEMPTS>
+</STEP BY STEP REASONING>
+
+3. ソリューション検証:
+
+<REASONING PRESENTATION>
+- 可能限り詳細PLAN(計画)提示。
+- ソリューションステップバイステップ分解、各々明瞭・詳細考察。
+- 他有望案比較、最適性論じる。
+- 全仮定・選択・決定事項明示説明。
+- ソリューショントレードオフ説明。
+- 必要応じ、回答後私問い自身言葉で言換直す。
+</REASONING PRESENTATION>
+- 実装入る前、<REASONING PRESENTATION>作成ソリューションプラン検証。
+
+---
+
+プランニング/アーキテクトタスク後**必ず**2つのこと実行:
+a. 既存ドキュメント計画記録、`docs/`内ファイル(i. `docs/architecture.md`、ii. `docs/product_requirement_docs.md`、iii. `docs/technical.md`)更新。
+b. 計画・関連タスク計画・コンテキストを`tasks/`内ファイル(i. `tasks/active_context.md`、ii. `tasks/tasks_plan.md`)記録。
+

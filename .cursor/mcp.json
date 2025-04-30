@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "perplexity-mcp": {
+      "env": {
+        "PERPLEXITY_API_KEY": "pplx-", 
+        "PERPLEXITY_MODEL": "sonar"
+      },
+      "command": "uvx",
+      "args": [
+        "perplexity-mcp"
+      ]
+    },
+    "perplexity-ask": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "PERPLEXITY_API_KEY",
+        "mcp/perplexity-ask"
+      ],
+      "env": {
+        "PERPLEXITY_API_KEY": "pplx-"
+      }
+    }
+  }
+}

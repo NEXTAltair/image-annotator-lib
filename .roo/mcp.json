@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "perplexity-mcp": {
+      "env": {
+        "PERPLEXITY_API_KEY": "",
+        "PERPLEXITY_MODEL": "sonar"
+      },
+      "command": "uvx",
+      "args": [
+        "perplexity-mcp"
+      ],
+      "disabled": true,
+      "alwaysAllow": []
+    },
+    "perplexity-ask": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "PERPLEXITY_API_KEY",
+        "mcp/perplexity-ask"
+      ],
+      "timeout": 600,
+      "env": {
+        "PERPLEXITY_API_KEY": ""
+      },
+      "disabled": true,
+      "alwaysAllow": []
+    }
+  }
+}

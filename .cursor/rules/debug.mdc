@@ -1,0 +1,30 @@
+---
+description: Always include while DEBUGGING
+globs: 
+alwaysApply: false
+---
+---
+description: Include these rules while DEBUGGING.
+globs:
+alwaysApply: true
+---
+<DEBUGGING>
+以下のデバッグ手順は、**永続的なエラーや不完全な修正**に対して使用するものである。つまり、**行き詰まった時だけ**このルーチンを使うこと。
+
+<DIAGNOSE>
+- すべてのエラーメッセージ、ログ、挙動の症状を収集する。
+- ファイルから関連するコンテキストを追加する。
+- [memory.mdc](mdc:.cursor/rules/memory.mdc) に指定されているプロジェクトのアーキテクチャ、計画、現在の作業タスクを取得する。
+</DIAGNOSE>
+
+- テスト結果で失敗した場合は、必ずまず <DIAGNOSE> を使ってさらにコンテキストを追加し、問題を効果的にデバッグする。その後、**完全な情報が揃ってから**修正に進む。
+- まず**観察結果 (OBSERVATIONS)** を説明し、その後**推論 (REASONINGS)** を提示して「なぜこれが問題なのか、他ではないのか」を説明する。
+- 確信が持てない場合は、さらに<DIAGNOSE>を使って追加の観察結果を収集し、**問題を正確かつ具体的に特定する**。必要なら<CLARIFICATION>を求めてもよい。
+- 問題に関連するコードを、[implement.mdc](mdc:.cursor/rules/implement.mdc)に定義されている<ANALYZE CODE>を使って理解する。
+- <STEP BY STEP REASONING>を使い、単なるバグだけでなく「アーキテクチャの不整合」や「設計ミス」など全ての可能性を考える。
+- @error-documentation.mdcや<WEB USE>を活用して、既に解決されている類似パターンがないか探す。
+- 修正案は<REASONING PRESENTATION>を使って提示し、検証を受ける。
+- コードの更新と修正は、[implement.mdc](mdc:.cursor/rules/implement.mdc)に定義されている<SYSTEMATIC CODE PROTOCOL>と<TESTING>を使って開始する。
+
+</DEBUGGING>
+

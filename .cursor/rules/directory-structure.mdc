@@ -1,0 +1,171 @@
+---
+description: directory structure to follow
+globs:
+alwaysApply: false
+---
+---
+description: the top-level directory structure for the project
+globs:
+alwaysApply: false
+---
+# Directory Structure
+
+## 1. トップレベル構造
+
+```mermaid
+flowchart TD
+    Root[Project Root]
+    Root --> Docs[docs/]
+    Root --> Tasks[tasks/]
+    Root --> CursorRules[.cursor/rules/]
+    Root --> RooRules[.roo/]
+    Root --> SourceCode[src/]
+    Root --> TestsDir[tests/]
+    Root --> Utils[tools/]
+    Root --> Config[config/]
+    Root --> Data[data/]
+    Root --> Example[example/]
+    Root --> Logs[logs/]
+    Root --> Results[results/]
+    Root --> Other[Other Files/Dirs]
+
+    subgraph SourceCode [src/]
+        LibRoot[image_annotator_lib/]
+    end
+
+    subgraph TestsDir [tests/]
+        UnitTests[unit/]
+        IntegrationTests[integration/]
+        Features[features/]
+        StepDefs[step_defs/]
+        TestResources[resources/]
+        Conftest[conftest.py]
+    end
+
+    subgraph LibRoot [image_annotator_lib/]
+        direction LR
+        Init[__init__.py]
+        API[api.py]
+        PyTyped[py.typed]
+        Core[core/]
+        Exceptions[exceptions/]
+        ModelClass[model_class/]
+        Resources[resources/]
+    end
+
+    subgraph Core [core/]
+        direction LR
+        CoreBase[base.py]
+        CoreFactory[model_factory.py]
+        CoreRegistry[registry.py]
+        CoreConfig[config.py]
+        CoreUtils[utils.py]
+        CoreDiscovery[api_model_discovery.py]
+        CoreConstants[constants.py]
+        CoreFactoryStub[factory.pyi]
+    end
+
+    subgraph Exceptions [exceptions/]
+        direction LR
+        ExcInit[__init__.py]
+        ExcErrors[errors.py]
+        ExcErrorsStub[errors.pyi]
+    end
+
+    subgraph ModelClass [model_class/]
+        direction LR
+        MCWebApi[annotator_webapi.py]
+        MCPipeline[pipeline_scorers.py]
+        MCClip[scorer_clip.py]
+        MCOnnx[tagger_onnx.py]
+        MCTf[tagger_tensorflow.py]
+        MCTransformers[tagger_transformers.py]
+    end
+
+    subgraph Resources [resources/]
+        direction LR
+        SystemRes[system/]
+    end
+
+    subgraph SystemRes [system/]
+        direction LR
+        SysConfig[annotator_config.toml]
+        SysOpenRouter[openrouter_json_compatible_models.py]
+    end
+
+    subgraph UnitTests [unit/]
+        direction LR
+        UnitLib[image_annotator_lib/]
+        UnitApi[test_api.py]
+        UnitError[test_error_handling.py]
+        UnitModelError[test_model_errors.py]
+    end
+
+    subgraph UnitLib [image_annotator_lib/]
+        direction LR
+        UnitCore[core/]
+    end
+
+    subgraph UnitCore [core/]
+        direction LR
+        UnitCoreDiscovery[test_api_model_discovery.py]
+        UnitCoreConfig[test_config.py]
+        UnitCoreFactory[test_model_factory_unit.py]
+        UnitCoreRegistry[test_registry.py]
+    end
+
+    subgraph StepDefs [step_defs/]
+        direction LR
+        StepAnnotate[test_annotate.py]
+        StepCore[core/]
+        StepScore[score_models/]
+    end
+
+    subgraph StepCore [core/]
+        direction LR
+        StepCoreDiscovery[test_api_model_discovery_steps.py]
+        StepCoreFactory[test_model_factory.py]
+        StepCoreRegistry[test_registry.py]
+        StepCoreUtils[test_utils.py]
+    end
+
+    subgraph StepScore [score_models/]
+        direction LR
+        StepAesthetic[test_aesthetic_score_models.py]
+    end
+
+```
+
+## 2. ディレクトリ構成ルール (AI向け指示)
+
+本ドキュメントは、`image-annotator-lib` ライブラリと `tests` ディレクトリの内部構成に関するルールを定義する。AI はファイルやディレクトリを作成・移動する際に、以下の指示に従うこと。
+
+### 2.1. 基本ルール
+
+- ディレクトリ名、ファイル名には、その役割を簡潔に示す英語の小文字とアンダースコア (`_`) を使用する。
+
+### 2.2. `image-annotator-lib` ディレクトリ構成 (`src/image_annotator_lib/`)
+
+本ディレクトリは、画像のアノテーション(評価、タグ付けなど)に関するコア機能を提供する独立したライブラリである。
+
+- **`core/`**: モデル読み込み、ベースクラス、共通ユーティリティなど、ライブラリの中核となるコンポーネントを配置する。
+- **`exceptions/`**: ライブラリ固有の例外クラスを定義する。
+- **`model_class/`**: 各アノテーター(例: スコアラー、タガー)の具体的な実装クラスを配置する。
+- **`resources/system/`**: システムデフォルトの設定ファイルなどを配置する。
+- **`__init__.py`**: 主要なクラスや関数を公開するためのエントリーポイント。
+- **`api.py`**: ユーザー向けの高レベルAPI関数 (`annotate` など) を配置する。
+- **`py.typed`**: PEP 561 準拠のためのマーカーファイル。
+
+### 2.3. ルート `tests` ディレクトリ構成
+
+- **`unit/`**: ユニットテストを配置する。
+    - **`image_annotator_lib/`**: `image-annotator-lib` の各モジュールに対応するユニットテストを、元の `src/` 内の構造を模倣して配置する。(例: `tests/unit/image_annotator_lib/core/test_base.py`)
+- **`integration/`**: 複数のコンポーネントや外部サービスとの連携をテストする統合テストを配置する。
+- **`features/`**: BDD (振る舞い駆動開発) の Feature ファイル (`.feature`) を配置する。
+- **`step_defs/`**: BDD のステップ定義ファイル (`test_*.py`) を配置する。
+- **`resources/`**: テストで使用する画像ファイル、設定ファイルなどのリソースを配置する。
+- **`conftest.py`**: プロジェクト全体のテストで共通して使用するフィクスチャやフックを定義する。
+
+**指示:**
+- 新しい `image-annotator-lib` のモジュールを追加した場合、対応するユニットテストファイルを `tests/unit/image_annotator_lib/` 配下の適切な場所に作成する。
+- 新しいBDDシナリオを追加する場合、Feature ファイルを `tests/features/` に、ステップ定義を `tests/step_defs/` に作成する。

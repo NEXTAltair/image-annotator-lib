@@ -1,0 +1,107 @@
+---
+description: Document major failure points in this project and they were solved.  To be filled by AI.
+globs: 
+alwaysApply: false
+---
+---
+description: Document major failure points in this project and they were solved.  To be filled by AI.
+globs:
+---
+
+# Error Documentation
+
+## 1. Mypy エラー: `config.py` と `base.py` 関連 (過去解決済)
+
+### エラー内容
+
+-   `Item "None" of "dict[str, Any] | None" has no attribute "get"Mypyunion-attr` (`config.py` `get` メソッド内)
+-   `Argument 3 to "load_transformers_components" of "ModelLoad" has incompatible type "str | float"; expected "str"` (`base.py` で `self.device` 渡す箇所)
+
+### 原因
+
+-   エラー 1: `config.py` `get` メソッド内で、`model_config` 変数が `None` になる可能性があり、`None` に対し `.get()` 呼出。
+-   エラー 2: `config.py` `get` メソッド戻り値型ヒント広すぎたため、`base.py` で `self.device` が `str | float` と推論され、`str` 期待関数に渡されていた。
+
+### 解決策
+
+`src/image_annotator_lib/core/config.py` `ModelConfigRegistry.get` メソッド修正:
+
+1.  **KeyError 処理:** `self._config_data[model_name]` 使用、`model_name` 不存在時 `KeyError` 発生させ、`model_config` が `None` になる可能性排除。
+2.  **型ヒント精緻化:** 戻り値型ヒントを実際返しうる `str | float | None` に修正。`default` 引数型も `None` に限定。
+
+### 影響
+
+-   上記 Mypy エラー解消。
+-   `config.py` `get` メソッド堅牢性向上。
+
+---
+
+## 2. ルールとドキュメント間矛盾点 (過去指摘)
+
+過去、定義ルールとドキュメント内容間に複数矛盾点指摘あり。以下要約。
+
+-   **`Any` 型扱い:** ドキュメント内 `Any` 型理由コメント無使用箇所あり。 -> **推奨対応:** 理由コメント必須、可能限り具体的型へ置換。
+-   **ドキュメント更新徹底:** ドキュメント統合・削減後リンク切れ・古情報残存可能性あり。 -> **推奨対応:** 変更後全ファイルリンク・内容再点検。
+-   **`predict()` オーバーライド禁止:** ルール禁止だが、ドキュメントサンプルコード等で誤解招く表現無か注意必要だった。
+-   **命名規則:** クラス名「*er」禁止ルールに対し、既存有名モデル (`WDTagger` 等) 例外であることドキュメント明記必要あった。
+-   **設定ファイルパス:** ドキュメント間設定ファイルパス表記 (`config/` vs `src/.../resources/system/`) 不統一だった。 -> **推奨対応:** パス表記統一。
+-   **テストディレクトリ構造:** ルール定義厳密構造が、ドキュメントで十分説明・統一されていなかった。 -> **推奨対応:** 説明統一、ルールへのリンク明記。
+
+**現状:** これら指摘事項多くは、その後開発や今回ドキュメント整理で解消可能性あるが、引続き注意必要。
+
+---
+
+## 3. モデルロード時CUDAエラー及び関連TypeError (過去解決済, 2025-04-19)
+
+### 問題
+
+CUDA非対応環境で `device="cuda"` 指定モデル (例: `aesthetic_shadow_v1`) ロード試行時、`Torch not compiled with CUDA enabled` エラー発生、後続処理で `TypeError` 発生。
+
+### 現象 (ログより)
+
+-   `ERROR: Pipeline 'aesthetic_shadow_v1' ロード中予期せぬエラー発生: Torch not compiled with CUDA enabled`
+-   `ERROR: Pipeline 推論中エラー発生: 'NoneType' object is not subscriptable` (モデルロード失敗による)
+-   `ERROR: モデル 'aesthetic_shadow_v1' CPUキャッシュ失敗: 'NoneType' object has no attribute 'items'` (モデルロード失敗による)
+
+### 原因
+
+-   インストール済 PyTorch が CUDA 非対応 (CPU版) であったため、`device="cuda"` でのモデルロード失敗。
+
+### 解決策
+
+-   **CUDA利用不可時CPUフォールバック:**
+    -   `core/utils.py` に `determine_effective_device` 関数追加。`torch.cuda.is_available()` が `False` かつ設定で `device="cuda"` 要求時、警告ログ出力しつつ内部的にデバイスを `"cpu"` に切替ロジック実装。
+    -   `BaseAnnotator.__init__` 等で本関数使用修正。
+
+### 影響
+
+-   CUDA非対応環境でも `device="cuda"` 指定モデルがCPUでロード・実行されるようになった。
+-   関連 `TypeError` 解消。
+-   フォールバック時警告ログ出力されるようになった。
+
+---
+
+## 4. ログ出力多重化問題 (過去解決済, 2025-04-19)
+
+### 問題
+
+ログ出力多重(同内容2回以上出力)。
+
+### 原因
+
+-   `core/utils.py` logger 初期化処理 (`logger.add` 等) が、モジュール import 経路違い等により複数回実行され、logger sink (出力先) 重複登録。
+
+### 解決策
+
+-   **初期化明示化:**
+    -   logger 初期化処理を `init_logger` 関数として分離、多重初期化防止ガード追加。
+    -   logger 初期化は `__init__.py` でプロセス起動時1回のみ明示呼出変更。
+    -   `core/registry.py` import 時自動初期化(ログ出力、`register_annotators()` 呼出)も廃止、エントリーポイント等で明示実行設計変更。
+
+### 影響
+
+-   ログ出力正常化(1回のみ出力)、可読性・運用性向上。
+-   import 時副作用排除、テスト・再利用性・保守性向上。
+
+
+-   logger/レジストリ初期化はエントリーポイント等で明示呼出必要生じた。
