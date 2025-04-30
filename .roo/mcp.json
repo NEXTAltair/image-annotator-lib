@@ -2,15 +2,13 @@
   "mcpServers": {
     "perplexity-mcp": {
       "env": {
-        "PERPLEXITY_API_KEY": "",
+        "PERPLEXITY_API_KEY": "", 
         "PERPLEXITY_MODEL": "sonar"
       },
       "command": "uvx",
       "args": [
         "perplexity-mcp"
-      ],
-      "disabled": true,
-      "alwaysAllow": []
+      ]
     },
     "perplexity-ask": {
       "command": "docker",
@@ -25,9 +23,7 @@
       "timeout": 600,
       "env": {
         "PERPLEXITY_API_KEY": ""
-      },
-      "disabled": true,
-      "alwaysAllow": []
+      }
     }
   }
 }
