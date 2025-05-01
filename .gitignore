@@ -1,17 +1,86 @@
 # Byte-compiled / optimized / DLL files
-__pycache__
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
+.env
 .venv/
 venv/
-.env
-temp
-models
-.DS_Store
-settings.json
-coverage.xml
-.coverage
+env/
+ENV/
+env.bak/
+venv.bak/
 
-# 参考用リポジトリ
+# IDEs / Editors
+.vscode/
+.idea/
+.project
+.pydevproject
+.settings/
+*.sublime-workspace
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+temp/
+*.tmp
+*.bak
+*.swp
+
+# Custom
+models/
+!models/utilsによってダウンロードされたモデルの保存先.txt
+.roo/mcp.json
+.cursor/mcp.json
+
+# 参考用リポジトリ (必要に応じて)
 stable-diffusion-webui-wd14-tagger/
 DeepDanbooru/
-
-uv.lock

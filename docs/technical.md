@@ -8,9 +8,11 @@
 
 - **プロジェクトルート:** `image-annotator-lib` (リポジトリルート)
     - 全ファイル操作(read_file, write_to_file等)は原則本ディレクトリからの相対パス指定。
+    - ユーザー設定ファイルは `config/annotator_config.toml` に配置推奨。
 - **`image-annotator-lib` パッケージソースルート:** `src/image_annotator_lib`
     - ライブラリ内部モジュール参照・編集時の基点。
     - 例: `src/image_annotator_lib/core/base.py`
+- **システム設定ファイル:** `src/image_annotator_lib/resources/system/annotator_config.toml`
 
 ### 1.2 技術スタック
 
@@ -22,10 +24,11 @@
 - Ruff (フォーマッター、リンター)
 - Mypy (型チェック)
 - uv (パッケージ管理)
+- pytest, pytest-bdd (テスト)
 
 ### 1.3 主要依存関係
 
-依存関係は `pyproject.toml` に定義、`uv` で管理。主要ライブラリは以下:
+依存関係は `pyproject.toml` に定義、`uv` で管理。主要ライブラリは以下 (詳細は `pyproject.toml` 参照):
 
 - `toml`
 - `requests`
@@ -36,50 +39,83 @@
 - `Pillow`
 - `numpy`
 - `tqdm`
-- `pytest` (テスト用)
+- `pytest`, `pytest-cov`, `pytest-bdd` (テスト用)
 - `psutil` (メモリ管理用)
 - `python-dotenv` (APIキー管理用)
 - `anthropic` (API用)
 - `google-genai` (API用)
 - `openai` (API用)
 
-### 1.4 ディレクトリ構造 (ソースコード)
+### 1.4 ディレクトリ構造 (主要部分)
 
-ライブラリ主要ソースコードは `src/image_annotator_lib/` 以下配置。
+```mermaid
+graph TD
+    A[.] --> B(config)
+    B --> B1(annotator_config.toml)
+    A --> C(docs)
+    C --> C1(architecture.md)
+    C --> C2(product_requirement_docs.md)
+    C --> C3(rules.md)
+    C --> C4(technical.md)
+    C --> C5(literature)
+    A --> D(src)
+    D --> D1(image_annotator_lib)
+    D1 --> D1a(__init__.py)
+    D1 --> D1b(api.py)
+    D1 --> D1c(py.typed)
+    D1 --> D1d(core)
+        D1d --> D1d1(api_model_discovery.py)
+        D1d --> D1d2(base.py)
+        D1d --> D1d3(config.py)
+        D1d --> D1d4(constants.py)
+        D1d --> D1d5(model_factory.py)
+        D1d --> D1d6(registry.py)
+        D1d --> D1d7(utils.py)
+    D1 --> D1e(exceptions)
+        D1e --> D1e1(__init__.py)
+        D1e --> D1e2(errors.py)
+    D1 --> D1f(model_class)
+        D1f --> D1f1(annotator_webapi.py)
+        D1f --> D1f2(pipeline_scorers.py)
+        D1f --> D1f3(scorer_clip.py)
+        D1f --> D1f4(tagger_onnx.py)
+        D1f --> D1f5(tagger_tensorflow.py)
+        D1f --> D1f6(tagger_transformers.py)
+    D1 --> D1g(resources)
+        D1g --> D1g1(system)
+            D1g1 --> D1g1a(annotator_config.toml)
+            D1g1 --> D1g1b(openrouter_json_compatible_models.py)
+    A --> E(tasks)
+    E --> E1(active_context.md)
+    E --> E2(tasks_plan.md)
+    E --> E3(rfc)
+    A --> F(tests)
+    F --> F1(integration)
+    F --> F2(unit)
+    F --> F3(features)
+    A --> G(.gitignore)
+    A --> H(LICENSE)
+    A --> I(pyproject.toml)
+    A --> J(README.md)
+    A --> K(uv.lock)
 
+    style B fill:#f9f,stroke:#333,stroke-width:2px
+    style C fill:#f9f,stroke:#333,stroke-width:2px
+    style C5 fill:#f9f,stroke:#333,stroke-width:2px
+    style D fill:#f9f,stroke:#333,stroke-width:2px
+    style D1 fill:#f9f,stroke:#333,stroke-width:2px
+    style D1d fill:#f9f,stroke:#333,stroke-width:2px
+    style D1e fill:#f9f,stroke:#333,stroke-width:2px
+    style D1f fill:#f9f,stroke:#333,stroke-width:2px
+    style D1g fill:#f9f,stroke:#333,stroke-width:2px
+    style D1g1 fill:#f9f,stroke:#333,stroke-width:2px
+    style E fill:#f9f,stroke:#333,stroke-width:2px
+    style E3 fill:#f9f,stroke:#333,stroke-width:2px
+    style F fill:#f9f,stroke:#333,stroke-width:2px
+    style F1 fill:#f9f,stroke:#333,stroke-width:2px
+    style F2 fill:#f9f,stroke:#333,stroke-width:2px
+    style F3 fill:#f9f,stroke:#333,stroke-width:2px
 ```
-src/
-└── image_annotator_lib/   # ライブラリパッケージ
-    ├── __init__.py        # パッケージ初期化、主要APIエクスポート
-    ├── api.py             # ユーザー向けAPI関数 (annotate)
-    ├── py.typed           # PEP 561 準拠マーカーファイル
-    ├── config/            # (空の可能性、設定ファイルは resources/ に移動?)
-    ├── core/              # Tagger/Scorer共通基盤モジュール
-    │   ├── api_model_discovery.py # Web API モデル情報取得・管理
-    │   ├── base.py          # BaseAnnotator, フレームワーク別基底クラス, 型定義
-    │   ├── config.py        # ModelConfigRegistry (設定管理)
-    │   ├── constants.py     # 定数定義
-    │   ├── factory.pyi      # (型スタブファイル)
-    │   ├── model_factory.py # ModelLoad (モデルロード/キャッシュ管理)
-    │   ├── registry.py      # モデル登録/取得関連
-    │   └── utils.py         # 共通ユーティリティ (ロギング、ファイルI/O等)
-    ├── exceptions/        # カスタム例外クラス
-    │   ├── __init__.py
-    │   ├── errors.py
-    │   └── errors.pyi     # (型スタブファイル)
-    ├── model_class/       # 各モデル実装 (具象クラス)
-    │   ├── annotator_webapi.py # Web API ベースアノテーター基底・実装
-    │   ├── pipeline_scorers.py # Pipeline ベーススコアラー
-    │   ├── scorer_clip.py      # CLIP ベーススコアラー
-    │   ├── tagger_onnx.py      # ONNX ベースタガー
-    │   ├── tagger_tensorflow.py # TensorFlow ベースタガー
-    │   └── tagger_transformers.py # Transformers ベースタガー
-    └── resources/         # 設定ファイル等リソース
-        └── system/
-            ├── annotator_config.toml # システムデフォルト設定
-            └── openrouter_json_compatible_models.py # OpenRouterモデル情報
-```
-*(注意: 以前ドキュメントの `resources/user/` ディレクトリは現リストに含まず)*
 
 ## 2. コーディング規約
 
@@ -90,23 +126,23 @@ src/
 - **リンター:** Ruff (`ruff check . --fix`)
 - **型チェック:** Mypy (`mypy src/`)
 - **Docstring:** Google スタイル (日本語)
-- **ルール参照:** `.cursor/rules` ディレクトリ内ルールファイル参照しコーディング。変更必要時はユーザー判断仰ぐ。
+- **ルール参照:** `docs/rules.md` 及び `.cursor/rules` のルールを参照。
 
-### 2.2 特に重要なルール (AI 向け)
+### 2.2 特に重要なルール
 
 - **型ヒント:**
-    - **モダンな型:** `typing.List` や `typing.Dict`, `Optional` でなく、Python 3.9 以降組込型 (`list`, `dict`) や `collections.abc` 型使用 (`Union` は `|` 使用)。
-    - **`Any` 回避:** `Any` 型使用は最小限、可能限り具体的型指定。
-    - **エラー抑制禁止:** Mypy/Ruff エラー/警告は `# type: ignore` や `# noqa` で抑制せず、根本解決。
-- **半角文字:** コード、コメント、ドキュメント内では、**絶対全角英数字・全角記号不使用**。
-- **原則違反通知:**
-    - AIが定義原則違反コード生成・編集せざるを得ない場合、**一度作業停止、必ずユーザーに旨・理由説明、指示仰ぐ。**
-- **問題解決プロセス:**
-    - エラー/警告発生時は以下手順対応。
-        1.  **解決策検討:** 問題原因分析、最低3つ以上異解決策検討。
-        2.  **最適解決策選択:** 検討解決策中、最適と考えられるもの選択、理由記録。
-        3.  **試行・反復:** 選択解決策適用、問題解決確認。解決しない場合、別解決策試行、更なる別解決策検討。
-        4.  **エスカレーション:** 上記試行3回以上繰返しても問題未解決の場合、作業中断、ユーザーに状況、試行解決策、考原因説明、判断要求。
+    - **モダンな型:** `typing.List`, `typing.Dict`, `Optional` 等の古い型ではなく、Python 3.9+ の組込型 (`list`, `dict`) や `|` 演算子 (`str | None`) を使用。複雑な辞書は `TypedDict` を検討。
+    - **`Any` 回避:** `Any` 型の使用は最小限に留め、可能な限り具体的な型を指定。
+    - **オーバーライド:** 親クラスメソッドをオーバーライドする際は `@override` デコレーターを使用。
+    - **エラー抑制禁止:** Mypy/Ruff のエラーや警告は `# type: ignore` や `# noqa` で抑制せず、根本的な解決を目指す。
+- **半角文字:** コード、コメント、ドキュメント内では、**絶対に全角英数字・全角記号を使用しないこと**。
+- **カプセル化:**
+    - 他クラスの内部変数 (`_` 始まり) への直接アクセスは禁止。
+    - Tell, Don't Ask の原則に従う。
+    - 内部状態は非公開を原則とし、公開する場合は `@property` を使用。ミュータブルな内部オブジェクトの参照を直接返さない。
+    - 安易なゲッター/セッターは作成しない。
+    - 公開インターフェースは最小限にする (YAGNI)。
+- **リスト内包表記:** 可読性のため、`if` と `for` はそれぞれ1回まで。
 
 ## 3. 主要技術決定 (履歴)
 
@@ -125,61 +161,67 @@ src/
 
 ## 4. 新モデル追加方法
 
-本セクションでは、新画像アノテーションモデル(従来MLモデル・Web APIベースモデル含)を `image-annotator-lib` に追加手順説明。
+本セクションでは、新しい画像アノテーションモデル(従来のMLモデル、Web APIベースモデルを含む)を `image-annotator-lib` に追加する手順を説明します。
 
 ### 4.1 アーキテクチャ・クラス階層理解
 
-ライブラリはコード重複最小限抑えつつ多様アノテーター管理のため、3層クラス階層採用。詳細は `docs/architecture.md` 参照。
+ライブラリは、コードの重複を最小限に抑えつつ、多様なアノテーターを管理するために、3層のクラス階層を採用しています。詳細は `docs/architecture.md` を参照してください。
 
-- **`BaseAnnotator` (`core/base.py`):** 全アノテーター抽象基底クラス。共通機能(ロギング、設定読込、コンテキスト管理、**バッチ処理**、pHash計算、エラーハンドリング、**標準化結果生成 (`_generate_result`)**)提供。
-- **フレームワーク/タイプ別基底クラス (`core/base.py`, `model_class/annotator_webapi.py`):** `BaseAnnotator` 継承。特定フレームワーク(ONNX, Transformers, TensorFlow, CLIP等)またはタイプ(Web API等)共通ロジック実装。例: `ONNXBaseAnnotator`, `BaseWebApiAnnotator`。
-- **具象モデルクラス (`model_class/`):** フレームワーク/タイプ別基底クラス継承。個別モデル固有ロジックのみ実装(主に `_generate_tags`)。例: `WDTagger`, `GoogleApiAnnotator`。
+1.  **`BaseAnnotator` (`core/base.py`):** 全てのアノテーターの抽象基底クラス。共通機能(ロギング、設定読み込み、コンテキスト管理、**バッチ処理**、pHash計算、エラーハンドリング、**標準化された結果生成 (`_generate_result`)**)を提供します。
+2.  **フレームワーク/タイプ別基底クラス (`core/base.py`, `model_class/annotator_webapi.py`):** `BaseAnnotator` を継承します。特定のフレームワーク(ONNX, Transformers, TensorFlow, CLIPなど)またはタイプ(Web APIなど)に共通のロジックを実装します。例: `ONNXBaseAnnotator`, `BaseWebApiAnnotator`。
+3.  **具象モデルクラス (`model_class/`):** フレームワーク/タイプ別基底クラスを継承します。個別のモデル固有のロジックのみ(主に `_generate_tags` メソッド)を実装します。例: `WDTagger`, `GoogleApiAnnotator`。
 
 ### 4.2 具象モデルクラス実装
 
-適切ディレクトリ(`src/image_annotator_lib/model_class/`)に新モデル用Pythonクラス作成。
+適切なディレクトリ (`src/image_annotator_lib/model_class/`) に新しいモデル用のPythonクラスを作成します。
 
-1.  **適切基底クラス選択:** モデルフレームワーク/タイプ適合基底クラス選択。
-2.  **クラス定義:**
-    *   選択基底クラス継承。
-    *   `__init__(self, model_name)` 実装:
-        *   `super().__init__(model_name)` 呼出。
-        *   モデル固有設定は `config_registry.get(self.model_name, "your_key", default_value)` 使用取得(`src/image_annotator_lib/core/config.py` 共有インスタンス `config_registry` 利用)。**`self.config` 直接アクセス不可。**
-        *   モデル固有初期化(タグリスト読込、閾値設定等)実行。Web APIモデルの場合、APIキーは基底クラス `_load_api_key` で処理。
-    *   **必要抽象メソッドオーバーライド:** 通常、モデル固有データ処理・タグ/スコア生成ロジック実装。
-        *   `_preprocess_images(self, images: list[Image.Image]) -> Any`: PIL画像リストをモデル期待形式へ前処理。
-        *   `_run_inference(self, processed: Any) -> Any`: 前処理済データで推論実行、生モデル出力返却。Web APIモデルはAPIコール実行。
-        *   `_format_predictions(self, raw_outputs: Any) -> list[Any]`: (任意) 生モデル出力を `_generate_tags` 消費容易形式へ整形。
-        *   `_generate_tags(self, formatted_output: Any) -> list[str]`: 整形済出力から最終タグリスト(または `["[SCORE]0.95"]` 等スコア文字列)生成。**多場合、実装必要主要メソッド。**
-    *   **`_generate_result` 通常オーバーライド不可:** `BaseAnnotator` が標準化 `AnnotationResult` 生成のため、本メソッドオーバーライド非推奨。
-    *   **バッチ処理:** `BaseAnnotator.predict` が入力画像チャンク(バッチ)分割処理。`_preprocess_images` と `_run_inference` はバッチデータ受入設計。
-    *   **結果・エラー:** `BaseAnnotator.predict` が結果・エラー集約。サブクラスメソッド内発生エラーは、可能なら結果構造一部として返却、または例外伝播(基底クラス捕捉し `AnnotationResult` `error` フィールド記録)。
+1.  **適切な基底クラスを選択:** モデルのフレームワークやタイプに適合する基底クラスを選択します。
+2.  **クラスを定義:**
+    *   選択した基底クラスを継承します。
+    *   `__init__(self, model_name: str)` を実装します:
+        *   `super().__init__(model_name)` を呼び出します。
+        *   モデル固有の設定は `config_registry.get(self.model_name, "your_key", default_value)` を使用して取得します (`src/image_annotator_lib/core/config.py` の共有インスタンス `config_registry` を利用)。**`self.config` に直接アクセスしないでください。**
+        *   モデル固有の初期化(タグリストの読み込み、閾値の設定など)を実行します。Web API モデルの場合、APIキーは基底クラス `_load_api_key` で処理されます。
+    *   **必要な抽象メソッドをオーバーライド:** 通常、モデル固有のデータ処理やタグ/スコア生成ロジックを実装します。
+        *   `_preprocess_images(self, images: list[Image.Image]) -> Any`: PIL画像のリストをモデルが期待する形式に前処理します。
+        *   `_run_inference(self, processed_data: Any) -> Any`: 前処理されたデータで推論を実行し、生のモデル出力を返します。Web API モデルの場合は、APIコールを実行します。
+        *   `_format_predictions(self, raw_outputs: Any) -> Any`: (任意) 生のモデル出力を `_generate_tags` が消費しやすい形式に整形します。
+        *   `_generate_tags(self, formatted_output: Any) -> list[str] | list[tuple[str, float]]`: 整形された出力から最終的なタグリスト(文字列のリスト)、またはスコア付きタグリスト(タプルのリスト)、あるいはスコア文字列 (`["[SCORE]0.95"]`) を生成します。**多くの場合、これが実装する必要がある主要なメソッドです。**
+    *   **`_generate_result` は通常オーバーライドしない:** `BaseAnnotator` が標準化された `AnnotationResult` を生成するため、このメソッドのオーバーライドは非推奨です。
+    *   **バッチ処理:** `BaseAnnotator.predict` が入力画像をチャンク(バッチ)に分割して処理します。`_preprocess_images` と `_run_inference` はバッチデータを受け入れるように設計する必要があります。
+    *   **結果とエラー:** `BaseAnnotator.predict` が結果とエラーを集約します。サブクラスのメソッド内で発生したエラーは、可能であれば結果構造の一部として返すか、例外を伝播させます(基底クラスが捕捉して `AnnotationResult` の `error` フィールドに記録します)。
 
 ### 4.3 設定ファイルエントリ追加
 
-新モデル利用可能化のため、設定ファイル(`src/image_annotator_lib/resources/system/annotator_config.toml` またはユーザー設定ファイル)にエントリ追加。ユーザー設定ファイルはプロジェクトルート `config/annotator_config.toml` 配置推奨。
+新しいモデルを利用可能にするために、設定ファイル(システム設定 `src/image_annotator_lib/resources/system/annotator_config.toml` またはユーザー設定 `config/annotator_config.toml`)にエントリを追加します。
 
-- **セクション名 (`[model_unique_name]`):** ライブラリ内モデル識別用一意名。
-- `class` (必須): 実装具象モデルクラス名(文字列)。
-- `model_path` (ローカル/DLモデル必須): モデルファイル/リポジトリパス/URL。APIモデルはプロバイダー上モデルID等。
-- `estimated_size_gb` (ローカル/DLモデル推奨): メモリ管理用モデルサイズ概算値(GB)。APIモデル通常0。
-- `device` (任意): モデル使用デバイス(`"cuda"`, `"cpu"` 等)。
-- 他モデル固有設定キー。
+- **セクション名 (`[model_unique_name]`):** ライブラリ内でモデルを識別するための一意の名前。
+- `class` (必須): 実装した具象モデルクラスの名前(文字列)。
+- `model_path` (ローカル/ダウンロードモデル必須): モデルファイル/リポジトリのパス/URL。API モデルの場合はプロバイダー上のモデルIDなど。
+- `estimated_size_gb` (ローカル/ダウンロードモデル推奨): メモリ管理のためのモデルサイズ概算値(GB)。API モデルの場合は通常 0。
+- `device` (任意): モデルを使用するデバイス (`"cuda"`, `"cpu"` など)。ローカルモデル用。
+- その他、モデル固有の設定キー。
 
 **設定例:**
 
 ```toml
 [my-new-onnx-tagger-v1]
-class = "MyNewONNXTagger"
+class = "MyNewONNXTagger" # 作成したクラス名
 model_path = "path/to/your/model.onnx"
 estimated_size_gb = 0.5
-tags_file_path = "path/to/tags.txt"
-threshold = 0.45
+tags_file_path = "path/to/tags.txt" # モデル固有設定
+threshold = 0.45 # モデル固有設定
+
+[my-web-api-model]
+class = "MyWebApiAnnotator" # 作成したクラス名
+model_path = "some-api-specific-model-id" # API上のモデルID
+# APIキーは .env で管理
+prompt_template = "Describe this image: {image}" # モデル固有設定
 ```
 
 ### 4.4 機能検証
 
-ライブラリ使用し新モデル正動作テスト。
+ライブラリを使用して新しいモデルが正しく動作するかテストします。
 
 ```python
 from image_annotator_lib import annotate, list_available_annotators
@@ -187,14 +229,15 @@ from PIL import Image
 
 available = list_available_annotators()
 print(available)
-assert "my-new-onnx-tagger-v1" in available
+# assert "my-new-onnx-tagger-v1" in available # 設定名を確認
 
-img = Image.open("path/to/test/image.jpg")
-results = annotate([img], ["my-new-onnx-tagger-v1"])
-print(results)
+# img_path = "path/to/test/image.jpg"
+# img = Image.open(img_path)
+# results = annotate([img_path], ["my-new-onnx-tagger-v1"]) # 画像パスのリストで渡す
+# print(results)
 ```
 
-新モデルクラス対単体テスト追加も検討。
+新しいモデルクラスに対する単体テストを追加することも検討してください。
 
 ## 5. テスト実行方法
 

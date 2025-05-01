@@ -201,8 +201,18 @@ graph TD
 
 外部 Web API を利用して画像アノテーションを行う機能。
 
--   **設計方針:** 既存 `BaseAnnotator` 設計を踏襲し、API プロバイダー毎に専用具象クラスを作成。API キーは `.env` で管理し、設定ファイルでモデル名やプロンプト等を管理。戻り値構造は `AnnotationResult` を使用。
--   **クラス構成:** `BaseWebApiAnnotator` を基底とし、各 API プロバイダー (`Google`, `OpenAI`, `Anthropic`, `OpenRouter`) 毎に具象クラスを実装。
--   **共通機能 (`BaseWebApiAnnotator`):** API キー管理、画像 Base64 エンコード、レート制限、リトライ、エラーハンドリング、テキスト/JSON 解析、共通設定読み込み。
--   **具象クラス:** API 固有クライアント初期化や推論実行を実装。
--   **エラーハンドリング:** API キー不足、タイムアウト、認証エラー、レート制限、レスポンス形式エラー等に対し、適切エラーメッセージを含む `AnnotationResult` を返すか例外発生。
+-   **設計方針:** 既存 `BaseAnnotator` 設計を踏襲し、API プロバイダー毎に専用具象クラスを作成。API キーは `.env` または環境変数で管理し、設定ファイルでモデル名やプロンプト等を管理。戻り値構造は `BaseAnnotator` が生成する標準 `AnnotationResult` を使用。
+-   **クラス構成:** `BaseWebApiAnnotator` (`model_class/annotator_webapi.py`) を基底とし、各 API プロバイダー (`Google`, `OpenAI`, `Anthropic`, `OpenRouter`) 毎に具象クラス (`GoogleApiAnnotator`, `OpenAIApiAnnotator` 等) を実装。
+-   **共通機能 (`BaseWebApiAnnotator`):**
+    -   API キー管理 (`_load_api_key`, `.env` 読み込み)。
+    -   画像 Base64 エンコード (`_encode_image`)。
+    -   基本的なリクエスト構築・送信ロジックの抽象化 (サブクラスが `_run_inference` で実装)。
+    -   レート制限、リトライ機構 (必要に応じてサブクラスまたは共通ヘルパーで実装検討)。
+    -   共通エラーハンドリング (タイムアウト、接続エラー等)。
+    -   テキスト/JSON レスポンス解析ヘルパー (必要に応じて)。
+    -   共通設定項目 (`prompt`, `max_tokens` 等) の読み込み。
+-   **具象クラス:**
+    -   API プロバイダー固有クライアントの初期化。
+    -   `_run_inference`: API 固有のリクエスト形式で画像データを送信し、レスポンスを取得する。
+    -   `_generate_tags`: API レスポンスからタグ/スコア情報を抽出し、標準形式 (文字列リスト) に変換する。
+-   **エラーハンドリング:** API キー不足、認証エラー、レート制限超過、APIからのエラーレスポンス、レスポンス形式不正等に対し、`BaseAnnotator` のエラーハンドリング機構を利用し、適切エラーメッセージを含む `AnnotationResult` (`error` フィールドに格納) を返す。致命的な設定不備等は例外を送出する可能性もある。
