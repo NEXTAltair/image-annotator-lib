@@ -1,16 +1,15 @@
-from pathlib import Path
 import logging
-import toml
 import time
-from pytest_bdd import given, when, then, parsers, scenarios
-import pytest
+from pathlib import Path
 
-from image_annotator_lib.core.utils import (
-    load_file,
-    setup_logger,
-)
+import pytest
+import toml
+from pytest_bdd import given, parsers, scenarios, then, when
+
 from image_annotator_lib.core.config import config_registry
-scenarios("../features/core/utils.feature")
+from image_annotator_lib.core.utils import load_file, logger  # setup_logger を削除し、logger をインポート
+
+scenarios("../features/utils.feature")
 
 
 @pytest.fixture(scope="module")
@@ -22,7 +21,7 @@ def cleanup_downloads():
 
     downloaded_files = []  # ダウンロードしたファイルのパスを記録するリスト
 
-    # このフィクスチャの値としてリストを返す（テスト中に追跡するため）
+    # このフィクスチャの値としてリストを返す(テスト中に追跡するため)
     yield downloaded_files
 
     # テスト終了後のクリーンアップ
@@ -31,7 +30,7 @@ def cleanup_downloads():
         if file_path_obj.exists():
             file_path_obj.unlink()
 
-    # modelsディレクトリが空なら削除（オプション）
+    # modelsディレクトリが空なら削除(オプション)
     if models_dir.exists() and not any(models_dir.iterdir()):
         models_dir.rmdir()
 
@@ -84,7 +83,7 @@ def when_user_access_file(source, cleanup_downloads):
         # モックなしで実際にファイルをダウンロード
         result_path = load_file(test_url)
 
-        # ダウンロードされたファイルのパスをリストに追加（後で削除するため）
+        # ダウンロードされたファイルのパスをリストに追加(後で削除するため)
         cleanup_downloads.append(result_path)
 
         return result_path
@@ -99,12 +98,13 @@ def when_app_executes_important_operation():
     log_dir.mkdir(exist_ok=True)
 
     # ロガーをセットアップして動作をテスト
-    test_logger = setup_logger("test_operation_logger")
-    test_logger.info("テスト操作を実行中")
-    test_logger.warning("警告メッセージ")
+    # utils.py で設定された logger を使用
+    logger.info("テスト操作を実行中")
+    logger.warning("警告メッセージ")
 
-    return test_logger
-
+    # 検証のために logger オブジェクトを返す (必要に応じて調整)
+    # loguru の logger はグローバルなので、返す必要がない場合もある
+    return logger
 
 @when("設定ファイルの読み込みを要求される", target_fixture="config_data")
 def when_config_file_is_loaded():
@@ -126,10 +126,10 @@ def then_file_is_not_downloaded_again(cached_file_info, source_url_or_path):
     # キャッシュされたファイルと現在のファイルが同じであることを確認
     assert cached_file_info["path"] == source_url_or_path
 
-    # ファイルの最終更新時刻が変わっていないことを確認（ダウンロードされていない証拠）
+    # ファイルの最終更新時刻が変わっていないことを確認(ダウンロードされていない証拠)
     current_mtime = Path(source_url_or_path).stat().st_mtime
     assert current_mtime == cached_file_info["mtime"], (
-        "ファイルが再ダウンロードされました（更新時刻が変更されています）"
+        "ファイルが再ダウンロードされました(更新時刻が変更されています)"
     )
 
 
@@ -172,9 +172,9 @@ def then_correct_parameters_loaded(config_data, config_fixture):
 
 @then("パフォーマンスのためにこれらの設定値はキャッシュされる")
 def then_parameters_cached():
-    # キャッシュがうまく機能しているか確認（同じオブジェクトが返されることを確認）
+    # キャッシュがうまく機能しているか確認(同じオブジェクトが返されることを確認)
     config1 = config_registry()
     config2 = config_registry()
 
-    # 同一オブジェクトである（キャッシュが機能している）ことを確認
+    # 同一オブジェクトである(キャッシュが機能している)ことを確認
     assert config1 is config2

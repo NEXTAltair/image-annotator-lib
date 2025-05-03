@@ -12,6 +12,9 @@ from typing import Any
 
 import psutil
 import torch
+from PIL import Image
+from pytest_bdd import given, scenarios, then, when
+
 from image_annotator_lib.api import (
     _MODEL_INSTANCE_REGISTRY,
     PHashAnnotationResults,
@@ -24,10 +27,8 @@ from image_annotator_lib.core.registry import (
     list_available_annotators,
 )
 from image_annotator_lib.core.utils import calculate_phash
-from PIL import Image
-from pytest_bdd import given, scenarios, then, when
 
-scenarios("../features/integration/scorer.feature")
+scenarios("../features/scorer.feature")
 
 
 # resourcesディレクトリのパス

@@ -12,6 +12,9 @@ from typing import Any
 import psutil
 import pytest
 import torch
+from PIL import Image
+from pytest_bdd import given, scenarios, then, when
+
 from image_annotator_lib.api import (
     _MODEL_INSTANCE_REGISTRY,
     PHashAnnotationResults,
@@ -23,10 +26,8 @@ from image_annotator_lib.core.registry import (
     get_cls_obj_registry,
     list_available_annotators,
 )
-from PIL import Image
-from pytest_bdd import given, scenarios, then, when
 
-scenarios("../features/integration/tagger.feature")
+scenarios("../features/tagger.feature")
 
 
 # given ----------------

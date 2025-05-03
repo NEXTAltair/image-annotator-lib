@@ -2,12 +2,16 @@ import unittest.mock as mock
 from typing import Any
 
 import pytest
-from pytest_bdd import given, parsers, then, when, scenarios
+from pytest_bdd import given, parsers, scenarios, then, when
 
-from image_annotator_lib.models.pipeline_scorers import AestheticShadow
-from image_annotator_lib.models.pipeline_scorers import CafePredictor
+# 正しいモジュールパスからインポート
+from image_annotator_lib.model_class.pipeline_scorers import AestheticShadow, CafePredictor
 
-scenarios("../../features/score_models/aesthetic_score_models.feature")
+# 共通ステップ定義をimport
+from tests.features.step_definitions.common_steps import *
+
+# 正しい相対パスを指定
+scenarios("scorer.feature")
 
 
 # 共通のフィクスチャ
@@ -40,8 +44,10 @@ def model_context() -> dict[str, Any]:
 def aesthetic_shadow_v1_model(model_context: dict[str, Any]) -> None:
     with mock.patch("image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"):
         model = AestheticShadow("aesthetic_shadow_v1")
-        model._pipeline = mock.MagicMock()
-        model._pipeline.return_value = model_context["output_formats"]["aesthetic_shadow"]
+        # _run_inference をモックし、生の出力を返すように設定
+        model._run_inference = mock.MagicMock()
+        # _run_inference はリストを受け取りリストを返す想定
+        model._run_inference.return_value = [model_context["output_formats"]["aesthetic_shadow"]]
         model_context["model"] = model
         model_context["model_type"] = "pipeline"
         assert model is not None
@@ -52,8 +58,9 @@ def aesthetic_shadow_v1_model(model_context: dict[str, Any]) -> None:
 def aesthetic_shadow_v2_model(model_context: dict[str, Any]) -> None:
     with mock.patch("image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"):
         model = AestheticShadow("aesthetic_shadow_v2")
-        model._pipeline = mock.MagicMock()
-        model._pipeline.return_value = model_context["output_formats"]["aesthetic_shadow"]
+        # _run_inference をモックし、生の出力を返すように設定
+        model._run_inference = mock.MagicMock()
+        model._run_inference.return_value = [model_context["output_formats"]["aesthetic_shadow"]]
         model_context["model"] = model
         model_context["model_type"] = "pipeline"
         assert model is not None
@@ -65,8 +72,9 @@ def cafe_aesthetic_model(model_context: dict[str, Any]) -> None:
     with mock.patch("image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"):
         model = CafePredictor("cafe_aesthetic")
         model.config = {"score_prefix": "[CAFE]"}
-        model._evaluate = mock.MagicMock()
-        model._evaluate.return_value = model_context["output_formats"]["cafe_aesthetic"]
+        # _run_inference をモックし、生の出力を返すように設定
+        model._run_inference = mock.MagicMock()
+        model._run_inference.return_value = [model_context["output_formats"]["cafe_aesthetic"]]
         model_context["model"] = model
         model_context["model_type"] = "pipeline"
         assert model is not None

@@ -3,17 +3,18 @@
 """
 
 from unittest.mock import MagicMock, patch
+
 import pytest
-from pytest_bdd import given, then, when, parsers, scenarios
+from pytest_bdd import given, parsers, scenarios, then, when
 
 from image_annotator_lib.api import (
     _MODEL_INSTANCE_REGISTRY,
     _create_annotator_instance,
-    get_annotator_instance,
     annotate,
+    get_annotator_instance,
 )
 
-scenarios("../features/scorer.feature")
+scenarios("webapi_annotate.feature")
 
 
 @pytest.fixture

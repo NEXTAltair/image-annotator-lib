@@ -1,22 +1,23 @@
 import io
 import logging
-from pathlib import Path
-import zipfile
-import requests
-import pytest
-from urllib.parse import urlparse
-from PIL import Image
-import toml
 import shutil
+import zipfile
+from pathlib import Path
 from unittest.mock import MagicMock
+from urllib.parse import urlparse
 
-from pytest_bdd import given, scenarios, then, when, parsers
+import pytest
+import requests
+import toml
+from PIL import Image
+from pytest_bdd import given, parsers, scenarios, then, when
+
 from image_annotator_lib.core.utils import (
-    load_file,
     calculate_phash,
+    load_file,
 )
 
-scenarios("../../features/core/utils.feature")
+scenarios("utils.feature")
 
 # --- 共通の定数とヘルパー ---
 error_mapping = {
@@ -264,8 +265,8 @@ def given_resource_exists(source_type: str, location: str, test_env: dict) -> di
     }
 
 
-@given(parsers.parse("キャッシュの状態が{state}"))
-def given_cache_state(state: str, resource_info: dict):
+@given(parsers.parse("キャッシュの状態が{cache_state}"))
+def given_cache_state(cache_state: str, resource_info: dict):
     """キャッシュの状態を設定"""
     cache_dir = resource_info["cache_dir"]  # resource_info から直接取得
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -297,7 +298,7 @@ def given_cache_state(state: str, resource_info: dict):
 
         resource_info["cache_file"] = None  # デフォルトはキャッシュなし
 
-        if state == "exists":
+        if cache_state == "exists":
             logging.debug(f"Setting cache state to 'exists' for: {expected_cache_path}")
             if is_zip:
                 # 展開後ディレクトリとダミーファイルを作成
@@ -308,7 +309,7 @@ def given_cache_state(state: str, resource_info: dict):
                 # 通常のキャッシュファイルを作成
                 expected_cache_path.write_bytes(b"test content")
                 resource_info["cache_file"] = expected_cache_path  # ファイルパスを格納
-        elif state == "empty":
+        elif cache_state == "empty":
             logging.debug(f"Ensuring cache state is 'empty' for: {expected_cache_path}")
     else:
         # ローカルリソースの場合はキャッシュ状態を 'none' とし、何もしない
@@ -329,7 +330,7 @@ def when_resolve_path(resource_info: dict, mock_requests: MagicMock) -> Path:
 
     try:
         # load_file を呼び出す
-        resolved = load_file(path_to_load, cache_dir=cache_dir)
+        resolved = load_file(path_to_load)
         # 呼び出し情報を resource_info に保存
         resource_info["mock_get_called"] = mock_requests.called
         resource_info["mock_get_call_args"] = mock_requests.call_args
@@ -343,10 +344,10 @@ def when_resolve_path(resource_info: dict, mock_requests: MagicMock) -> Path:
         return Path(f"error_{Path(path_to_load).name}")  # 例: error_image.jpg
 
 
-@then(parsers.parse("{action}が実行される"))
-def then_verify_action(action: str, resource_info: dict, resolved_path: Path):  # resolved_path を引数に追加
+@then(parsers.parse("{expected_action}が実行される"))
+def then_verify_action(expected_action: str, resource_info: dict, resolved_path: Path):  # resolved_path を引数に追加
     """アクション実行の検証"""
-    if action == "download":
+    if expected_action == "download":
         # resource_info から呼び出し情報を取得して確認
         assert resource_info.get(
             "mock_get_called", False
@@ -359,18 +360,18 @@ def then_verify_action(action: str, resource_info: dict, resolved_path: Path):  
         assert (
             requested_url == expected_url
         ), f"予期しないURLへのリクエスト: {requested_url} (期待: {expected_url})"
-    elif action == "extract_zip":
+    elif expected_action == "extract_zip":
         # when で返された resolved_path がディレクトリであることを確認
         # resolved_path は引数で受け取る
         assert resolved_path.is_dir(), f"ZIP展開後のパスがディレクトリではありません: {resolved_path}"
         # 展開後のファイル存在確認
         assert (resolved_path / "test.txt").exists(), "展開された test.txt が見つかりません"
-    elif action == "read_local":
+    elif expected_action == "read_local":
         # when で返された resolved_path がファイルであることを確認
         # resolved_path は引数で受け取る
         assert resolved_path.is_file(), f"ローカルリソースのパスがファイルではありません: {resolved_path}"
         assert resolved_path.exists()  # exists は when で確認済みだが念のため
-    elif action == "use_cache":
+    elif expected_action == "use_cache":
         # when で返された resolved_path がキャッシュパスと一致するか確認
         # resolved_path は引数で受け取る
         expected_cache_path = resource_info.get("cache_file")
@@ -382,11 +383,11 @@ def then_verify_action(action: str, resource_info: dict, resolved_path: Path):  
         ), f"解決されたパスがキャッシュパスと一致しません。\n期待: {expected_cache_path}\n実際: {resolved_path}"
 
 
-@then(parsers.parse("保存されているリソースのパス{expected_path_key}を返す"))
-def then_verify_path(expected_path_key: str, resolved_path: Path, resource_info: dict):
+@then(parsers.parse("保存されているリソースのパス{expected_path}を返す"))
+def then_verify_path(expected_path: str, resolved_path: Path, resource_info: dict):
     """パスの検証"""
     # EXPECTED_PATHS から期待される相対パス部分を取得
-    expected_suffix = EXPECTED_PATHS[expected_path_key]
+    expected_suffix = EXPECTED_PATHS[expected_path]
     cache_dir = resource_info["cache_dir"]
     resources_dir = resource_info["resources_dir"]
 
@@ -504,7 +505,9 @@ def given_config_params(test_config: dict) -> dict:
 @when("設定ファイルの読み込みを要求される", target_fixture="loaded_config")
 def when_load_config(test_config: dict) -> dict:
     """設定ファイルの読み込み"""
-    return load_model_config(test_config["config_file"])
+    # 設定ファイルを直接 toml で読み込む
+    with open(test_config["config_file"], "r", encoding="utf-8") as f:
+        return toml.load(f)
 
 
 @then("設定ファイルから正しいパラメーターが読み込まれる")

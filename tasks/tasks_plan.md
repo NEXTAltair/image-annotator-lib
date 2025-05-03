@@ -35,6 +35,22 @@
 
 ## 進行中のタスク
 
+- [ ] **BDDテストクリーンアップ・修正計画 (2025-05-02)**
+    - **進捗:**
+        - ディレクトリ構成をCucumber標準に変更し、`scenarios()`パス指定も修正済み。
+        - 存在しないfeatureファイル参照（annotate.feature）を修正。
+        - 未定義Given句（APIキーが環境変数に設定されている等）を `common_steps.py` にダミー追加。
+        - BDDテストのデータテーブル・パラメータ渡し問題を公式ドキュメント精読により解決。
+        - featureファイルをScenario＋step直下のデータテーブル方式に修正、step定義でdatatable引数を受け取る形に変更。
+        - テストが期待通りに動作することを確認。
+    - **残課題:**
+        1. When句や一部Given句の未定義ステップを `common_steps.py` に追加（ダミーでOK）
+        2. fixture不足（例：mock_config_tomlなど）も追加
+        3. その後、再度 `uv run pytest -q` で確認
+    - **教訓:**
+        - BDDやpytest-bddのようなDSL/フレームワークは、**公式ドキュメントの仕様を最初に正確に把握することが最重要**。
+        - 文言やパターンの微修正だけでなく、根本的な設計・記法の違いを疑うべき。
+        - 公式ドキュメントの「Step arguments」「Scenario outlines」「Datatables」セクションは必読。
 
 ## 完了したタスク
 

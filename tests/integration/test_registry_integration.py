@@ -12,7 +12,7 @@ from image_annotator_lib.core.registry import (  # type: ignore
     register_annotators,
 )
 
-scenarios("../features/core/registry.feature")
+scenarios("../features/registry.feature")
 
 
 @given("モデル設定TOMLファイルが存在する", target_fixture="test_config_toml")
@@ -61,7 +61,7 @@ def then_model_name_key_model_class_object_registered(test_registry):
     # レジストリが空でないことを確認
     assert len(test_registry) > 0, "レジストリにモデルが登録されていません"
 
-    # 各値がクラスオブジェクト（type型）であることを確認
+    # 各値がクラスオブジェクト(type型)であることを確認
     for model_name, model_class in test_registry.items():
         assert isinstance(model_class, type), (
             f"値はクラスオブジェクトである必要があります: {model_name} -> {model_class}"
@@ -75,7 +75,7 @@ def then_registry_content_matches_config_file(test_config_toml, test_registry):
             f"config_toml に存在するモデル: {model_name} がレジストリに存在しません"
         )
 
-        # クラス名で比較（レジストリのクラスオブジェクトから__name__を取得）
+        # クラス名で比較(レジストリのクラスオブジェクトから__name__を取得)
         class_name = test_registry[model_name].__name__
         assert class_name == model_config["class"], (
             f"モデル {model_name} のクラス名が一致しません: "
@@ -95,11 +95,11 @@ def then_model_name_corresponding_class_object_returned(test_specific_model):
     # 取得したクラスオブジェクトがNoneでないことを確認
     assert test_specific_model is not None, "モデルが取得できませんでした"
 
-    # 取得したオブジェクトがクラス（type）であることを確認
+    # 取得したオブジェクトがクラス(type)であることを確認
     assert isinstance(test_specific_model, type), (
         f"取得したオブジェクトはクラスオブジェクトではありません: {type(test_specific_model)}"
     )
 
-    # クラスオブジェクトの名前が意味のある値であることを確認（オプション）
+    # クラスオブジェクトの名前が意味のある値であることを確認(オプション)
     class_name = test_specific_model.__name__
     assert len(class_name) > 0, "クラス名が空です"
