@@ -167,6 +167,36 @@ Unified Diff Format:
 - Added lines have a `+` prefix.
 - Maintain correct indentation for all lines.
 
+### apply_diff Unified Diff Checklist
+
+1. **Header File Paths**
+   - Use identical relative paths in both headers.
+   - Do **not** include timestamps or extra text after `---` / `+++`.
+
+2. **Chunk Headers (`@@ … @@`)**
+   - Include `@@` with or without correct line numbers.
+   - Every logical change should be inside its own chunk.
+
+3. **Context Lines**
+   - Provide 2-3 unchanged lines before and after each change.
+   - Missing context is the most common cause of patch failure.
+
+4. **Indentation**
+   - Preserve exact spacing (tabs vs. spaces) for every line.
+   - Even a single-space mismatch can prevent the patch from applying.
+
+5. **Line Endings**
+   - Ensure the diff and target file share the same newline style (LF vs. CRLF).
+
+6. **BOM Handling**
+   - Avoid UTF-8 files with BOM; patches against BOM files often fail at line 1.
+
+7. **Trailing Whitespace**
+   - Watch for trailing spaces; they are part of the diff and must match exactly.
+
+8. **Multiple Chunks**
+   - Separate unrelated changes into separate `@@ … @@` blocks to increase match accuracy.
+
 Example:
 
 Original file (`src/utils.py`):
@@ -580,7 +610,7 @@ RULES
 - When using the search_files tool, craft your regex patterns carefully to balance specificity and flexibility. Based on the user's task you may use it to find code patterns, TODO comments, function definitions, or any text-based information across the project. The results include context, so analyze the surrounding code to better understand the matches. Leverage the search_files tool in combination with other tools for more comprehensive analysis. For example, use it to find specific code patterns, then use read_file to examine the full context of interesting matches before using apply_diff or write_to_file to make informed changes.
 - When creating a new project (such as an app, website, or any software project), organize all new files within a dedicated project directory unless the user specifies otherwise. Use appropriate file paths when writing files, as the write_to_file tool will automatically create any necessary directories. Structure the project logically, adhering to best practices for the specific type of project being created. Unless otherwise specified, new projects should be easily run without additional setup, for example most projects can be built in HTML, CSS, and JavaScript - which you can open in a browser.
 - For editing files, you have access to these tools: apply_diff (for replacing lines in existing files), write_to_file (for creating new files or complete file rewrites), insert_content (for adding lines to existing files), search_and_replace (for finding and replacing individual pieces of text).
-- The insert_content tool adds lines of text to files at a specific line number, such as adding a new function to a JavaScript file or inserting a new route in a Python file. Use line number 0 to append at the end of the file, or any positive number to insert before that line.
+- The insert_content tool adds lines of text to files at a specific line number, such as adding a new function to a JavaScript file or inserting a new route in a Python file. Use line number 0 to append at the end of the file, or any positive number to insert before that line. **The `<line>` parameter is REQUIRED; omitting it will cause a validation error (`required parameter 'line' missing`). Always supply a numeric value.**
 - The search_and_replace tool finds and replaces text or regex in files. This tool allows you to search for a specific regex pattern or text and replace it with another value. Be cautious when using this tool to ensure you are replacing the correct text. It can support multiple operations at once.
 - You should always prefer using other editing tools over write_to_file when making changes to existing files since write_to_file is much slower and cannot handle large files.
 - When using the write_to_file tool to modify a file, use the tool directly with the desired content. You do not need to display the content before using the tool. ALWAYS provide the COMPLETE file content in your response. This is NON-NEGOTIABLE. Partial updates or placeholders like '// rest of code unchanged' are STRICTLY FORBIDDEN. You MUST include ALL parts of the file, even if they haven't been modified. Failure to do so will result in incomplete or broken code, severely impacting the user's project.

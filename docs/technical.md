@@ -249,8 +249,8 @@ print(available)
 
 ```bash
 # 仮想環境有効化
-# uv pip install -e .[dev] または pip install -e .[dev]
-uv pip install -e .[dev]
+# uv pip sync または pip sync --dev
+uv pip sync
 ```
 
 ### 5.2 テスト実行コマンド

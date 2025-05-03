@@ -58,6 +58,7 @@ dependencies = [
     "loguru",
     "torch>=2.6.0",
     "torchvision>=0.21.0",
+    "datetime>=5.5",
 ]
 
 [project.optional-dependencies]
@@ -124,9 +125,10 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 pythonpath = ["src"]          # テスト実
 testpaths = ["tests"]
-python_files = ["test_*.py"]
+python_files = ["test_*.py", "*_steps.py"]
 python_functions = ["test_*"]
-addopts = ["-v", "-s", "-ra", "--tb=short", "--showlocals", "--cov=src", "--cov-report=xml"]
+    addopts = ["--import-mode=importlib", "-v", "-s", "-ra", "--tb=short", "--showlocals", "--cov=src", "--cov-report=xml"]
+    bdd_features_base_dir = "tests/features/"
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",

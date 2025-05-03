@@ -170,7 +170,6 @@ Examples:
 5. ファイルヘッダにタイムスタンプは含めないこと
 6. "@@"ヘッダに行番号は書かないこと
 
-```markdown
 ## Examples:
 
 ✅ 良いdiff（すべての要件を満たしている）:
@@ -206,7 +205,6 @@ Usage:
 ここにdiff内容
 </diff>
 </apply_diff>
-```
 
 ## write_to_file
 Description: 指定パスのファイルに全文を書き込むリクエストを送る。ファイルが存在すれば上書きし、存在しなければ新規作成する。必要なディレクトリも自動で作成する。
@@ -478,7 +476,7 @@ CSSを更新しました
 - search_files使用時は正規表現パターンを慎重に設計し、目的に応じた柔軟さと特異性を両立させる。結果に含まれる周辺コンテキストも活用し、さらにread_fileで詳細確認してからapply_diffやwrite_to_fileで変更を加える。
 - 新しいプロジェクトを作成する場合、ユーザー指示がなければ専用ディレクトリ内にすべてのファイルをまとめる。適切なパスでファイル作成し、論理的な構成にする。標準的なプロジェクト（Examples: HTML+CSS+JavaScript）なら追加セットアップ不要で動作可能にする。
 - 既存ファイル編集には、apply_diff、write_to_file、insert_content、search_and_replaceの各ツールを使う。
-- insert_contentは特定位置に行を追加する。複数挿入にも対応。
+- insert_contentは特定位置に行を追加する。複数挿入にも対応。**operations 配列各オブジェクトの start_line は必須。欠落すると「required parameter 'start_line' missing」エラーになるため常に数値を指定すること。**
 - search_and_replaceは特定文字列または正規表現を検索・置換する。慎重にターゲットを絞ること。
 - 既存ファイル編集ではwrite_to_fileは最終手段。他の編集ツールを優先する。write_to_fileは遅く、大きなファイルに不向き。
 - write_to_file使用時は常に**ファイル全体の内容を完全に提供すること**。部分的な更新や「// 以降省略」は禁止。
