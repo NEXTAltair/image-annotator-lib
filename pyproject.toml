@@ -123,17 +123,35 @@ ignore_missing_imports = true
 
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]          # テスト実
+pythonpath = ["src"]
 testpaths = ["tests"]
-python_files = ["test_*.py", "*_steps.py"]
+python_files = ["test_*.py"]
 python_functions = ["test_*"]
-    addopts = ["--import-mode=importlib", "-v", "-s", "-ra", "--tb=short", "--showlocals", "--cov=src", "--cov-report=xml"]
-    bdd_features_base_dir = "tests/features/"
+addopts = ["--import-mode=importlib", "-v", "-s", "-ra", "--tb=short", "--showlocals", "--cov=src", "--cov-report=xml"]
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",
     "gui: GUI tests",
     "slow: Tests that take more time",
+    "api_model_discovery: Tests related to API model discovery functionality",
+    "base: Tests for core base classes and functionalities",
+    "scorer: Tests specific to scorer models",
+    "tagger: Tests specific to tagger models",
+    "webapi: Tests related to Web API based annotators",
+    "errors: Tests for custom exception handling",
+    "registry: Tests for the model registry",
+    "base_loader: Tests for the base model loader",
+    "model_factory: Tests for the model factory (ModelLoad)",
+    "transformers_loader: Tests for the Transformers loader",
+    "transformers_pipeline_loader: Tests for the Transformers Pipeline loader",
+    "onnx_loader: Tests for the ONNX loader",
+    "tensorflow_loader: Tests for the TensorFlow loader",
+    "clip_loader: Tests for the CLIP loader",
+    "memory_management: Tests for memory management features",
+    "cache_control: Tests for cache control mechanisms",
+    "cuda_management: Tests related to CUDA device management",
+    "error_handling: General tests for error handling across the library",
+    "utils: Tests for utility functions"
 ]
 
 [tool.coverage.run]
@@ -169,4 +187,4 @@ include = ["/src", "/tests"]
 "src/image_annotator_lib/py.typed" = "image_annotator_lib/py.typed"
 
 [tool.poetry.dependencies]
-imagehash = "^4.3.1" # pHash計算用
+imagehash = "^4.3.1"

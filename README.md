@@ -25,10 +25,10 @@
 2.  **依存関係のインストール:**
     ```bash
     # 通常の利用
-    uv pip install image-annotator-lib # (PyPIに公開後) または git+https...
+    uv pip sync
 
     # 開発用にソースからインストール
-    uv pip install -e .[dev]
+    uv pip sync --dev
     ```
 
 ## Getting Started / 基本的な使い方

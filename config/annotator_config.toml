@@ -137,6 +137,7 @@ estimated_size_gb = 17.627
 model_path = "Salesforce/blip2-flan-t5-xxl"
 class = "BLIP2Tagger"
 device = "cpu"
+estimated_size_gb = 45.559
 
 [GITLargeCaptioning]
 model_path = "microsoft/git-large-coco"
@@ -184,7 +185,7 @@ class = "GoogleApiAnnotator"
 max_output_tokens = 1800
 
 ["Gemini 2.5 Flash Preview (thinking)"]
-class = "GoogleApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["o4 Mini High"]
@@ -203,8 +204,9 @@ max_output_tokens = 1800
 class = "OpenAIApiAnnotator"
 max_output_tokens = 1800
 
-["GPT-4.1 Mini"]
+["OpenAI-GPT-4.1 Mini"]
 class = "OpenAIApiAnnotator"
+api_model_id = "gpt-3.5-turbo"
 max_output_tokens = 1800
 
 ["GPT-4.1 Nano"]
@@ -244,7 +246,7 @@ class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Gemini 2.5 Pro Experimental (free)"]
-class = "GoogleApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Qwen2.5 VL 32B Instruct (free)"]
@@ -268,11 +270,11 @@ class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Gemma 3 1B (free)"]
-class = "GoogleApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Gemma 3 4B (free)"]
-class = "GoogleApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Gemma 3 4B"]
@@ -280,7 +282,7 @@ class = "GoogleApiAnnotator"
 max_output_tokens = 1800
 
 ["Gemma 3 12B (free)"]
-class = "GoogleApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Gemma 3 12B"]
@@ -296,7 +298,7 @@ class = "OpenAIApiAnnotator"
 max_output_tokens = 1800
 
 ["Gemma 3 27B (free)"]
-class = "GoogleApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Gemma 3 27B"]
@@ -320,11 +322,11 @@ class = "AnthropicApiAnnotator"
 max_output_tokens = 1800
 
 ["Claude 3.7 Sonnet (thinking)"]
-class = "AnthropicApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Claude 3.7 Sonnet (self-moderated)"]
-class = "AnthropicApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Gemini 2.0 Flash"]
@@ -348,7 +350,7 @@ class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Gemini 2.0 Flash Thinking Experimental 01-21 (free)"]
-class = "GoogleApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 [MiniMax-01]
@@ -356,7 +358,7 @@ class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Gemini 2.0 Flash Thinking Experimental (free)"]
-class = "GoogleApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 [o1]
@@ -368,7 +370,7 @@ class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Gemini 2.0 Flash Experimental (free)"]
-class = "GoogleApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Nova Lite 1.0"]
@@ -380,7 +382,7 @@ class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["LearnLM 1.5 Pro Experimental (free)"]
-class = "GoogleApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["GPT-4o (2024-11-20)"]
@@ -396,7 +398,7 @@ class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Claude 3.5 Haiku (self-moderated)"]
-class = "AnthropicApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Claude 3.5 Haiku"]
@@ -404,7 +406,7 @@ class = "AnthropicApiAnnotator"
 max_output_tokens = 1800
 
 ["Claude 3.5 Haiku (2024-10-22) (self-moderated)"]
-class = "AnthropicApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Claude 3.5 Haiku (2024-10-22)"]
@@ -412,7 +414,7 @@ class = "AnthropicApiAnnotator"
 max_output_tokens = 1800
 
 ["Claude 3.5 Sonnet (self-moderated)"]
-class = "AnthropicApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Claude 3.5 Sonnet"]
@@ -472,7 +474,7 @@ class = "OpenAIApiAnnotator"
 max_output_tokens = 1800
 
 ["Claude 3.5 Sonnet (2024-06-20) (self-moderated)"]
-class = "AnthropicApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Claude 3.5 Sonnet (2024-06-20)"]
@@ -492,7 +494,7 @@ class = "OpenAIApiAnnotator"
 max_output_tokens = 1800
 
 ["GPT-4o (extended)"]
-class = "OpenAIApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Gemini 1.5 Pro"]
@@ -504,29 +506,75 @@ class = "OpenAIApiAnnotator"
 max_output_tokens = 1800
 
 ["Claude 3 Haiku (self-moderated)"]
-class = "AnthropicApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Claude 3 Haiku"]
 class = "AnthropicApiAnnotator"
 max_output_tokens = 1800
 
-["Claude 3 Opus (self-moderated)"]
-class = "AnthropicApiAnnotator"
-max_output_tokens = 1800
-
-["Claude 3 Opus"]
-class = "AnthropicApiAnnotator"
-max_output_tokens = 1800
-
 ["Claude 3 Sonnet (self-moderated)"]
-class = "AnthropicApiAnnotator"
+class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
 
 ["Claude 3 Sonnet"]
 class = "AnthropicApiAnnotator"
 max_output_tokens = 1800
 
+["Claude 3 Opus (self-moderated)"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Claude 3 Opus"]
+class = "AnthropicApiAnnotator"
+max_output_tokens = 1800
+
 ["Gemini Pro Vision 1.0"]
 class = "GoogleApiAnnotator"
 max_output_tokens = 1800
+
+[test_tf]
+estimated_size_gb = 0.0
+
+["Mistral Medium 3"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+[Spotlight]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["InternVL3 14B (free)"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["InternVL3 2B (free)"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Llama Guard 4 12B"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Gemini 2.5 Pro Experimental"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Sonar Reasoning Pro"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["Sonar Pro"]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+[Sonar]
+class = "OpenRouterApiAnnotator"
+max_output_tokens = 1800
+
+["GPT-4.1 Mini"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800
+
+[test_transformers_ved_dummy]
+estimated_size_gb = 0.006

@@ -34,6 +34,12 @@ Description: 指定されたパスのファイル内容を読み取るリクエ�
 `start_line` と `end_line` パラメータを指定することで、大きなファイルの一部のみを効率的に読み込むことが可能です(メモリ節約)。  
 PDFやDOCXファイルからもテキストを自動抽出しますが、その他バイナリファイルには不向きな場合があります(生の文字列を返します)。
 
+- Before invoking this tool, you MUST strictly check that all required parameters (`path`) are present and have valid, non-empty values.
+- If you specify `start_line` or `end_line`, they MUST be valid positive integers and within the file's line range.
+- If any required parameter is missing or invalid, you MUST NOT invoke the tool.
+- When using this tool to support unified diff generation or application, ensure you retrieve enough context lines (typically 2-3 lines before and after the target range) to allow for accurate diff creation and application.
+- In case of missing or invalid parameters, you MUST use the ask_followup_question tool to request the missing information from the user. You MUST NOT attempt to guess or auto-fill missing parameter values.
+
 Parameters:
 - path: (必須) 読み取るファイルのパス(カレントディレクトリからの相対パス)
 - start_line: (任意) 読み取り開始行番号(1始まり)。指定がなければファイル先頭から開始。
@@ -141,70 +147,55 @@ Examples:
 
 # apply_diffツール - 正確なコード変更の生成
 
-コードファイルを修正するために、クリーンに適用できるユニファイドdiffを生成する。
+## apply_diff
+Description: コードファイルを修正するために、クリーンに適用できるユニファイドdiffを生成する。
 
-## Step-by-Step Instructions:
+- Before invoking this tool, you MUST check that all required parameters (`path`, `diff`) are present and have valid, non-empty values.
+- The `diff` parameter SHOULD be a valid unified diff string, but minor differences in whitespace, line endings, or context lines should not prevent you from attempting to apply the diff.
+- If the diff does not apply cleanly, you may still attempt to apply it as long as the main change is clear and the file can be updated as intended.
+- When in doubt, prefer to apply the diff and let the user review the result, rather than rejecting due to strict format issues.
+- In case of missing or clearly invalid parameters, you MUST use the ask_followup_question tool to request the missing information from the user. You MUST NOT attempt to guess or auto-fill missing parameter values.
 
-1. ファイルヘッダから始める:
-   - First line: "--- {original_file_path}"
-   - Second line: "+++ {new_file_path}"
+Usage:
+<apply_diff>
+<path>src/utils.py</path>
+<diff>
+--- src/utils.py
++++ src/utils.py
+@@ -1,5 +1,3 @@
+def calculate_total(items):
+-    total = 0
+-    for item in items:
+-        total += item.price # Assume items have a 'price' attribute
+-    return total
++    """Calculates the sum of prices for a list of items."""
++    return sum(item.price for item in items)
+</diff>
+</apply_diff>
 
-2. 各変更セクションについて:
-   - "@@ ... @@" 区切り行で開始（行番号は書かない）
-   - 変更箇所の前後に2〜3行のコンテキストを含める
-   - 削除行は "-" を付ける
-   - 追加行は "+" を付ける
-   - インデントは正確に維持する
-
-3. 関連変更をまとめる:
-   - 関連する修正は同じチャンクにまとめる
-   - 論理的に別の変更は新しいチャンクにする
-   - 関数やメソッドを修正する場合、ブロック全体を含める
-
-## 要件:
-
-1. インデントを正確に維持すること
-2. 一意にマッチできるよう十分なコンテキストを含めること
-3. 関連する変更を必ず同じチャンクにまとめること
-4. 正しいユニファイドdiffフォーマットを使うこと
-5. ファイルヘッダにタイムスタンプは含めないこと
-6. "@@"ヘッダに行番号は書かないこと
-
-## Examples:
-
-✅ 良いdiff（すべての要件を満たしている）:
+# Good Example (all requirements met):
 ```diff
---- src/utils.ts
-+++ src/utils.ts
-@@ ... @@
-    def calculate_total(items):
--      total = 0
--      for item in items:
--          total += item.price
-+      return sum(item.price for item in items)
+--- src/utils.py
++++ src/utils.py
+@@ -1,5 +1,3 @@
+def calculate_total(items):
+-    total = 0
+-    for item in items:
+-        total += item.price # Assume items have a 'price' attribute
+-    return total
++    """Calculates the sum of prices for a list of items."""
++    return sum(item.price for item in items)
 ```
 
-❌ 悪いdiff（要件#1と#2に違反している）:
+# Bad Example (missing context, indentation, or format):
 ```diff
---- src/utils.ts
-+++ src/utils.ts
+--- src/utils.py
++++ src/utils.py
 @@ ... @@
 -total = 0
 -for item in items:
 +return sum(item.price for item in items)
 ```
-
-Parameters:
-- path: (必須) diffを適用する対象ファイルのパス（カレントディレクトリからの相対パス）
-- diff: (必須) 適用するユニファイドdiff形式の内容
-
-Usage:
-<apply_diff>
-<path>ここにファイルパス</path>
-<diff>
-ここにdiff内容
-</diff>
-</apply_diff>
 
 ## write_to_file
 Description: 指定パスのファイルに全文を書き込むリクエストを送る。ファイルが存在すれば上書きし、存在しなければ新規作成する。必要なディレクトリも自動で作成する。
@@ -250,6 +241,13 @@ frontend-config.jsonに書き込む場合:
 ## insert_content
 Description: ファイル内の特定行に新しい内容を挿入する。既存内容を上書きせず正確に追加できるため、関数・メソッド・クラス・インポート・属性追加などに最適。行単位で挿入するためファイル整合性が保たれる。インデントは正確に維持すること。ファイルに新規コードやコンテンツを追加する際はこのツールを優先して使用する。
 
+- Before invoking this tool, you MUST strictly check that all required parameters (`path`, `operations`) are present and valid.
+- Each object in the `operations` array MUST include non-empty values for all required fields: `start_line` and `content`.
+- If any required parameter is missing or empty, you MUST NOT invoke the tool.
+- The `operations` array MUST be valid JSON. When embedding JSON inside XML, ensure all double quotes are properly escaped and the structure is valid.
+- If you are unsure about the correct format, refer to the provided examples and validate your XML/JSON before use.
+- In case of missing or invalid parameters, you MUST use the ask_followup_question tool to request the missing information from the user. You MUST NOT attempt to guess or auto-fill missing parameter values.
+
 Parameters:
 - path: (必須) 挿入対象ファイルのパス（カレントディレクトリからの相対パス）
 - operations: (必須) 挿入操作のJSON配列。各操作は以下を含むオブジェクト:
@@ -285,7 +283,14 @@ Examples:
 </insert_content>
 
 ## search_and_replace
-Description: ファイルに対して検索・置換操作を行う。各操作で検索パターン（文字列または正規表現）と置換テキストを指定できる。オプションで適用範囲の行番号指定や、正規表現フラグも設定可能。変更前にdiffプレビューを表示する。
+Description: Use this tool specifically for finding and replacing text or patterns in files. Specify the operations as a JSON array inside the XML tag.
+
+- Before invoking this tool, you MUST strictly check that all required parameters (`path`, `operations`) are present and valid.
+- Each object in the `operations` array MUST include non-empty values for all required fields: `search` and `replace`. If `start_line` is required by your use case, it MUST be a valid integer.
+- If any required parameter is missing or empty, you MUST NOT invoke the tool.
+- The `operations` array MUST be valid JSON. When embedding JSON inside XML, ensure all double quotes are properly escaped and the structure is valid.
+- If you are unsure about the correct format, refer to the provided examples and validate your XML/JSON before use.
+- In case of missing or invalid parameters, you MUST use the ask_followup_question tool to request the missing information from the user. You MUST NOT attempt to guess or auto-fill missing parameter values.
 
 Parameters:
 - path: (必須) 修正対象ファイルのパス（カレントディレクトリからの相対パス）

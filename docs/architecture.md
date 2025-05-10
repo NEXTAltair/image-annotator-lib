@@ -69,11 +69,11 @@ sequenceDiagram
     loop 各 model_name について
         AnnotateAPI->>ModelRegistry: get_model_class(model_name)
         ModelRegistry-->>AnnotateAPI: ModelClass を返す
-        AnnotateAPI->>ModelLoad: load_model(ModelClass, config) # 静的メソッド経由でロード指示
+        AnnotateAPI->>ModelLoad: load_model(ModelClass, config) # モデルロードと準備を指示 (旧: 静的メソッド経由)
         ModelLoad-->>AnnotateAPI: ロード済みモデルインスタンスを返す
     end
     loop 各 image_path について
-        AnnotateAPI->>ModelLoad: Ensure model is on correct device (e.g., CUDA) # 静的メソッド経由
+        AnnotateAPI->>ModelLoad: Ensure model is on correct device (e.g., CUDA) # デバイス管理を指示 (旧: 静的メソッド経由)
         loop 各 loaded_model_instance について
             AnnotateAPI->>ModelClass: loaded_model_instance.predict(image) # BaseAnnotator の共通 predict
             ModelClass-->>AnnotateAPI: 結果 (タグ/スコア) を返す
@@ -120,12 +120,12 @@ sequenceDiagram
     *   **責務:** 共通属性初期化、**共通化`predict`メソッド**（チャンク処理、pHash計算、エラーハンドリング、標準結果生成）、サブクラス実装抽象ヘルパーメソッド定義、コンテキスト管理インターフェース定義。
 2.  **フレームワーク/タイプ別基底クラス (`core/base.py`, `model_class/annotator_webapi.py`):**
     *   `BaseAnnotator` を継承し、特定MLフレームワーク（ONNX, Transformers等）やタイプ（Web API等）共通処理を実装。
-    *   **例:** `ONNXBaseAnnotator`, `TransformersBaseAnnotator`, `TensorflowBaseAnnotator`, `ClipBaseAnnotator`, `PipelineBaseAnnotator`, `BaseWebApiAnnotator`。
+    *   **例:** `ONNXBaseAnnotator`, `TransformersBaseAnnotator`, `TensorflowBaseAnnotator`, `ClipBaseAnnotator`, `PipelineBaseAnnotator`, `WebApiBaseAnnotator`。
     *   **責務:** フレームワーク固有モデルロード/解放ロジック、`BaseAnnotator` 抽象ヘルパーメソッドの一部実装。
 3.  **具象モデルクラス (`models/`, `model_class/annotator_webapi.py`):**
     *   対応するフレームワーク/タイプ別基底クラスを継承し、個別モデル固有処理のみ実装。
-    *   **例:** `WDTagger`, `BLIPTagger`, `AestheticShadowV1`, `CafePredictor`, `GoogleApiAnnotator`。
-    *   **責務:** モデル固有初期化、ファイル読み込み、必要に応じたヘルパーメソッドのオーバーライド（特に `_generate_tags`）。
+    *   **例:** `WDTagger`, `BLIPTagger`, `AestheticShadowV1`, `CafePredictor`, `GoogleApiAnnotator`, `OpenAIApiAnnotator`, `AnthropicApiAnnotator`, `OpenRouterApiAnnotator`。
+    *   **責務:** モデル固有初期化、ファイル読み込み、必要に応じたヘルパーメソッドのオーバーライド（特に `_generate_tags`、Web APIの場合は `_run_inference` も重要）。
 
 ### 3.3 主要コンポーネントの役割
 
@@ -202,17 +202,43 @@ graph TD
 外部 Web API を利用して画像アノテーションを行う機能。
 
 -   **設計方針:** 既存 `BaseAnnotator` 設計を踏襲し、API プロバイダー毎に専用具象クラスを作成。API キーは `.env` または環境変数で管理し、設定ファイルでモデル名やプロンプト等を管理。戻り値構造は `BaseAnnotator` が生成する標準 `AnnotationResult` を使用。
--   **クラス構成:** `BaseWebApiAnnotator` (`model_class/annotator_webapi.py`) を基底とし、各 API プロバイダー (`Google`, `OpenAI`, `Anthropic`, `OpenRouter`) 毎に具象クラス (`GoogleApiAnnotator`, `OpenAIApiAnnotator` 等) を実装。
--   **共通機能 (`BaseWebApiAnnotator`):**
-    -   API キー管理 (`_load_api_key`, `.env` 読み込み)。
-    -   画像 Base64 エンコード (`_encode_image`)。
-    -   基本的なリクエスト構築・送信ロジックの抽象化 (サブクラスが `_run_inference` で実装)。
-    -   レート制限、リトライ機構 (必要に応じてサブクラスまたは共通ヘルパーで実装検討)。
-    -   共通エラーハンドリング (タイムアウト、接続エラー等)。
-    -   テキスト/JSON レスポンス解析ヘルパー (必要に応じて)。
-    -   共通設定項目 (`prompt`, `max_tokens` 等) の読み込み。
--   **具象クラス:**
-    -   API プロバイダー固有クライアントの初期化。
-    -   `_run_inference`: API 固有のリクエスト形式で画像データを送信し、レスポンスを取得する。
-    -   `_generate_tags`: API レスポンスからタグ/スコア情報を抽出し、標準形式 (文字列リスト) に変換する。
--   **エラーハンドリング:** API キー不足、認証エラー、レート制限超過、APIからのエラーレスポンス、レスポンス形式不正等に対し、`BaseAnnotator` のエラーハンドリング機構を利用し、適切エラーメッセージを含む `AnnotationResult` (`error` フィールドに格納) を返す。致命的な設定不備等は例外を送出する可能性もある。
+-   **クラス構成:** `WebApiBaseAnnotator` (`model_class/annotator_webapi.py`) を基底とし、各 API プロバイダー (`Google`, `OpenAI`, `Anthropic`, `OpenRouter`) 毎に具象クラス (`GoogleApiAnnotator`, `OpenAIApiAnnotator` 等) を実装。
+-   **共通機能 (`WebApiBaseAnnotator`):**
+    -   APIキーの環境変数からの読み込み支援 (実際の読み込みと設定は具象クラスの `__enter__` で行う)。
+    -   画像の前処理 (`_preprocess_images`): 多くの場合、Base64エンコードなどを行う共通実装を提供またはサブクラスでオーバーライド。
+    -   APIリクエスト送信とレスポンス受信の抽象化 (サブクラスが `_run_inference` で具体的なAPIコールを実装)。
+    -   レート制限のための待機処理 (`_wait_for_rate_limit`)。
+    -   APIエラーの共通処理 (`_handle_api_error`)。
+    -   レスポンスJSONの共通パース処理 (`_parse_common_json_response`)。
+    -   共通設定項目 (プロンプトテンプレート、最大トークン数、タイムアウトなど) の設定ファイルからの読み込みと利用。
+    -   コンテキスト管理 (`__enter__`, `__exit__`) によるクライアントの初期化とクリーンアップの枠組み提供。
+-   **具象クラス (`GoogleApiAnnotator`, `OpenAIApiAnnotator`, `AnthropicApiAnnotator`, `OpenRouterApiAnnotator`):**
+    -   `__enter__` メソッド内でのAPIプロバイダー固有クライアントの初期化 (APIキー設定含む)。
+    -   `_preprocess_images`: 必要に応じてオーバーライドし、プロバイダー固有の前処理を実装。
+    -   `_run_inference`: API プロバイダー固有のリクエスト形式で画像データを送信し、レスポンスを取得する。
+    -   `_format_predictions`: API レスポンスを共通の `FormattedOutput` 形式 (またはそれに準ずる中間形式) に整形する。
+    -   `_generate_tags`: `_format_predictions` の結果から、最終的なタグリストまたはスコア情報を抽出する (多くの場合、基底クラスのデフォルト実装を利用可能)。
+-   **エラーハンドリング:** `_handle_api_error` や各処理ステップでの例外捕捉を通じて、APIキー不足、認証エラー、レート制限超過、APIからのエラーレスポンス、レスポンス形式不正等に対し、`BaseAnnotator` のエラーハンドリング機構を利用し、適切エラーメッセージを含む `AnnotationResult` (`error` フィールドに格納) を返す。致命的な設定不備等は `ConfigurationError` などのカスタム例外を送出。
+
+## テストアーキテクチャの改善 (追記)
+
+現在、プロジェクトの信頼性と安定性を向上させるため、BDD (Behavior Driven Development) テストスイートの大規模な修正と改善作業を行っています。
+この取り組みは、以下の点でアーキテクチャ全体の堅牢性に寄与します。
+
+*   **早期の不具合検出:** BDDテストは、システムの振る舞いを自然言語に近い形で記述し、それを自動テストとして実行します。これにより、開発の初期段階で仕様の誤解や実装の不具合を検出しやすくなります。
+*   **リグレッション防止:** 包括的なテストスイートを整備し、継続的に実行することで、新たな変更が既存機能に悪影響を与える（リグレッション）のを防ぎます。
+*   **仕様の明確化:** `.feature` ファイルは「生きたドキュメント」として機能し、システムの期待される振る舞いを明確に示します。今回の修正作業では、ステップ定義の不足解消や、`datatable` のような曖昧な記述から `Scenario Outline` と `Examples` といったより構造化された形式への移行を進めており、仕様の明確性が向上しています。
+*   **保守性の向上:** ステップ定義を共通化 (`conftest.py` や共通ステップファイル) し、各フィーチャー固有のステップと分離することで、テストコードの重複を減らし、保守性を高めています。また、テストランナー (`test_bdd_runner.py`) のインポート構造を整理することで、テスト全体の管理をしやすくしています。
+
+進行中の主な修正点：
+*   **`StepDefinitionNotFoundError` の解消:** ほぼ完了。未対応のステップがあれば個別に対応。
+*   **Fixture (`datatable`, `scoring_results` 等) の問題解決:** `datatable` は `Scenario Outline` への移行で対応。`scoring_results` は `target_fixture` の利用やステップ間のデータ受け渡し方法の見直しで対応中。
+*   **テストと実装間の不整合の修正:** `AssertionError` やその他の実行時エラーの修正。
+
+これにより、開発サイクル全体を通じて品質の高いソフトウェアを提供するための基盤を強化しています。
+
+---
+【現状追記】
+2025-05-10時点、BDDテストのステップ定義ファイルおよびconftest.pyは全て削除済みであり、BDDテスト実装自体が存在しない。
+本セクションの「BDDテストスイートの修正・改善作業」は過去の経緯として参考情報として残す。
+今後テストを再開する場合は、「BDDテストは統合テストとしてモック・ダミー・スタブ等を使用しない」現方針に従うこと。

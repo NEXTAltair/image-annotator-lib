@@ -7,19 +7,36 @@ os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 from .api import PHashAnnotationResults
+from .core.api_model_discovery import discover_available_vision_models
 from .core.base import AnnotationResult
+from .core.config import config_registry
+from .core.constants import (
+    AVAILABLE_API_MODELS_CONFIG_PATH,
+    DEFAULT_PATHS,
+    SYSTEM_CONFIG_PATH,
+    USER_CONFIG_PATH,
+)
+from .core.model_factory import ModelLoad
 from .core.registry import initialize_registry, list_available_annotators
 from .core.utils import init_logger
+from .exceptions import *
 from .exceptions.errors import AnnotatorError, ModelLoadError, ModelNotFoundError, OutOfMemoryError
 
 # --- Public API ---
 __all__ = [
+    "AVAILABLE_API_MODELS_CONFIG_PATH",
+    "DEFAULT_PATHS",
+    "SYSTEM_CONFIG_PATH",
+    "USER_CONFIG_PATH",
     "AnnotationResult",
     "AnnotatorError",
+    "ModelLoad",
     "ModelLoadError",
     "ModelNotFoundError",
     "OutOfMemoryError",
     "annotate",
+    "config_registry",
+    "discover_available_vision_models",
     "list_available_annotators",
 ]
 

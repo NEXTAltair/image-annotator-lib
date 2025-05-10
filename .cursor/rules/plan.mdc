@@ -8,10 +8,11 @@ description: Always include these rules.
 globs:
 alwaysApply: true
 ---
-プランニング/アーキテクトタスク前に**必ず**3つのこと実行:
+プランニング/アーキテクトタスク前に**必ず**4つのこと実行:
 a. `docs/` 内既存ドキュメント読込: i. [architecture.md](mdc:docs/architecture.md)  ii. [product_requirement_docs.md](mdc:docs/product_requirement_docs.md) iii. [technical.md](mdc:docs/technical.md)
 b. `tasks/` 内計画・関連タスクコンテキスト読込: i. [active_context.md](mdc:tasks/active_context.md) ii. [active_context.md](mdc:tasks/active_context.md)
 c. `src` 及び他場所コードから、必要解決策コンテキスト取得。
+d. プロンプト受信時に、関連ディレクトリのソースコード全てを読み込む。
 ---
 - 以下は従うべきプランニングワークフロー:
 
@@ -74,3 +75,4 @@ d. 必要応じ<WEB USE>で調査。
 a. 既存ドキュメント計画記録、`docs/`内ファイル(i. [architecture.md](mdc:docs/architecture.md)  ii. [architecture.md](mdc:docs/architecture.md) iii. [architecture.md](mdc:docs/architecture.md) )更新。
 b. 計画・関連タスク計画・コンテキストを`tasks/`内ファイル(i. [active_context.md](mdc:tasks/active_context.md) ii. [tasks_plan.md](mdc:tasks/tasks_plan.md) )記録。
 
+- 指定されたファイル（設計・実装・テスト・ドキュメント等）は**必ず全行をツールで読み込むこと**。部分的な読込や推測・ハルシネーションのみでの判断・提案は厳禁。

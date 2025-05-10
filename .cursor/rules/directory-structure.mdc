@@ -21,7 +21,7 @@ flowchart TD
     Root --> RooRules[.roo/]
     Root --> SourceCode[src/]
     Root --> TestsDir[tests/]
-    Root --> Utils[tools/]
+    Root --> Tools[tools/]
     Root --> Config[config/]
     Root --> Data[data/]
     Root --> Example[example/]
@@ -37,9 +37,19 @@ flowchart TD
         UnitTests[unit/]
         IntegrationTests[integration/]
         Features[features/]
-        StepDefs[step_defs/]
         TestResources[resources/]
         Conftest[conftest.py]
+    end
+
+    subgraph Features [features/]
+        direction LR
+        FeatureFiles[*.feature]
+        StepDefs[step_definitions/]
+    end
+
+    subgraph StepDefs [step_definitions/]
+        direction LR
+        StepFiles[*_steps.py]
     end
 
     subgraph LibRoot [image_annotator_lib/]
@@ -113,27 +123,6 @@ flowchart TD
         UnitCoreFactory[test_model_factory_unit.py]
         UnitCoreRegistry[test_registry.py]
     end
-
-    subgraph StepDefs [step_defs/]
-        direction LR
-        StepAnnotate[test_annotate.py]
-        StepCore[core/]
-        StepScore[score_models/]
-    end
-
-    subgraph StepCore [core/]
-        direction LR
-        StepCoreDiscovery[test_api_model_discovery_steps.py]
-        StepCoreFactory[test_model_factory.py]
-        StepCoreRegistry[test_registry.py]
-        StepCoreUtils[test_utils.py]
-    end
-
-    subgraph StepScore [score_models/]
-        direction LR
-        StepAesthetic[test_aesthetic_score_models.py]
-    end
-
 ```
 
 ## 2. ディレクトリ構成ルール (AI向け指示)
@@ -161,11 +150,12 @@ flowchart TD
 - **`unit/`**: ユニットテストを配置する。
     - **`image_annotator_lib/`**: `image-annotator-lib` の各モジュールに対応するユニットテストを、元の `src/` 内の構造を模倣して配置する。(例: `tests/unit/image_annotator_lib/core/test_base.py`)
 - **`integration/`**: 複数のコンポーネントや外部サービスとの連携をテストする統合テストを配置する。
-- **`features/`**: BDD (振る舞い駆動開発) の Feature ファイル (`.feature`) を配置する。
-- **`step_defs/`**: BDD のステップ定義ファイル (`test_*.py`) を配置する。
+- **`features/`**: BDD (振る舞い駆動開発) のファイルを配置する。
+    - **ルート**: Feature ファイル (`.feature`) を配置する。
+    - **`step_definitions/`**: BDD のステップ定義ファイル (例: `*_steps.py`) を配置する。
 - **`resources/`**: テストで使用する画像ファイル、設定ファイルなどのリソースを配置する。
 - **`conftest.py`**: プロジェクト全体のテストで共通して使用するフィクスチャやフックを定義する。
 
 **指示:**
 - 新しい `image-annotator-lib` のモジュールを追加した場合、対応するユニットテストファイルを `tests/unit/image_annotator_lib/` 配下の適切な場所に作成する。
-- 新しいBDDシナリオを追加する場合、Feature ファイルを `tests/features/` に、ステップ定義を `tests/step_defs/` に作成する。
+- 新しいBDDシナリオを追加する場合、Feature ファイルを `tests/features/` に、ステップ定義を `tests/features/step_definitions/` に作成する。
