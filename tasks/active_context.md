@@ -64,3 +64,21 @@
 - 構造化出力モデルをAnnotationSchema（webapi_shared.py）に統一。
 - _run_inference/_format_predictionsの型安全・エラーハンドリングを整理。
 - ユニットテスト（test_openai_api_response.py）を追加し、正常系・異常系・API例外を網羅。
+
+## 2025-05-10 AnthropicApiAnnotator変更経緯（テスト用ToolUseBlockクラス名修正・型判定整理）
+
+- テスト用ダミークラスのクラス名をToolUseBlockに合わせ、type(obj).__name__ == "ToolUseBlock" の判定に合致させることでテストがパス。
+- _format_predictionsでAnnotationSchema型を許容し、APIレスポンスの型安全性・一貫性を向上。
+- これにより、Anthropic/Claude系APIの構造化出力テストが全てパス。
+
+## 2025-05-10 annotator_webapi.py から OpenAIApiAnnotator・AnthropicApiAnnotator 分離の作業内容・進捗
+
+- annotator_webapi.py から OpenAIApiAnnotator を openai_api_response.py へ、AnthropicApiAnnotator を anthropic_api.py へ分離。
+- 分離に伴い、型定義・エラーハンドリング・テストを整理。
+- 共通スキーマ（AnnotationSchema）は webapi_shared.py に集約。
+- テスト用ダミークラスのクラス名・型判定ロジックを実装と一致させ、テストの信頼性を担保。
+- テスト全パスを確認。
+
+### 今後のタスク
+- 他API（Google, OpenRouter等）も同様の分離・整理を検討。
+- ドキュメント・設計方針の定期的な見直し。

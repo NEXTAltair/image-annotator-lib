@@ -48,3 +48,14 @@ image-annotator-lib
 - OpenAI APIの画像入力仕様（base64エンコード画像はimage_url: dict型で渡す）を明確化。
 - 型エラー解消・構造化出力モデルのAnnotationSchema統一により、保守性・拡張性を向上。
 - ユニットテスト追加で品質保証を強化。
+
+## AnthropicApiAnnotatorのテスト用ToolUseBlockクラス名修正・型判定整理
+- テスト用ダミークラスのクラス名をToolUseBlockに合わせ、実装の型判定と一致させることでテストがパス。
+- _format_predictionsでAnnotationSchema型を許容し、構造化出力の一貫性・保守性を向上。
+- これにより、Anthropic系APIのユニットテストが全て正常に通過。
+
+## annotator_webapi.py から OpenAIApiAnnotator・AnthropicApiAnnotator 分離のユーザー価値・目的
+- APIごとの実装が明確に分離され、拡張・保守が容易に。
+- 新API追加や既存APIの仕様変更時も、他APIへの影響を最小化。
+- テスト・型定義の一貫性向上により、品質保証が強化。
+- ユーザーは各APIの責務・依存関係を明確に把握でき、開発・運用の効率が向上。

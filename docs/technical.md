@@ -354,11 +354,12 @@ print(available)
 
 # 変更履歴（2025-05-10）
 
-## OpenAIApiAnnotatorの型・エラー整理、AnnotationSchema統一
-- OpenAI SDK v1.xの型定義に従い、ChatCompletionContentPartImageParamのimage_urlはstrではなくdict型（{"url": ..., "detail": ...}）で渡す必要がある。
-- 公式ドキュメント・型定義を再確認し、型エラー（Incompatible types ... ImageURL）を解消。
-- 構造化出力モデルはwebapi_shared.pyのAnnotationSchemaに統一し、重複定義を排除。
-- _run_inference/_format_predictionsの型安全性・エラーハンドリングを強化。
-- ユニットテストでAPI例外・異常系も網羅し、信頼性を向上。
+## annotator_webapi.py から OpenAIApiAnnotator・AnthropicApiAnnotator 分離の技術的詳細
+- OpenAI/Anthropic で画像入力・構造化出力の型仕様が異なるため、共通部分（AnnotationSchema, JSON_SCHEMA等）は webapi_shared.py に集約し、API固有部分は各ファイルで管理。
+- OpenAI: image_urlはstr型ではなくdict型（{"url": ..., "detail": ...}）で渡す必要がある。公式SDK型定義・ドキュメントを参照し、型エラー（ImageURL型）を解消。
+- Anthropic: ToolUseBlock型のinput属性からdictを抽出し、AnnotationSchemaへ変換。APIレスポンスの型判定はtype(obj).__name__ == "ToolUseBlock"で厳密化。
+- テスト用ダミークラスのクラス名・型判定ロジックを実装と一致させることで、テストの信頼性を担保。
+- 共通スキーマ（AnnotationSchema）を全APIで利用し、型の重複・分岐処理の煩雑化を排除。
+- エラーハンドリングはSDK公式例外のみcatchし、冗長なtry/exceptや独自ラップを削除。
 
 ---
