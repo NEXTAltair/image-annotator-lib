@@ -41,3 +41,10 @@ image-annotator-lib
 ## 3. プロジェクト概要
 
 `image-annotator-lib` は `scorer-wrapper-lib` と `tagger-wrapper-lib` を統合し、ローカルの機械学習モデルや外部のWeb APIを利用して、画像アノテーション（タギング、スコアリング）機能を提供するPythonライブラリである。統一されたAPIを通じて、多様なアノテーションソースを透過的に扱うことを目指す。
+
+# 変更履歴（2025-05-10）
+
+## OpenAIApiAnnotatorの画像入力・構造化出力の型仕様統一
+- OpenAI APIの画像入力仕様（base64エンコード画像はimage_url: dict型で渡す）を明確化。
+- 型エラー解消・構造化出力モデルのAnnotationSchema統一により、保守性・拡張性を向上。
+- ユニットテスト追加で品質保証を強化。

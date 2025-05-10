@@ -351,3 +351,14 @@ print(available)
 
 ## 参照日
 - 2025-05-10
+
+# 変更履歴（2025-05-10）
+
+## OpenAIApiAnnotatorの型・エラー整理、AnnotationSchema統一
+- OpenAI SDK v1.xの型定義に従い、ChatCompletionContentPartImageParamのimage_urlはstrではなくdict型（{"url": ..., "detail": ...}）で渡す必要がある。
+- 公式ドキュメント・型定義を再確認し、型エラー（Incompatible types ... ImageURL）を解消。
+- 構造化出力モデルはwebapi_shared.pyのAnnotationSchemaに統一し、重複定義を排除。
+- _run_inference/_format_predictionsの型安全性・エラーハンドリングを強化。
+- ユニットテストでAPI例外・異常系も網羅し、信頼性を向上。
+
+---

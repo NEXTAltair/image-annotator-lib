@@ -89,4 +89,24 @@
 - (ここに、純粋な未解決の問題点やバグを記載)
 - (例: WebAPIアノテーターのテストで稀にタイムアウトが発生する (原因調査中))
 
+## [2025-05-10] Google Gemini annotator レスポンス型・エラーハンドリング設計変更
+
+### 完了タスク
+- google_api.py のレスポンス型を WebApiAnnotationOutput (annotation: dict[str, Any] | None, error: str | None) に統一
+- スキーマ不一致・APIエラー時のエラー格納設計実装
+- テスト・型定義の修正
+- ドキュメント(technical.md, architecture.md, active_context.md)への記録
+
+### 今後のタスク
+- 他WebAPIアノテーターへの同様の設計適用(必要に応じて)
+- 設計方針・ドキュメントの定期的な見直し
+
+## 2025-05-10 OpenAIApiAnnotator関連タスク
+
+- OpenAI API画像入力（base64）はimage_url: dict型で渡すよう修正
+- 型エラー（ImageURL型）を辞書型指定で解消
+- 構造化出力モデルをAnnotationSchema（webapi_shared.py）に統一
+- _run_inference/_format_predictionsの型安全・エラーハンドリングを整理
+- ユニットテスト（test_openai_api_response.py）を追加し、正常系・異常系・API例外を網羅
+
 ---

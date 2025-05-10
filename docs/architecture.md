@@ -261,3 +261,14 @@ graph TD
 
 ## 参照日
 - 2025-05-10
+
+# 変更履歴（2025-05-10）
+
+## OpenAIApiAnnotatorの構造化出力・画像入力処理の整理
+- OpenAI APIの画像入力（base64エンコード画像）を正しい型（image_url: dict型）で渡すよう修正。
+- 型エラー（image_url: ImageURL型）を公式ドキュメント・SDK型定義に従い、辞書型で解決。
+- 冗長なPydanticモデル定義を削除し、全APIでAnnotationSchemaを唯一の型として利用。
+- _run_inference/_format_predictionsの型安全・エラーハンドリングを整理。
+- ユニットテスト（test_openai_api_response.py）を追加し、正常系・異常系・API例外を網羅。
+
+---

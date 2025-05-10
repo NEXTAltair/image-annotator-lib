@@ -40,3 +40,27 @@
 - `tasks/tasks_plan.md` (全体タスク計画、バックログ)
 - `.cursor/rules/lessons-learned.mdc` (過去の教訓、知見)
 - `.cursor/rules/error-documentation.mdc` (既知のエラーと解決策)
+
+## [2025-05-10] Google Gemini annotator レスポンス型・エラーハンドリング設計変更
+
+### 現状
+- google_api.py のレスポンス型を WebApiAnnotationOutput (annotation: dict[str, Any] | None, error: str | None) に統一済み。
+- スキーマ不一致・APIエラー時も error に詳細を格納し、annotationはNoneで返す設計。
+- テスト・型定義もこの設計に合わせて修正済み。
+
+### 決定事項
+- annotation/errorペア型の全WebAPIアノテーターでの統一運用。
+- 型重複(Responsedict等)の排除。
+- annotationはdict型、_format_predictionsでAnnotationSchemaへ変換。
+
+### 次ステップ
+- 他WebAPIアノテーターへの同様の設計適用(必要に応じて)
+- ドキュメント・設計方針の定期的な見直し
+
+## 2025-05-10 OpenAIApiAnnotator変更経緯
+
+- OpenAI API画像入力（base64）はimage_url: dict型で渡す必要があることを公式ドキュメント・SDK型定義で再確認。
+- 型エラー（ImageURL型）を辞書型指定で解消。
+- 構造化出力モデルをAnnotationSchema（webapi_shared.py）に統一。
+- _run_inference/_format_predictionsの型安全・エラーハンドリングを整理。
+- ユニットテスト（test_openai_api_response.py）を追加し、正常系・異常系・API例外を網羅。
