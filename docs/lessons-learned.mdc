@@ -1,0 +1,10 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+## 2024/05/10 OpenRouterApiAnnotator テスト・型安全化の知見
+- OpenAI/Router系のAPIラッパーでは、クライアント型チェック（isinstance(self.client, OpenAI)）がテストの落とし穴になりやすい。
+  → テスト時はOpenAIインスタンス＋API呼び出しモックで回避可能。
+- 型安全なスキーマ（AnnotationSchema）を使うことで、レスポンスの信頼性・保守性が大幅に向上。
+- レスポンス異常系も網羅的にテストし、エラー内容を明示的に格納することでデバッグ性も向上。

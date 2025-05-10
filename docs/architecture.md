@@ -276,4 +276,9 @@ graph TD
 - テスト・型定義・依存管理がAPIごとに明確化
 - 新API追加・既存API仕様変更時の保守性が大幅に向上
 
+## OpenRouterApiAnnotatorの設計・型・テスト方針（2024/05/10更新）
+- OpenRouterApiAnnotatorはOpenAI/RouterレスポンスのcontentをAnnotationSchemaでバリデーションし、型安全な注釈データを生成する。
+- レスポンスのパース失敗や型不整合時はエラー内容を明示的に格納。
+- テストではAPIクライアント型チェック（isinstance(self.client, OpenAI)）を通すため、MagicMockではなくOpenAIインスタンスを利用し、API呼び出しはpatchで差し替え。
+
 ---

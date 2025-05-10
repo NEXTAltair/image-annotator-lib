@@ -362,4 +362,12 @@ print(available)
 - 共通スキーマ（AnnotationSchema）を全APIで利用し、型の重複・分岐処理の煩雑化を排除。
 - エラーハンドリングはSDK公式例外のみcatchし、冗長なtry/exceptや独自ラップを削除。
 
+## OpenRouterApiAnnotator 技術詳細・テスト実装方針（2024/05/10更新）
+- AnnotationSchemaを用いてOpenAI/Routerレスポンスの型安全なバリデーション・注釈生成を実現。
+- レスポンスのcontentが空・choicesが空・JSON不正・API例外など異常系も網羅的にテスト。
+- テストではAPI呼び出し部分をpatchで差し替え、外部通信を発生させずに異常系も検証。
+- クライアント型チェック（isinstance(self.client, OpenAI)）のため、テスト時はOpenAIインスタンスをセット。
+- linterエラー（dict→リテラル、型アノテーション重複など）・型エラーも全て解消済み。
+- AnnotationSchema利用により、レスポンスの型不整合やパース失敗時のエラーハンドリングも明確化。
+
 ---

@@ -82,3 +82,9 @@
 ### 今後のタスク
 - 他API（Google, OpenRouter等）も同様の分離・整理を検討。
 - ドキュメント・設計方針の定期的な見直し。
+
+### 2024/05/10 OpenRouterApiAnnotator テスト・型・設計最新状況
+- OpenRouterApiAnnotatorのユニットテストを追加・修正し、全ケースでパスを確認。
+- テスト失敗の主因（クライアント型チェック）を特定し、OpenAIインスタンス利用で解決。
+- AnnotationSchemaによる型安全な注釈生成・バリデーションを徹底。
+- レスポンス異常系（content空、choices空、JSON不正、API例外）も網羅的にテスト。
