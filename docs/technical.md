@@ -327,3 +327,27 @@ print(available)
     - Google AI Gemini API Documentation
     - `openai` Python SDK ソースコード (`responses.py`)
     - 実行時のエラーログ、デバッグログ
+
+# 仕様変更記録: Google Gemini annotator
+
+## 変更内容
+- APIレスポンス型を `WebApiAnnotationOutput` (annotation: dict[str, Any] | None, error: str | None) に統一。
+- スキーマバリデーション失敗時やAPIエラー時は `annotation=None, error=エラーメッセージ` で返却。
+- 正常時は `annotation` に `AnnotationSchema` (dict形式) を格納。
+- `_format_predictions` で `annotation` を `AnnotationSchema` に変換し、`FormattedOutput` へ渡す設計に統一。
+
+## 変更理由
+- 外部API(Gemini)のレスポンスが常にスキーマ通りとは限らず、バリデーション失敗や不正データも考慮する必要があるため。
+- エラー情報と正常レスポンスを一元管理し、利用側での分岐・例外処理を簡潔にするため。
+- 型の重複(WebApiAnnotationOutput/Responsedict)を排除し、全体の設計をシンプルに保つため。
+
+## 影響範囲
+- `google_api.py` の推論・フォーマット処理
+- テストコード
+- 型定義の整理
+
+## 参照ルール
+- @implement.mdc, @memory.mdc の設計原則・型設計方針に準拠
+
+## 参照日
+- 2025-05-10

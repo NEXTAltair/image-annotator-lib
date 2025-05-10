@@ -12,7 +12,7 @@ import re
 import traceback
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, NoReturn, Self, TypedDict, Union, cast
+from typing import Any, NoReturn, Self, TypedDict
 
 import numpy as np
 import onnxruntime as ort
@@ -73,14 +73,14 @@ class WebApiComponents(TypedDict):
     api_model_id: str
     provider_name: str
 
-LoaderComponents = Union[  # noqa: UP007
-    TransformersComponents,
-    TransformersPipelineComponents,
-    ONNXComponents,
-    TensorFlowComponents,
-    CLIPComponents,
-    WebApiComponents,
-]
+LoaderComponents = (
+    TransformersComponents |
+    TransformersPipelineComponents |
+    ONNXComponents |
+    TensorFlowComponents |
+    CLIPComponents |
+    WebApiComponents
+)
 
 
 class ModelComponents(TypedDict, total=False):
@@ -1568,32 +1568,11 @@ class WebApiBaseAnnotator(BaseAnnotator):
         logger.warning(f"どの形式でもタグを抽出できませんでした。テキスト: {text[:100]}...")
         return []
 
-    # _generate_tags の共通実装を追加
     def _generate_tags(self, formatted_output: WebApiAnnotationOutput) -> list[str]:
-        """フォーマット済み出力からタグを生成する (WebApiBaseAnnotator 共通実装)
-
-        Args:
-            formatted_output: _format_predictions で生成された WebApiAnnotationOutput 辞書。
-
-        Returns:
-            抽出されたタグのリスト。エラー発生時やタグが見つからない場合は空リスト。
-        """
-        if formatted_output.get("error") or formatted_output.get("annotation") is None:
+        """フォーマット済み出力からタグを生成する"""
+        if formatted_output["error"] or formatted_output["annotation"] is None:
             return []
-
         annotation = formatted_output["annotation"]
-        if annotation is None:
-            return []
-
-        # annotation 辞書から tags を抽出
-        tags_data = annotation.get("tags")
-
-        if isinstance(tags_data, list):
-            # リスト内の要素が文字列であることを確認して返す
-            return [str(tag).strip() for tag in tags_data if isinstance(tag, str)]
-        elif isinstance(tags_data, str):
-            # 文字列の場合はカンマで分割
-            return [tag.strip() for tag in tags_data.split(",") if tag.strip()]
-        else:
-            logger.warning(f"予期しない形式のタグデータ: {type(tags_data)}. タグを抽出できませんでした。")
-            return []
+        if "tags" in annotation and isinstance(annotation["tags"], list):
+            return annotation["tags"]
+        return []
