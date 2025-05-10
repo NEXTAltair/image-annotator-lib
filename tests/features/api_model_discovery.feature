@@ -1,5 +1,5 @@
+@api_model_discovery
 Feature: API経由での利用可能なVisionモデルの探索
-
   画像アノテーションライブラリの利用者として、
   外部API (OpenRouter) から利用可能なVisionモデルを発見したい。
   これにより、どのモデルがアノテーションに利用可能かを知ることができる。

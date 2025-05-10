@@ -7,7 +7,7 @@
 #   create_model 関数を呼び出します
 # - 画像の埋め込み処理は image_embeddings 関数を使用します
 # - モデルのロード状態は is_model_loaded フラグで管理されます
-
+@base
 Feature: BaseBaseAnnotator基本機能のテスト
     BaseBaseAnnotator クラスとその派生クラスの基本機能をテストする
 

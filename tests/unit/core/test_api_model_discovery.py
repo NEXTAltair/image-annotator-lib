@@ -12,7 +12,6 @@ from image_annotator_lib.core.api_model_discovery import (
     _format_model_data_for_toml,
     _update_toml_with_api_results,
 )
-from image_annotator_lib.core.utils import convert_unix_to_iso8601  # 比較用
 
 # --- Test Data --- #
 
@@ -386,7 +385,7 @@ import requests
 
 # テスト対象のメイン関数
 from image_annotator_lib.core.api_model_discovery import discover_available_vision_models
-from image_annotator_lib.exceptions import (
+from image_annotator_lib.exceptions.errors import (
     ApiRequestError,
     ApiServerError,
     ApiTimeoutError,

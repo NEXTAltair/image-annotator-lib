@@ -180,6 +180,50 @@ class ModelConfigRegistry:
         # Immediately update the merged view as well
         self._merge_configs()
 
+    def add_default_setting(self, section_name: str, key: str, value: Any) -> None:
+        """
+        システム設定データにデフォルト値を設定し、変更があればファイルに保存する。
+
+        指定されたセクションが存在しない場合は作成する。
+        指定されたキーがセクション内に存在しない場合のみ、値を設定する。
+        既存のキーの値は上書きしない。
+        値を設定した場合（データが変更された場合）のみ、システム設定ファイルを保存する。
+
+        Args:
+            section_name: 設定を追加するセクション名 (モデル名など)。
+            key: 追加する設定のキー。
+            value: 追加する設定の値。
+        """
+        setting_added = False
+        # Ensure the section exists
+        if section_name not in self._system_config_data:
+            self._system_config_data[section_name] = {}
+            logger.debug(f"システム設定に新しいセクションを追加: [{section_name}]")
+            # Technically, creating a section might be considered an addition
+            # But we only trigger save if a key/value is added.
+
+        # Add the key/value only if the key does not exist
+        if key not in self._system_config_data[section_name]:
+            self._system_config_data[section_name][key] = value
+            logger.info(f"システム設定 [{section_name}] にデフォルト値を追加: {key} = {value}")
+            setting_added = True
+        else:
+            logger.debug(
+                f"システム設定 [{section_name}] のキー '{key}' は既に存在するため、デフォルト値の追加をスキップしました。"
+            )
+
+        # Update the merged config regardless of whether a setting was added
+        self._merge_configs()
+
+        # Save the system config file only if a setting was actually added
+        if setting_added:
+            logger.debug(f"デフォルト設定が追加されたため、システム設定ファイルを保存します。")
+            self.save_system_config()
+        else:
+            logger.debug(
+                f"デフォルト設定の追加はスキップされたため、システム設定ファイルの保存は行いません。"
+            )
+
     def save_user_config(self, user_config_path: str | Path | None = None) -> None:
         """現在のユーザー設定 (_user_config_data) を指定されたファイルパスに保存します。"""
         save_path = Path(user_config_path) if user_config_path else self._user_config_path

@@ -9,6 +9,7 @@ import dotenv
 import onnxruntime as ort
 import psutil
 import tensorflow as tf
+from tensorflow import keras # Keras のインポートを追加
 import torch
 import torch.nn as nn
 from anthropic import Anthropic
@@ -48,7 +49,7 @@ class ONNXComponents(TypedDict):
 
 class TensorFlowComponents(TypedDict):
     model_dir: Path
-    model: tf.Module | tf.keras.Model
+    model: tf.Module | keras.Model # tf.keras.Model を keras.Model に変更
 
 
 class CLIPComponents(TypedDict):
@@ -153,10 +154,14 @@ def _process_model_id(model_id_on_provider: str, provider_name: str) -> str:
     processed_id = model_id_on_provider
     prefix_to_remove = ""
 
+    if ":" in model_id_on_provider or provider_name == "OpenRouter":
+        # OpenRouter は通常プレフィックス付きで渡すので、除去しない
+        # `:` が含まれている場合は OpenRouter の場合として扱う
+        return model_id_on_provider
+
     if provider_name == "OpenAI" and model_id_on_provider.startswith("openai/"):
         prefix_to_remove = "openai/"
     elif provider_name == "Google" and model_id_on_provider.startswith("google/"):
-        # Google の場合は genai ライブラリがプレフィックスなしを期待するため除去
         prefix_to_remove = "google/"
     elif provider_name == "Anthropic" and model_id_on_provider.startswith("anthropic/"):
         prefix_to_remove = "anthropic/"
@@ -171,20 +176,23 @@ def _process_model_id(model_id_on_provider: str, provider_name: str) -> str:
     return processed_id
 
 
-def _initialize_api_client(provider_name: str, api_key: str) -> Any:
+def _initialize_api_client(provider_name: str, api_key: str, api_model_id: str) -> Any:
     """プロバイダー名とAPIキーに基づいてAPIクライアントを初期化する。
 
     Args:
         provider_name: プロバイダー名。
         api_key: APIキー。
-
+        api_model_id: モデルID (e.g., "gemini-1.5-pro", "gemma-3-27b-it:free").
     Returns:
         初期化されたAPIクライアントオブジェクト。
 
     Raises:
         ConfigurationError: サポートされていないプロバイダー名の場合、または必要なライブラリがインストールされていない場合。
     """
-    if provider_name == "Google":
+    if ":" in api_model_id:
+        openrouter_base_url = "https://openrouter.ai/api/v1"
+        return OpenAI(api_key=api_key, base_url=openrouter_base_url)
+    elif provider_name == "Google":
         return genai.Client(api_key=api_key)
     elif provider_name == "OpenAI":
         return OpenAI(api_key=api_key)
@@ -218,6 +226,7 @@ def prepare_web_api_components(model_name: str) -> WebApiComponents:
 
     # 1. available_api_models.toml をロード
     available_models_data = config.load_available_api_models()
+    logger.debug(f"available_models_data: {available_models_data}")
     if not available_models_data:
         raise ConfigurationError(
             "利用可能なAPIモデル情報 (available_api_models.toml) がロードされていません。"
@@ -225,6 +234,8 @@ def prepare_web_api_components(model_name: str) -> WebApiComponents:
 
     # 2. モデルエントリを検索
     model_entry = _find_model_entry_by_name(model_name, available_models_data)
+
+    logger.debug(f"model_entry: {model_entry}")
     if not model_entry:
         raise ConfigurationError(
             f"モデル名 '{model_name}' に対応するエントリが available_api_models.toml に見つかりません。"
@@ -252,7 +263,7 @@ def prepare_web_api_components(model_name: str) -> WebApiComponents:
 
     # 5. API クライアントを初期化
     try:
-        client = _initialize_api_client(provider_name, api_key)
+        client = _initialize_api_client(provider_name, api_key, api_model_id)
     except ConfigurationError as e:
         raise ConfigurationError(f"APIクライアント初期化エラー ({model_name}): {e}") from e
     except Exception as e:
@@ -780,7 +791,7 @@ class ModelLoad:
             logger.error(f"メモリ不足エラー: モデル '{model_name}' ロード中。詳細: {error_msg}")
             if isinstance(error, torch.cuda.OutOfMemoryError) and torch.cuda.is_available():
                 try:
-                    device_name = str(error.device) if hasattr(error, "device") else "cuda"
+                    device_name = str(error.device) if hasattr(error, "device") else "cuda" # type: ignore[attr-defined]
                     logger.error(f"CUDA メモリサマリー ({device_name}):")
                     logger.error(torch.cuda.memory_summary(device=device_name, abbreviated=True))
                 except Exception as mem_e:
@@ -1178,14 +1189,14 @@ class ModelLoad:
             if model_dir is None:
                 raise FileNotFoundError(f"TensorFlow モデルディレクトリ解決失敗: {model_path}")
 
-            model_instance: tf.Module | tf.keras.Model | None = None
+            model_instance: tf.Module | keras.Model | None = None # tf.keras.Model を keras.Model に変更
             if model_format == "h5":
                 h5_files = list(model_dir.glob("*.h5"))
                 if not h5_files:
                     raise FileNotFoundError(f"H5ファイルが見つかりません: {model_dir}")
                 target_path = h5_files[0]
                 logger.info(f"H5モデルロード中: {target_path}")
-                model_instance = tf.keras.models.load_model(target_path, compile=False)
+                model_instance = keras.models.load_model(target_path, compile=False) # tf.keras.models を keras.models に変更
             elif model_format == "saved_model":
                 target_path = model_dir
                 logger.info(f"SavedModelロード中: {target_path}")
@@ -1267,10 +1278,10 @@ class ModelLoad:
             logger.debug(f"CLIPプロセッサロード中: {base_model}")
             clip_processor = CLIPProcessor.from_pretrained(base_model)
             logger.debug(f"CLIPモデルロード中: {base_model} on {self.device}")
-            clip_model = cast(CLIPModel, CLIPModel.from_pretrained(base_model).to(self.device).eval())
+            clip_model = cast(CLIPModel, CLIPModel.from_pretrained(base_model).to(self.device).eval()) # type: ignore[no-untyped-call]
             input_size = clip_model.config.projection_dim
             logger.debug(f"CLIPモデル {base_model} 特徴量次元: {input_size}")
-            return clip_processor, clip_model, input_size
+            return clip_processor, clip_model, input_size # type: ignore[return-value]
 
         def _create_and_load_classifier_head(
             self,
@@ -1597,7 +1608,7 @@ class ModelLoad:
 
     @staticmethod
     def restore_model_to_cuda(
-        model_name: str, device: str, components: dict[str, Any]
+        model_name: str, components: dict[str, Any], device: str # 引数の順序を components, device に変更
     ) -> dict[str, Any] | None:
         """Restores a model (likely from CPU cache) to the specified CUDA device. Public interface.
         / モデル (おそらく CPU キャッシュから) を指定された CUDA デバイスに復元する。公開インターフェース。
@@ -1608,8 +1619,8 @@ class ModelLoad:
 
         Args:
             model_name: Name of the model.
-            device: Target CUDA device (e.g., "cuda", "cuda:0").
             components: Dictionary of model components (likely on CPU).
+            device: Target CUDA device (e.g., "cuda", "cuda:0").
 
         Returns:
             The components dictionary moved to the target device, or None if restoration failed.

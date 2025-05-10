@@ -2,11 +2,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
-from PIL import Image
 
-from image_annotator_lib import api
-from image_annotator_lib.api import annotate
-from image_annotator_lib.exceptions import (
+from image_annotator_lib.exceptions.errors import (
     InvalidInputError,
     InvalidModelConfigError,
     InvalidOutputError,

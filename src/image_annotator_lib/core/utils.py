@@ -1,6 +1,7 @@
 import hashlib
 import sys
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -266,3 +267,29 @@ def determine_effective_device(requested_device: str, model_name: str | None = N
 
     logger.debug(f"要求デバイス: '{requested_device}', 決定デバイス: '{actual_device}'")
     return actual_device
+
+
+def convert_unix_to_iso8601(timestamp: int | float | None, model_id_for_log: str | None = None) -> str:
+    """Unixタイムスタンプを ISO 8601 形式の UTC 文字列に変換する。
+
+    Args:
+        timestamp: Unix タイムスタンプ (int または float)。None の場合は "Invalid Timestamp" を返す。
+        model_id_for_log: ログ出力用のモデル ID (任意)。
+
+    Returns:
+        ISO 8601 形式の文字列 (例: "2024-07-28T12:34:56Z") または "Invalid Timestamp"。
+    """
+    if timestamp is None:
+        return "Invalid Timestamp"
+
+    if isinstance(timestamp, int | float):
+        try:
+            dt_object = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            # ISO 8601 形式 (秒まで) + Z (UTCを示す) に変換
+            return dt_object.isoformat(timespec="seconds").replace("+00:00", "Z")
+        except (ValueError, OSError) as e:
+            log_prefix = f"モデル {model_id_for_log} の " if model_id_for_log else ""
+            logger.warning(
+                f"{log_prefix}created タイムスタンプ ({timestamp}) を ISO8601 に変換できませんでした: {e}"
+            )
+            return "Invalid Timestamp"

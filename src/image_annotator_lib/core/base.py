@@ -12,14 +12,16 @@ import re
 import traceback
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, NoReturn, Self, TypedDict
+from typing import Any, NoReturn, Self, TypedDict, Union, cast
 
 import numpy as np
 import onnxruntime as ort
 import tensorflow as tf
 import torch
 from PIL import Image
-from transformers import AutoProcessor
+from transformers.models.auto.processing_auto import AutoProcessor
+from transformers.models.clip import CLIPModel, CLIPProcessor
+from transformers.pipelines.base import Pipeline as TransformersPipelineObject
 
 # --- ローカルインポート ---
 from ..exceptions.errors import (
@@ -36,12 +38,49 @@ from ..exceptions.errors import (
 )
 from . import utils
 from .config import config_registry
-from .model_factory import ModelLoad
+from .model_factory import ModelLoad, prepare_web_api_components
 from .utils import logger
 
 # ロガーの初期化
 
 # --- 型定義 ---
+
+# model_factory.py から型定義を移植またはインポートする必要がある
+# ここでは一旦、主要なものを再定義
+class TransformersComponents(TypedDict):
+    model: Any
+    processor: AutoProcessor
+
+class TransformersPipelineComponents(TypedDict):
+    pipeline: TransformersPipelineObject
+
+class ONNXComponents(TypedDict):
+    session: ort.InferenceSession
+    csv_path: Path
+
+class TensorFlowComponents(TypedDict):
+    model_dir: Path
+    model: Any
+
+class CLIPComponents(TypedDict):
+    model: Any
+    processor: CLIPProcessor
+    clip_model: CLIPModel
+
+# WebApiComponents は model_factory.py からインポート想定だが、循環参照を避けるためここで再定義
+class WebApiComponents(TypedDict):
+    client: Any
+    api_model_id: str
+    provider_name: str
+
+LoaderComponents = Union[  # noqa: UP007
+    TransformersComponents,
+    TransformersPipelineComponents,
+    ONNXComponents,
+    TensorFlowComponents,
+    CLIPComponents,
+    WebApiComponents,
+]
 
 
 class ModelComponents(TypedDict, total=False):
@@ -138,8 +177,8 @@ class BaseAnnotator(ABC):
         model_path (str): モデルファイルまたはディレクトリへのパス。
         device (str): 推論に使用するデバイス ("cuda", "cpu")。
         chunk_size (int): 一度に処理する画像の数 (バッチサイズ)。
-        components (dict[str, Any]): ロードされたモデルコンポーネントを保持する辞書。
-                                     キーと値の型は `ModelComponents` TypedDict を参照。
+        components (LoaderComponents | None): ロードされたモデルコンポーネントを保持する辞書。
+                                            WebApiComponents を含む LoaderComponents 型を使用。
     """
 
     def __init__(self, model_name: str):
@@ -150,14 +189,26 @@ class BaseAnnotator(ABC):
             raise ValueError(f"モデル '{model_name}' の設定が見つかりません。")
 
         # 要求されたデバイスを取得
-        requested_device = config_registry.get(self.model_name, "device", "cuda")
+        requested_device_from_config = config_registry.get(self.model_name, "device", "cuda")
+        if not isinstance(requested_device_from_config, str):
+            logger.warning(f"モデル '{self.model_name}' のデバイス設定が無効です: {requested_device_from_config}。'cuda' をデフォルトとして使用します。")
+            requested_device = "cuda"
+        else:
+            requested_device = requested_device_from_config
 
         # --- utils.determine_effective_device を使って実際のデバイスを決定 --- #
+        # FIXME: WebAPIの場合この処理は無駄
         self.device = utils.determine_effective_device(requested_device, self.model_name)
         # --- ここまで修正 ---
 
-        self.chunk_size = config_registry.get(self.model_name, "chunk_size", 8)
-        self.components: dict[str, Any] | None = None
+        chunk_size_from_config = config_registry.get(self.model_name, "chunk_size", 8)
+        if not isinstance(chunk_size_from_config, int):
+            logger.warning(f"モデル '{self.model_name}' のチャンクサイズ設定が無効です: {chunk_size_from_config}。デフォルトの 8 を使用します。")
+            self.chunk_size = 8
+        else:
+            self.chunk_size = chunk_size_from_config
+        # components の型ヒントを LoaderComponents | None に変更
+        self.components: LoaderComponents | None = None
 
         logger.debug(
             f"{self.__class__.__name__} をモデル '{self.model_name}' で初期化中 (デバイス: {self.device})..."
@@ -1175,14 +1226,15 @@ class ONNXBaseAnnotator(BaseAnnotator):
 
 
 class WebApiBaseAnnotator(BaseAnnotator):
-    """Web API を使用するモデル用の基底クラス。"""
+    """Web API を利用するアノテーターの基底クラス。"""
 
     def __init__(self, model_name: str):
+        """初期化 (model_name のみ受け取るように変更)"""
         super().__init__(model_name)
-        # 設定ファイルから読み込む共通パラメータ
         self.prompt_template = config_registry.get(
             self.model_name, "prompt_template", "Describe this image."
         )
+
         timeout_val = config_registry.get(self.model_name, "timeout", 60)
         try:
             self.timeout = int(timeout_val)
@@ -1192,8 +1244,6 @@ class WebApiBaseAnnotator(BaseAnnotator):
             )
             self.timeout = 60
 
-        # レート制限とリトライの設定
-        # retry_count を int にキャスト
         retry_count_val = config_registry.get(self.model_name, "retry_count", 3)
         try:
             self.retry_count = int(retry_count_val)
@@ -1203,7 +1253,6 @@ class WebApiBaseAnnotator(BaseAnnotator):
             )
             self.retry_count = 3
 
-        # retry_delay を float にキャスト
         retry_delay_val = config_registry.get(self.model_name, "retry_delay", 1.0)
         try:
             self.retry_delay = float(retry_delay_val)
@@ -1214,7 +1263,6 @@ class WebApiBaseAnnotator(BaseAnnotator):
             self.retry_delay = 1.0
 
         self.last_request_time = 0.0
-        # min_request_interval を float にキャストして型を保証
         min_interval_val = config_registry.get(self.model_name, "min_request_interval", 1.0)
         try:
             self.min_request_interval = float(min_interval_val)
@@ -1224,36 +1272,68 @@ class WebApiBaseAnnotator(BaseAnnotator):
             )
             self.min_request_interval = 1.0
 
-        self.model_name_on_provider: str | None = config_registry.get(
-            self.model_name, "model_name_on_provider"
-        )
+        self.model_id_on_provider: str | None = None  # __enter__ で設定される
+        self.api_model_id: str | None = None  # __enter__ で設定される (加工済みID)
 
         self.max_output_tokens: int | None = config_registry.get(self.model_name, "max_output_tokens", 1800)
 
-        self.api_key = self._load_api_key()
-        self.client: Any = None  # 追加: クライアントインスタンス用属性
+        # APIキーは __enter__ で prepare_web_api_components から取得されるため、ここでは不要
 
-    @abstractmethod
+        self.client: Any = None
+        self.components: WebApiComponents | None = None  # components の型ヒントを修正
+
+    # @abstractmethod # __enter__ メソッドの実装を削除し、新しい実装を追加
     def __enter__(self) -> Self:
-        """サブクラスでAPIクライアントを初期化し、self.clientに設定します。"""
-        raise NotImplementedError("Web API サブクラスは __enter__ を実装する必要があります。")
+        """Web API コンポーネントを準備します。
+
+        model_factory.prepare_web_api_components を呼び出して、
+        APIクライアント、加工済みモデルID、プロバイダー名を取得し、
+        self.components に設定します。
+        """
+        logger.info(f"Web API アノテーター '{self.model_name}' のコンテキストに入ります...")
+        try:
+            # model_factory からコンポーネントを準備
+            self.components = prepare_web_api_components(self.model_name)
+
+            # 利便性のために主要なコンポーネントをインスタンス変数にも設定
+            self.client = self.components["client"]
+            self.api_model_id = self.components["api_model_id"]
+            # provider_name は components 経由でアクセス可能だが、変数にも設定しておく
+            self.provider_name = self.components["provider_name"]
+
+            logger.info(f"Web API コンポーネント準備完了 ({self.provider_name}, {self.api_model_id})。")
+
+        except (ConfigurationError, ApiAuthenticationError) as e:
+            logger.error(f"Web API コンポーネントの準備中に設定/認証エラーが発生: {e}")
+            self.components = None
+            self.client = None
+            self.api_model_id = None
+            self.provider_name = "Error"
+            raise  # エラーを再送出してコンテキストの失敗を通知
+        except Exception as e:
+            logger.exception(f"Web API コンポーネントの準備中に予期せぬエラーが発生: {e}")
+            self.components = None
+            self.client = None
+            self.api_model_id = None
+            self.provider_name = "Error"
+            raise ConfigurationError(f"Web API コンポーネント準備中の予期せぬエラー: {e}") from e
+
+        return self
 
     def __exit__(
         self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any
     ) -> None:
         """APIクライアントのリソースを解放 (Noneを設定) します。"""
-        # provider_name 属性が存在するか確認
-        provider_name = getattr(
-            self, "provider_name", self.model_name
-        )  # provider_name がなければ model_name を使用
+        # self.provider_name は __enter__ で設定されるかエラーになるはず
+        provider_name = getattr(self, "provider_name", self.model_name)
         if self.client:
-            logger.debug(f"APIクライアントの閉鎖/リリース{provider_name}")
+            logger.debug(f"APIクライアントの閉鎖/リリース ({provider_name}) ...")
+            # クライアントによっては close() メソッドなどが必要かもしれないが、
+            # 現状のライブラリ (OpenAI, Anthropic, google.generativeai) では
+            # 明示的な close は必須ではないため、参照を None にするだけで十分。
             self.client = None
-
-    @abstractmethod
-    def _load_api_key(self) -> str:
-        """環境変数から API キーをロードします。"""
-        raise NotImplementedError("Web API サブクラスは _load_api_key を実装する必要があります。")
+            logger.debug(f"APIクライアント ({provider_name}) の参照を解放しました。")
+        self.components = None  # components もクリア
 
     def _preprocess_images(self, images: list[Image.Image]) -> list[str] | list[bytes]:
         """画像リストを Base64 エンコードした文字列のリストに変換する"""
@@ -1273,10 +1353,16 @@ class WebApiBaseAnnotator(BaseAnnotator):
 
     @abstractmethod
     def _run_inference(self, processed: list[str] | list[bytes]) -> Any:
-        """Base64エンコードされた画像文字列リストをAPIに送信して推論結果を取得する
-        google API は 文字列化すると受け付けないので Bytes を直接渡す
+        """Web API にリクエストを送信し、生のレスポンスを取得します。
+
+        Args:
+            processed: 前処理済みの画像データ (Base64文字列のリストまたはバイト列のリスト)。
+
+        Returns:
+            APIからの生のレスポンス。形式はAPIプロバイダによって異なります。
+            通常、単一のリクエストに対するレスポンスが期待されます。
         """
-        raise NotImplementedError("Web API サブクラスは _run_inference を実装する必要があります。")
+        raise NotImplementedError
 
     def _wait_for_rate_limit(self) -> None:
         """レート制限に従ってリクエスト間隔を調整する"""

@@ -3,30 +3,23 @@
 import datetime
 import json
 from datetime import datetime as dt
-from datetime import timedelta, timezone  # datetime を dt としてインポート
-from pathlib import Path
-from typing import Any  # TOML データ用に一時的に使用
+from datetime import timezone 
+from typing import Any
 
 import requests
-import toml
 
-from ..exceptions import (
+from ..exceptions.errors import (
     ApiRequestError,
     ApiServerError,
     ApiTimeoutError,
     WebApiError,
 )
 from .config import (
-    load_available_api_models,  # TOML 読み込み関数
-    save_available_api_models,  # TOML 書き込み関数
+    load_available_api_models,
+    save_available_api_models,
 )
 from .constants import AVAILABLE_API_MODELS_CONFIG_PATH
 from .utils import convert_unix_to_iso8601, logger
-
-# キャッシュ用のデータ構造 -> 削除
-# _model_cache: dict[str, list[str] | str] = {}
-# _cache_expiry: dt | None = None
-# _CACHE_DURATION = timedelta(hours=1)
 
 _OPENROUTER_API_URL = "https://openrouter.ai/api/v1/models"
 _REQUEST_TIMEOUT = 10

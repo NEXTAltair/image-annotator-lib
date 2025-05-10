@@ -1,3 +1,4 @@
+@utils
 Feature: リソース管理機能
     ユーザーストーリー：
     データサイエンティストとして、
@@ -6,29 +7,29 @@ Feature: リソース管理機能
 
     Background:
         Given アプリケーションを起動している
-        And ログレベルがDEBUGに設定されている
 
     # リソースアクセスのメインシナリオ
     Scenario Outline: リソースアクセスの基本パターン
         Given リソース<source_type>が<location>に存在する
         And キャッシュの状態が<cache_state>
-        When システムがリソースパスを解決する
-        Then <expected_action>が実行される
+        When システムがリソースパスを解決し結果を取得する
+        Then <expected_action1>が実行される
+        And <expected_action2>が実行される
         And 保存されているリソースのパス<expected_path>を返す
 
         Examples:
-            | source_type | location       | cache_state | expected_action | expected_path |
-            | local_file  | local_image    | none        | read_local      | local_image   |
-            | local_zip   | local_archive  | none        | extract_zip     | local_dir     |
-            | remote_url  | remote_image   | empty       | download        | cache_image   |
-            | remote_url  | remote_image   | exists      | use_cache       | cache_image   |
-            | remote_zip  | remote_archive | empty       | download_zip    | cache_dir     |
+            | source_type | location       | cache_state | expected_action1 | expected_action2 | expected_path |
+            | local_file  | local_image    | none        | read_local       | none             | local_image   |
+            | local_zip   | local_archive  | none        | extract_zip      | none             | local_dir     |
+            | remote_url  | remote_image   | empty       | download         | none             | cache_image   |
+            | remote_url  | remote_image   | exists      | use_cache        | none             | cache_image   |
+            | remote_zip  | remote_archive | empty       | download         | extract_zip      | cache_dir     |
 
     # エラー処理シナリオ
     Scenario Outline: リソースアクセスのエラー処理
         Given リソース<source_type>が<location>に存在する
         And アクセス状態が<condition>
-        When システムがリソースパスを解決する
+        When システムがリソースパス解決を試みた結果エラーが発生する
         Then <error_type>エラーが発生する
 
         Examples:

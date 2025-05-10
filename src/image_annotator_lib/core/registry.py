@@ -130,6 +130,7 @@ def _register_models(
     try:
         # config_registry からロード済みの設定データを取得
         config = config_registry.get_all_config()
+        logger.debug(f"[DEBUG _register_models] ロードされた設定 (config_registry.get_all_config()): {config}")
 
         if not config:
             logger.warning("モデル設定が空か、ロードに失敗しました。モデルは登録されません。")
@@ -138,13 +139,14 @@ def _register_models(
 
         # 指定されたディレクトリから利用可能なクラスを収集
         available_classes = _gather_available_classes(directory)
+        logger.debug(f"[DEBUG _register_models] 利用可能なクラス (_gather_available_classesの結果): {list(available_classes.keys())}")
         logger.debug(
             f"{len(available_classes)} 個の利用可能な {model_type_name} クラスが見つかりました: {list(available_classes.keys())}"
         )
 
-        registered_count = len(available_classes)  # 成功時にカウントを更新
         # 設定ファイルに基づいてモデルを登録
         for model_name, model_config in config.items():
+            logger.debug(f"[DEBUG _register_models] 設定エントリを処理中: モデル名='{model_name}', 設定={model_config}")
             # config_filter によるフィルタリングを削除
 
             desired_class_name = model_config.get("class")
@@ -153,9 +155,11 @@ def _register_models(
                     f"設定でモデル '{model_name}' のクラス名が指定されていません。スキップします。"
                 )
                 continue
+            logger.debug(f"[DEBUG _register_models] 期待されるクラス名: '{desired_class_name}'")
 
             # 収集された利用可能なクラスからクラスを検索
             model_cls = available_classes.get(desired_class_name)
+            logger.debug(f"[DEBUG _register_models] 利用可能なクラスから '{desired_class_name}' を検索した結果: {model_cls}")
 
             if model_cls:
                 # 期待されるbase_classのサブクラスであるか、または predict を持つかを確認 (元のロジック踏襲)
@@ -165,6 +169,8 @@ def _register_models(
                             f"モデル名 '{model_name}' は既に登録されています。クラス '{model_cls.__name__}' で上書きします。"
                         )
                     registry[model_name] = model_cls
+                    registered_count += 1 # 登録成功時にカウント (修正)
+                    logger.debug(f"[DEBUG _register_models] モデル '{model_name}' をクラス '{model_cls.__name__}' でレジストリに登録しました。現在のレジストリキー: {list(registry.keys())}")
                 else:
                     logger.error(
                         f"モデル '{model_name}' のクラス '{desired_class_name}' が見つかりましたが、{base_class.__name__} を継承しておらず predict メソッドも持ちません。スキップします。"

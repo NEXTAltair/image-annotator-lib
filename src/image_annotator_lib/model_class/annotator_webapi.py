@@ -4,39 +4,73 @@
 利用して画像アノテーションを行う具象クラスを提供します。
 """
 
-import os
-from typing import Any, Self, TypedDict
+from typing import Any, TypedDict, cast, override
 
 import anthropic
 import openai
-from dotenv import load_dotenv
-from google import genai
+from google.genai import types as google_types
+from openai import APIConnectionError, OpenAI
+from openai import types as openai_types
+from openai._types import NOT_GIVEN
+from openai.types.chat import (
+    ChatCompletion,
+    ChatCompletionMessageParam,
+    ChatCompletionContentPartParam,
+    ChatCompletionContentPartTextParam,
+    ChatCompletionContentPartImageParam,
+    ChatCompletionSystemMessageParam,
+    ChatCompletionUserMessageParam,
+)
+from openai.types import chat as openai_chat_types
 from PIL import Image
+from pydantic import BaseModel, Field
+import json
+import requests
 
-from ..core.base import WebApiBaseAnnotator
+from image_annotator_lib.exceptions.errors import (
+    ConfigurationError,
+    WebApiError,
+)
+
+from ..core.base import WebApiAnnotationOutput, WebApiBaseAnnotator
 from ..core.config import config_registry
 from ..core.utils import logger
-from ..exceptions.errors import ApiKeyMissingError, WebApiError
-
 
 class Responsedict(TypedDict, total=False):
-    """API応答を格納する辞書型"""
+    """API応答を格納する辞書型
+    # TODO: 具体的な内容の説明
+    """
 
     response: (
-        genai.types.GenerateContentResponse
-        | openai.types.chat.ChatCompletion
+        google_types.GenerateContentResponse
+        | ChatCompletion
         | anthropic.types.Message
-        | dict[str, Any]  # OpenRouter は dict で返す想定
+        | Any # OpenAIStructuredOutput.model_dump() を許容するために Any に変更
         | None
     )
     error: str | None
 
 
 class FormattedOutput(TypedDict):
-    """フォーマット済み出力を格納する辞書型"""
+    """フォーマット済み出力を格納する辞書型
+    # TODO: 具体的な内容の説明
+    """
 
-    annotation: dict[str, Any] | None  # {"tags": list[str], "captions": list[str], "score": float}
+    annotation: dict[str, Any] | None
     error: str | None
+
+
+class Google_Json_Schema(BaseModel):
+    """Google API の応答を JSONクラスインスタンスにする
+
+    example:
+        my_Google_Json_Schema:
+            [Google_Json_Schema(tags=['1girl', 'facing front', ...], captions=['A red-haired or ...', '...'], score=8.75)]
+    """
+
+    tags: list[str]
+    captions: list[str]
+    score: float
 
 
 BASE_PROMPT = """As an AI assistant specializing in image analysis, analyze images with particular attention to:
@@ -128,7 +162,7 @@ BASE_PROMPT = """As an AI assistant specializing in image analysis, analyze imag
 
                     Do not add any text after the score
 
-                    Use standard tag conventions without underscores (e.g., \"blonde hair\" not \"blonde_hair\")
+                    Use standard tag conventions without underscores (e.g., "blonde hair" not "blonde_hair")
 
                     Always specify left/right orientation for poses, gazes, and positioning
 
@@ -185,33 +219,11 @@ class GoogleApiAnnotator(WebApiBaseAnnotator):
         """初期化
 
         Args:
-            model_name: モデル名
+            model_name: モデル名 (model_name_short)
         """
-        self.provider_name = "Google Gemini"
-        self.client: genai.Client | None = None
         super().__init__(model_name)
-        if self.model_name_on_provider is None:
-            self.model_name_on_provider = "gemini-1.5-pro-latest"
 
-    def __enter__(self) -> Self:
-        """APIクライアントを初期化し、環境をセットアップする"""
-
-        # クライアント初期化
-        self.client = genai.Client(api_key=self.api_key)
-
-        if self.client:
-            return self
-        else:
-            raise WebApiError("Google GenAI Client の初期化に失敗しました", self.provider_name)
-
-    def _load_api_key(self) -> str:
-        """Google API キーを環境変数から読み込む"""
-        load_dotenv()
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ApiKeyMissingError("GOOGLE_API_KEY", self.provider_name)
-        return api_key
-
+    @override
     def _preprocess_images(self, images: list[Image.Image]) -> list[bytes]:
         """画像リストをバイトデータのリストに変換する"""
         from io import BytesIO
@@ -223,82 +235,118 @@ class GoogleApiAnnotator(WebApiBaseAnnotator):
             encoded_images.append(buffered.getvalue())
         return encoded_images
 
-    def _run_inference(self, processed_images: list[bytes]) -> list[Responsedict]:
-        """Google Gemini API (クライアントベースSDK) を使用して推論を実行する"""
-        if not self.client:
-            raise WebApiError("API クライアントが初期化されていません", provider_name=self.provider_name)
+    @override
+    def _run_inference(self, processed: list[str] | list[bytes]) -> list[Responsedict]:
+        """画像データ (bytes) を Gemini API に送信し、結果を取得する。"""
+        if not all(isinstance(item, bytes) for item in processed):
+            raise ValueError("Google API annotator requires byte inputs.")
+        processed_bytes: list[bytes] = cast(list[bytes], processed)
+
+        if self.client is None or self.api_model_id is None:
+            raise WebApiError(
+                "API クライアントまたはモデル ID が初期化されていません",
+                provider_name=getattr(self, "provider_name", "Unknown"),
+            )
+
+        logger.debug(f"Google API 呼び出しに使用するモデルID: {self.api_model_id}")
 
         results: list[Responsedict] = []
-        for image_data in processed_images:
+        for image_data in processed_bytes:
             try:
                 self._wait_for_rate_limit()
 
-                # リクエスト準備
-                content = genai.types.Content(
-                    parts=[
-                        genai.types.Part.from_text(text=BASE_PROMPT),
-                        genai.types.Part.from_bytes(data=image_data, mime_type="image/webp"),
-                    ],
-                    role="user",
+                # contentsをリストで渡す
+                contents = [
+                    {"text": BASE_PROMPT},
+                    {"inline_data": {"mime_type": "image/webp", "data": image_data}},
+                ]
+
+                temperature = config_registry.get(self.model_name, "temperature", default=0.7)
+                top_p = config_registry.get(self.model_name, "top_p", default=1.0)
+                top_k = config_registry.get(self.model_name, "top_k", default=32)
+                max_output_tokens = config_registry.get(self.model_name, "max_output_tokens", default=1800)
+
+                response_schema = Google_Json_Schema
+
+                generation_config = google_types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    max_output_tokens=max_output_tokens,
+                    response_mime_type="application/json",
+                    temperature=temperature,
+                    response_schema=response_schema,
+                    top_p=top_p,
+                    top_k=top_k,
                 )
 
-                # システムインストラクション
-                system_instruction_text = SYSTEM_PROMPT
-
-                # JSON出力スキーマを定義
-                response_schema = JSON_SCHEMA
-
-                # 最新のクライアントベースAPIを使用
                 response = self.client.models.generate_content(
-                    model=self.model_name_on_provider,
-                    contents=[content],
-                    config=genai.types.GenerateContentConfig(
-                        system_instruction=system_instruction_text,
-                        max_output_tokens=self.max_output_tokens,
-                        response_mime_type="application/json",
-                        temperature=0.4,
-                        response_schema=response_schema,
-                    ),
+                    model=self.api_model_id,
+                    contents=contents,
+                    config=generation_config,
                 )
                 results.append({"response": response, "error": None})
-
+            except json.JSONDecodeError as e:
+                error_message = f"Google API: レスポンスJSONパース失敗: {e}"
+                logger.error(error_message, exc_info=True)
+                results.append({"response": None, "error": error_message})
+            except ValueError as e:
+                error_message = f"Google API: パラメータ不正またはAPIキー未設定: {e}"
+                logger.error(error_message, exc_info=True)
+                results.append({"response": None, "error": error_message})
+            except RuntimeError as e:
+                error_message = f"Google API: 実行時エラー: {e}"
+                logger.error(error_message, exc_info=True)
+                results.append({"response": None, "error": error_message})
+            except requests.exceptions.RequestException as e:
+                error_message = f"Google API: 通信エラー: {e}"
+                logger.error(error_message, exc_info=True)
+                results.append({"response": None, "error": error_message})
             except Exception as e:
-                try:
-                    self._handle_api_error(e)  # 基底クラスのエラーハンドリングを試す
-                except Exception as handled_e:
-                    error_message = str(handled_e)
-                    results.append({"error": error_message})
+                # 予期せぬエラーをログに記録し、エラー情報を結果に追加
+                error_message = f"Google API エラー: 処理中に予期せぬエラーが発生しました: {str(e)}"
+                logger.error(error_message, exc_info=True)
+                results.append({"response": None, "error": error_message})
 
         return results
 
+    @override
     def _format_predictions(self, raw_outputs: list[Responsedict]) -> list[FormattedOutput]:
         """Google Gemini API (google-genai SDK) からの応答をフォーマットする"""
         formatted_outputs = []
         for output in raw_outputs:
-            if output.get("error"):
-                formatted_outputs.append(FormattedOutput(annotation=None, error=output["error"]))
+            if output.get("error"): # type: ignore[typeddict-item]
+                formatted_outputs.append(FormattedOutput(annotation=None, error=output["error"])) # type: ignore[typeddict-item]
                 continue
 
-            response = output.get("response")
-            if response is None or not hasattr(response, "candidates") or not response.candidates:
-                formatted_outputs.append(
-                    FormattedOutput(annotation=None, error="応答コンテンツが無効または欠落している")
-                )
-                continue
+            response = output.get("response") # type: ignore[typeddict-item]
+            if isinstance(response, google_types.GenerateContentResponse):
+                parsed = getattr(response, "parsed", None)
+                data = None
+                if isinstance(parsed, Google_Json_Schema):
+                    data = parsed
+                elif isinstance(parsed, list) and parsed and isinstance(parsed[0], Google_Json_Schema):
+                    data = parsed[0]
 
-            try:
-                # 応答からテキストコンテンツを抽出
-                text_content = response.candidates[0].content.parts[0].text
-                # 共通ヘルパーメソッドを呼び出して解析
-                formatted = self._parse_common_json_response(text_content)
-                formatted_outputs.append(formatted)
-            except (AttributeError, IndexError, TypeError) as e:
-                error_message = f"Google Gemini API応答からテキストを抽出できませんでした: {e!s}"
-                formatted_outputs.append(FormattedOutput(annotation=None, error=error_message))
-            except Exception as e:
-                # _parse_common_json_response 内で処理されない予期せぬエラー
-                error_message = f"Google Gemini応答のフォーマットの予期しないエラー: {e!s}"
-                formatted_outputs.append(FormattedOutput(annotation=None, error=error_message))
+                if data is not None:
+                    formatted_outputs.append(FormattedOutput(annotation=data.model_dump(), error=None))
+                    continue
+
+                # フォールバック: candidates.parts[0].textをパース
+                try:
+                    candidate = response.candidates[0] if response.candidates else None
+                    part = candidate.content.parts[0] if candidate and candidate.content and candidate.content.parts else None
+                    part_text = getattr(part, "text", None)
+                    if not part_text or not part_text.strip():
+                        formatted_outputs.append(FormattedOutput(annotation=None, error="Gemini API: candidates.parts[0].textが空文字列または無効です。プロンプトやAPI呼び出し内容を見直してください。"))
+                        continue
+                    json_data = json.loads(part_text)
+                    schema_obj = Google_Json_Schema(**json_data)
+                    formatted_outputs.append(FormattedOutput(annotation=schema_obj.model_dump(), error=None))
+                    continue
+                except Exception as e:
+                    formatted_outputs.append(FormattedOutput(annotation=None, error=f"Gemini API: candidates.partsパース失敗: {e}\npart_text={part_text}"))
+                    continue
+            else:
+                formatted_outputs.append(FormattedOutput(annotation=None, error="応答がGoogle GeminiのGenerateContentResponse型ではありません"))
 
         return formatted_outputs
 
@@ -317,141 +365,156 @@ class GoogleApiAnnotator(WebApiBaseAnnotator):
 class OpenAIApiAnnotator(WebApiBaseAnnotator):
     """OpenAI GPT-4o API を使用するアノテーター"""
 
+    # Pydanticモデルの定義
+    # OpenAI SDKの `client.responses.parse` を使用し、構造化された出力を得るために定義。
+    # 参照ドキュメント: OpenAI Structured Outputs (ユーザー提供のURLを元に記載)
+    #   - URL: https://platform.openai.com/docs/guides/structured-outputs
+    #   - 参照日時: 2025-08-06 (ユーザーがドキュメントを提示した日時を想定)
+    #   - SDKバージョン: openai >= 1.0.0 (この機能が利用可能なバージョン)
+    class OpenAIStructuredOutput(BaseModel):
+        tags: list[str]
+        captions: list[str]
+        score: float
+
     def __init__(self, model_name: str):
         """初期化
 
         Args:
-            model_name: モデル名
+            model_name: モデル名 (model_name_short)
         """
-        self.provider_name = "OpenAI"
-        self.client: openai.OpenAI | None = None
         super().__init__(model_name)
-        if self.model_name_on_provider is None:
-            self.model_name_on_provider = "gpt-4o"
 
-    def __enter__(self) -> Self:
-        self.client = openai.OpenAI(api_key=self.api_key)
-        return self
-
-    def _load_api_key(self) -> str:
-        """OpenAI API キーを環境変数から読み込む"""
-        load_dotenv()
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ApiKeyMissingError("OPENAI_API_KEY", self.provider_name)
-        return api_key
-
-    def _run_inference(self, processed_images: list[str]) -> list[Responsedict]:
-        """OpenAI API を使用して推論を実行する"""
-        if not self.client:
-            raise WebApiError("API クライアントが初期化されていません", provider_name=self.provider_name)
+    @override
+    def _run_inference(self, processed: list[str] | list[bytes]) -> list[Responsedict]:
+        """OpenAI APIを使用して推論を実行し、構造化された応答を取得します。"""
+        # processed は base64エンコードされた画像の文字列のリストを想定
+        if not all(isinstance(item, str) for item in processed):
+            raise WebApiError(
+                "OpenAIApiAnnotator expects a list of base64 encoded image strings."
+            )
+        processed_str = cast(list[str], processed)
 
         results: list[Responsedict] = []
-        for image_data in processed_images:
+        # max_output_tokens と temperature の取得処理を復活
+        max_output_tokens = self.config.get("max_output_tokens", 2000)
+        temperature_config = self.config.get("temperature") # Noneの可能性あり
+        temperature_to_use: float | object = float(temperature_config) if temperature_config is not None else NOT_GIVEN
+
+        for image_data_base64 in processed_str:
             try:
                 self._wait_for_rate_limit()
 
-                input = [
-                    {
-                        "role": "system",
-                        "content": [
-                            {"type": "input_text", "text": SYSTEM_PROMPT},
-                        ],
-                    },
-                    {
-                        "role": "user",
-                        "content": [
+                # messages の型アノテーションを元に戻し、ignoreコメントでエラーを抑制
+                messages: list[ChatCompletionMessageParam] = [ # type: ignore[assignment]
+                    ChatCompletionSystemMessageParam(role="system", content=SYSTEM_PROMPT),
+                    ChatCompletionUserMessageParam(
+                        role="user",
+                        content=[ # type: ignore[arg-type]
                             {
                                 "type": "input_text",
-                                "text": BASE_PROMPT + "\nEnsure the response is a valid JSON object.",
+                                "text": BASE_PROMPT
                             },
                             {
                                 "type": "input_image",
-                                "image_url": f"data:image/webp;base64,{image_data}",
+                                "image_url": f"data:image/jpeg;base64,{image_data_base64}"
                             },
                         ],
-                    },
+                    ),
                 ]
-                text = {
-                    "format": {
-                        "type": "json_schema",
-                        "name": "Annotatejson",
-                        "strict": True,
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "tags": {
-                                    "type": "array",
-                                    "description": "タグの配列",
-                                    "items": {"type": "string"},
-                                },
-                                "captions": {
-                                    "type": "array",
-                                    "description": "キャプションの配列",
-                                    "items": {"type": "string"},
-                                },
-                                "score": {"type": "number", "description": "スコア(数値)"},
-                            },
-                            "required": ["tags", "captions", "score"],
-                            "additionalProperties": False,
-                        },
-                    }
-                }
-                try:
-                    timeout_float = float(self.timeout) if self.timeout is not None else 60.0
-                except (ValueError, TypeError):
-                    logger.warning(f"無効なタイムアウト値 '{self.timeout}', デフォルト60.0を使用します")
-                    timeout_float = 60.0
 
-                # model_name_on_providerがNoneでないことを表明
-                assert self.model_name_on_provider is not None, (
-                    "プロバイダーのモデル名を設定する必要があります"
+                logger.debug(
+                    f"OpenAI API Request - Model: {self.api_model_id}, Method: responses.parse"
                 )
-                response = self.client.responses.create(
-                    model=self.model_name_on_provider,
-                    input=input,
-                    text=text,
-                    temperature=1,
-                    max_output_tokens=self.max_output_tokens,
-                    timeout=timeout_float,  # Use the validated float value
+
+                response_parsed = self.client.responses.parse(
+                    model=self.api_model_id,
+                    input=messages,  # type: ignore[arg-type] # Linterの一時的な抑制は残す (バージョン更新後の確認のため)
+                    text_format=OpenAIApiAnnotator.OpenAIStructuredOutput,
+                    # max_tokens と temperature を再度渡す
+                    max_output_tokens=max_output_tokens,
+                    temperature=temperature_to_use,  # type: ignore[arg-type] # Linterの一時的な抑制は残す
                 )
-                results.append({"response": response, "error": None})
+                parsed_output: OpenAIApiAnnotator.OpenAIStructuredOutput = response_parsed.output_parsed
+
+                # パースされた内容をログに出力
+                parsed_output_dict = parsed_output.model_dump()
+                logger.debug(f"OpenAI Parsed Output: {json.dumps(parsed_output_dict, indent=2, ensure_ascii=False)}")
+
+                results.append(
+                    Responsedict(
+                        response=parsed_output_dict, # ログ出力した辞書をそのまま使用
+                        error=None
+                    )
+                )
+
+            except APIConnectionError as e:
+                logger.error(f"OpenAI API Connection Error: {e}")
+                results.append(Responsedict(response=None, error=f"API Connection Error: {e}"))
+            except openai.APIError as e:
+                logger.error(f"OpenAI API Error: {e}")
+                results.append(Responsedict(response=None, error=f"OpenAI API Error: {e.message if hasattr(e, 'message') else str(e)}"))
             except Exception as e:
-                try:
-                    self._handle_api_error(e)
-                except Exception as handled_e:
-                    error_message = str(handled_e)
-                    results.append({"response": None, "error": error_message})
-
+                logger.error(f"Error during OpenAI inference: {e}", exc_info=True)
+                results.append(Responsedict(response=None, error=str(e)))
         return results
 
-    def _format_predictions(self, raw_outputs: list[Responsedict]) -> list[FormattedOutput]:
-        """OpenAI API からの応答をフォーマットする"""
-        formatted_outputs = []
+    @override
+    def _format_predictions(self, raw_outputs: list[Responsedict]) -> list[WebApiAnnotationOutput]: # 戻り値型を合わせる
+        """OpenAI APIからの応答を標準形式にフォーマットします。"""
+        formatted_results: list[WebApiAnnotationOutput] = []
         for output in raw_outputs:
-            if output.get("error"):
-                formatted_outputs.append(FormattedOutput(annotation=None, error=output["error"]))
+            if output.get("error"): # type: ignore[typeddict-item]
+                formatted_results.append(
+                    WebApiAnnotationOutput(annotation=None, error=output["error"]) # type: ignore[typeddict-item]
+                )
                 continue
 
-            response = output.get("response")
-            if response is None:
-                formatted_outputs.append(FormattedOutput(annotation=None, error="応答が空です"))
-                continue
+            raw_response_data = output.get("response") # type: ignore[typeddict-item]
 
+            if not raw_response_data or not isinstance(raw_response_data, dict):
+                formatted_results.append(
+                    WebApiAnnotationOutput(
+                        annotation=None,
+                        error="Invalid or empty response data from OpenAI API after parsing.",
+                    )
+                )
+                continue
+            
             try:
-                # 新しいAPIの応答形式から出力テキストを取得
-                text_content = response.output_text
-                # 共通ヘルパーメソッドを呼び出して解析
-                formatted = self._parse_common_json_response(text_content)
-                formatted_outputs.append(formatted)
-            except AttributeError as e:
-                error_message = f"OpenAI API応答からテキストを抽出できませんでした: {e!s}"
-                formatted_outputs.append(FormattedOutput(annotation=None, error=error_message))
-            except Exception as e:
-                error_message = f"OpenAI応答のフォーマットで予期しないエラー: {e!s}"
-                formatted_outputs.append(FormattedOutput(annotation=None, error=error_message))
+                if not all(k in raw_response_data for k in ["tags", "captions", "score"]):
+                    raise ValueError("Parsed OpenAI response missing required keys: tags, captions, score")
 
-        return formatted_outputs
+                tags = raw_response_data["tags"]
+                # caption は captions リストの最初の要素とするか、仕様に合わせて調整
+                caption = raw_response_data["captions"][0] if raw_response_data["captions"] else ""
+                score = raw_response_data["score"]
+
+                if not (isinstance(tags, list) and all(isinstance(t, str) for t in tags)):
+                    raise ValueError("Invalid format for 'tags' in parsed OpenAI response.")
+                if not isinstance(caption, str):
+                    # captionsがリストなので、captionも文字列のリストになる想定。
+                    # ここでは最初の要素を使うようにしたが、仕様に応じて変更。
+                    # もしcaptionsが文字列のリストなら、captionの型もlist[str]にすべき。
+                    # FormattedOutputやWebApiAnnotationOutputの'caption'の型と合わせる。
+                    # 現在のWebApiAnnotationOutput.annotation.captionはstrを期待。
+                    raise ValueError("Invalid format for 'caption' in parsed OpenAI response.")
+                if not isinstance(score, (float, int)): # scoreはfloatのはず
+                    raise ValueError("Invalid format for 'score' in parsed OpenAI response.")
+
+                annotation_data = {
+                    "tags": tags, # 文字列のリストをそのまま使用
+                    "caption": caption,
+                    "score": float(score),
+                }
+                formatted_results.append(
+                    WebApiAnnotationOutput(annotation=annotation_data, error=None)
+                )
+            except Exception as e:
+                logger.error(f"Error formatting OpenAI prediction: {e}", exc_info=True)
+                formatted_results.append(
+                    WebApiAnnotationOutput(annotation=None, error=str(e))
+                )
+        return formatted_results
 
     def _generate_tags(self, formatted_output: FormattedOutput) -> list[str]:
         """フォーマット済み出力からタグを生成する"""
@@ -476,38 +539,42 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator):
         """初期化
 
         Args:
-            model_name: モデル名
+            model_name: モデル名 (model_name_short)
         """
-        self.provider_name = "Anthropic"
-        self.client: anthropic.Anthropic | None = None
         super().__init__(model_name)
-        if self.model_name_on_provider is None:
-            self.model_name_on_provider = "claude-3-opus-20240229"
 
-    def __enter__(self) -> Self:
-        self.client = anthropic.Anthropic(api_key=self.api_key)
-        return self
-
-    def _load_api_key(self) -> str:
-        """Anthropic API キーを環境変数から読み込む"""
-        load_dotenv()
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ApiKeyMissingError("ANTHROPIC_API_KEY", self.provider_name)
-        return api_key
-
-    def _run_inference(self, processed_images: list[str]) -> list[Responsedict]:
+    def _run_inference(self, processed_images: list[str] | list[bytes]) -> list[Responsedict]:
         """Anthropic API を使用して推論を実行する"""
-        if not self.client:
-            raise WebApiError("API クライアントが初期化されていません", provider_name=self.provider_name)
+        if not all(isinstance(item, str) for item in processed_images):
+            logger.error("AnthropicApiAnnotator received non-string input for _run_inference")
+            return [{"response": None, "error": "Invalid input type for Anthropic API"}] * len(
+                processed_images
+            )
+
+        processed_images_str: list[str] = cast(list[str], processed_images)
+
+        if self.client is None or self.api_model_id is None:
+            raise WebApiError(
+                "API クライアントまたはモデル ID が初期化されていません",
+                provider_name=getattr(self, "provider_name", "Unknown"),
+            )
+        if not isinstance(self.client, anthropic.Anthropic):
+            raise ConfigurationError(
+                f"予期しないクライアントタイプ: {type(self.client)}", provider_name=self.provider_name # self.provider_name を使用
+            )
+
+        logger.debug(f"Anthropic API 呼び出しに使用するモデルID: {self.api_model_id}")
 
         results: list[Responsedict] = []
-        for encoded_image in processed_images:
+        for base64_image in processed_images_str:
             try:
                 self._wait_for_rate_limit()
 
-                assert self.model_name_on_provider is not None, "Model name on provider is not set"
-                messages: list[anthropic.types.MessageParam] = [
+                # model_name_on_provider は削除したので assert 不要
+                # assert self.model_name_on_provider is not None, "Model name on provider is not set"
+
+                # 型ヒントを削除し、辞書リテラルを使用
+                messages = [
                     {
                         "role": "user",
                         "content": [
@@ -517,43 +584,62 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator):
                                 "source": {
                                     "type": "base64",
                                     "media_type": "image/webp",
-                                    "data": encoded_image,
+                                    "data": base64_image,  # 修正: encoded_image -> base64_image
                                 },
                             },
                         ],
-                    },
+                    }
                 ]
+                # tools も辞書リテラルに変更
                 tools = [
                     {
-                        "type": "custom",
+                        # "type": "custom", # Anthropic SDK は type を自動で付与する可能性があるので削除検討
                         "name": "Annotatejson",
                         "description": "Parsing image annotation results to JSON",
-                        "input_schema": {
-                            "type": "object",
-                            "properties": {
-                                "tags": {"type": "array", "items": {"type": "string"}},
-                                "captions": {"type": "array", "items": {"type": "string"}},
-                                "score": {"type": "number"},
-                            },
-                            "required": ["tags", "captions", "score"],
-                        },
+                        "input_schema": JSON_SCHEMA,
                     }
                 ]
                 system_prompt = SYSTEM_PROMPT
+
+                # パラメータ取得
+                temperature_val = config_registry.get(self.model_name, "temperature", default=0.7)
+                # NotGivenを使用
+                anthropic_temperature = float(temperature_val) if temperature_val is not None else NOT_GIVEN
+                max_tokens = config_registry.get(self.model_name, "max_output_tokens", default=1800)
+                # max_tokens は None でないことを確認 (必須引数のため)
+                if max_tokens is None:
+                    logger.warning(
+                        f"モデル {self.model_name} の max_output_tokens が設定されていません。デフォルト1800を使用します。"
+                    )
+                    max_tokens = 1800
+
                 response = self.client.messages.create(
-                    model=self.model_name_on_provider,
-                    max_tokens=self.max_output_tokens,
+                    model=self.api_model_id,
+                    max_tokens=int(max_tokens),  # int 型にキャスト
                     system=system_prompt,
-                    messages=messages,
-                    tools=tools,
+                    messages=messages,  # type: ignore[arg-type]
+                    tools=tools,  # type: ignore[arg-type]
+                    temperature=anthropic_temperature, # type: ignore[arg-type]
                 )
                 results.append({"response": response, "error": None})
+
+            except APIConnectionError as e:
+                error_message = f"Anthropic API サーバーへの接続に失敗しました: {e}"
+                logger.error(error_message, exc_info=True)
+                results.append({"response": None, "error": error_message})
+            except anthropic.RateLimitError as e:
+                error_message = f"Anthropic API レート制限エラー: {e}"
+                logger.error(error_message, exc_info=True)
+                results.append({"response": None, "error": error_message})
+            except anthropic.APIStatusError as e:
+                error_message = f"Anthropic API ステータスエラー: {e.status_code}, Response: {e.response}"
+                logger.error(error_message, exc_info=True)
+                results.append({"response": None, "error": error_message})
             except Exception as e:
                 try:
                     self._handle_api_error(e)
-                except Exception as handled_e:
-                    error_message = str(handled_e)
-                    results.append({"response": None, "error": error_message})
+                except WebApiError as api_e:
+                    results.append({"response": None, "error": str(api_e)})
 
         return results
 
@@ -561,33 +647,37 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator):
         """Anthropic API からの応答をフォーマットする"""
         formatted_outputs = []
         for output in raw_outputs:
-            if output.get("error"):
-                formatted_outputs.append(FormattedOutput(annotation=None, error=output["error"]))
+            if output.get("error"): # type: ignore[typeddict-item]
+                formatted_outputs.append(FormattedOutput(annotation=None, error=output["error"])) # type: ignore[typeddict-item]
                 continue
 
-            response: anthropic.types.Message | None = output.get("response")
-            if (
-                response is None
-                or not response.content
-                or not isinstance(response.content[0], anthropic.types.ToolUseBlock)
-            ):
-                stop_reason = response.stop_reason if response and response.stop_reason else "unknown"
+            response_val: anthropic.types.Message | Any | None = output.get("response") # type: ignore[typeddict-item]
+
+            if not isinstance(response_val, anthropic.types.Message):
+                formatted_outputs.append(FormattedOutput(annotation=None, error=f"Invalid response type: {type(response_val)}"))
+                continue
+
+            # response_val は anthropic.types.Message 型であることが保証される
+            if not response_val.content or not isinstance(response_val.content[0], anthropic.types.ToolUseBlock):
+                stop_reason = response_val.stop_reason if response_val.stop_reason else "unknown"
                 error_msg = f"応答コンテンツが無効または欠落している。: {stop_reason}"
                 formatted_outputs.append(FormattedOutput(annotation=None, error=error_msg))
                 continue
 
             try:
                 # 応答からtoolで作成されたJSONを抽出
-                dict_content = output["response"].content[0].input
+                dict_content_unknown = response_val.content[0].input
+                # dict_content が dict[str, Any] であることを期待
+                if not isinstance(dict_content_unknown, dict):
+                    raise ValueError(f"Expected dict from tool input, got {type(dict_content_unknown)}")
+                dict_content = cast(dict[str, Any], dict_content_unknown)
                 # 共通ヘルパーメソッドを呼び出して解析
                 formatted = self._parse_common_json_response(dict_content)
                 formatted_outputs.append(formatted)
-            except (AttributeError, IndexError, TypeError) as e:
+            except (AttributeError, IndexError, TypeError, ValueError) as e: # ValueError を追加
                 error_message = f"Anthropic API応答からテキストを抽出できませんでした: {e!s}"
                 formatted_outputs.append(FormattedOutput(annotation=None, error=error_message))
-            except Exception as e:
-                error_message = f"Anthropic応答をフォーマットする予期しないエラー: {e!s}"
-                formatted_outputs.append(FormattedOutput(annotation=None, error=error_message))
+                continue
 
         return formatted_outputs
 
@@ -607,85 +697,111 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator):
 
 
 class OpenRouterApiAnnotator(WebApiBaseAnnotator):
-    """OpenRouter API を使用するアノテーター (OpenAI互換APIクライアント)
-
-    OpenAIApiAnnotator を継承し、APIエンドポイントと認証情報を OpenRouter 用に変更します。
-    基本的な処理フロー (_run_inference, _format_predictions, _generate_tags) は
-    OpenAIApiAnnotator の実装を再利用します。
-    """
+    """OpenRouter API を使用して画像に注釈を付けるクラス"""
 
     def __init__(self, model_name: str):
         """初期化
 
         Args:
-            model_name: モデル名
+            model_name: モデル名 (model_name_short)
         """
-        self.provider_name = "OpenRouter"
-        self.api_base = config_registry.get(
-            model_name,
-            "api_endpoint",
-            "https://openrouter.ai/api/v1",
-        )
         super().__init__(model_name)
-        if self.model_name_on_provider is None:
-            self.model_name_on_provider = "anthropic/claude-3-opus"
 
-    def __enter__(self) -> Self:
-        self.client = openai.OpenAI(api_key=self.api_key, base_url=self.api_base)
-        if self.client:
-            return self
-        else:
+    def _run_inference(self, processed_images: list[str] | list[bytes]) -> list[Responsedict]:
+        """OpenRouter API (OpenAI互換) を使用して推論を実行する"""
+        if not all(isinstance(item, str) for item in processed_images):
+            raise ValueError("OpenRouter API annotator requires string (base64) inputs.")
+        processed_images_str: list[str] = cast(list[str], processed_images)
+
+        if self.client is None or self.api_model_id is None:
             raise WebApiError(
-                f"{self.provider_name} クライアントの初期化に失敗しました", self.provider_name
+                "API クライアントまたはモデル ID が初期化されていません",
+                provider_name=getattr(self, "provider_name", "Unknown"),
+            )
+        if not isinstance(self.client, OpenAI):
+            raise ConfigurationError(
+                f"予期しないクライアントタイプ: {type(self.client)}", provider_name=self.provider_name # self.provider_name を使用
             )
 
-    def _load_api_key(self) -> str:
-        """OpenRouter API キーを環境変数から読み込む (オーバーライド)"""
-        load_dotenv()
-        api_key = os.getenv("OPENROUTER_API_KEY")
-        if not api_key:
-            raise ApiKeyMissingError("OPENROUTER_API_KEY", self.provider_name)
-        return api_key
+        logger.debug(f"OpenRouter API 呼び出しに使用するモデルID: {self.api_model_id}")
 
-    def _run_inference(self, processed_images: list[str]) -> list[Responsedict]:
-        """OpenRouter API を使用して推論を実行する"""
-        if not self.client:
-            raise WebApiError("API クライアントが初期化されていません", provider_name=self.provider_name)
+        referer = config_registry.get(self.model_name, "referer")
+        app_name = config_registry.get(self.model_name, "app_name")
+        extra_headers: dict[str, str] = {}
+        if referer and isinstance(referer, str):
+            extra_headers["HTTP-Referer"] = referer
+        if app_name and isinstance(app_name, str):
+            extra_headers["X-Title"] = app_name
 
         results: list[Responsedict] = []
-        for encoded_image in processed_images:
+        for base64_image in processed_images_str:
             try:
                 self._wait_for_rate_limit()
 
-                assert self.model_name_on_provider is not None, (
-                    "プロバイダーのモデル名を設定する必要があります"
-                )
+                temperature_val = config_registry.get(self.model_name, "temperature", default=0.7)
+                temperature = float(temperature_val) if temperature_val is not None else 0.7
 
-                # OpenRouter用のリクエスト形式
+                max_tokens_val = config_registry.get(self.model_name, "max_output_tokens", default=1800)
+                max_tokens = int(max_tokens_val) if max_tokens_val is not None else 1800
+
+                timeout_val = config_registry.get(self.model_name, "timeout", default=120)
+                timeout = float(timeout_val) if timeout_val is not None else 60.0
+
+                # JSONスキーマ強制対応判定: TOMLやconfig_registryの設定値で判定
+                json_schema_supported = config_registry.get(self.model_name, "json_schema_supported", default=False)
+                if json_schema_supported:
+                    response_format = {"type": "json_schema", "json_schema": JSON_SCHEMA}
+                    logger.debug(
+                        f"モデル {self.api_model_id} は JSON スキーマ強制に対応しているため、response_format を指定します。"
+                    )
+                else:
+                    response_format = NOT_GIVEN
+                    logger.debug(
+                        f"モデル {self.api_model_id} は JSON スキーマ強制に未対応か不明なため、response_format を指定しません。"
+                    )
+
+                # 型ヒントを削除し、辞書リテラルを使用
+                messages = [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": BASE_PROMPT},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/webp;base64,{base64_image}"},
+                            },
+                        ],
+                    },
+                ]
+
                 response = self.client.chat.completions.create(
-                    model=self.model_name_on_provider,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": BASE_PROMPT},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {"url": f"data:image/webp;base64,{encoded_image}"},
-                                },
-                            ],
-                        },
-                    ],
-                    max_tokens=self.max_output_tokens,
+                    model=self.api_model_id,
+                    messages=messages,  # 辞書リストを直接渡す
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    response_format=response_format,  # type: ignore[arg-type]
+                    timeout=timeout,
+                    extra_headers=extra_headers,
                 )
                 results.append({"response": response, "error": None})
+
+            except APIConnectionError as e:
+                error_message = f"OpenRouter API サーバーへの接続に失敗しました: {e}"
+                logger.error(error_message, exc_info=True)
+                results.append({"response": None, "error": error_message})
+            except openai.RateLimitError as e:
+                error_message = f"OpenRouter API レート制限エラー: {e}"
+                logger.error(error_message, exc_info=True)
+            except openai.APIStatusError as e:
+                error_message = f"OpenRouter API ステータスエラー: {e.status_code}, Response: {e.response}"
+                logger.error(error_message, exc_info=True)
+                results.append({"response": None, "error": error_message})
             except Exception as e:
                 try:
                     self._handle_api_error(e)
-                except Exception as handled_e:
-                    error_message = str(handled_e)
-                    results.append({"response": None, "error": error_message})
+                except WebApiError as api_e:
+                    results.append({"response": None, "error": str(api_e)})
 
         return results
 
@@ -693,26 +809,42 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
         """OpenRouter API からの応答をフォーマットする"""
         formatted_outputs = []
         for output in raw_outputs:
-            if output.get("error"):
-                formatted_outputs.append(FormattedOutput(annotation=None, error=output["error"]))
+            if output.get("error"): # type: ignore[typeddict-item]
+                formatted_outputs.append(FormattedOutput(annotation=None, error=output["error"])) # type: ignore[typeddict-item]
                 continue
 
-            response = output.get("response")
-            if not response or not hasattr(response, "choices"):
-                formatted_outputs.append(FormattedOutput(annotation=None, error="応答が空または無効です"))
+            response_val = output.get("response") # type: ignore[typeddict-item]
+            if not isinstance(response_val, openai_chat_types.ChatCompletion): # openai_chat_types を使用
+                formatted_outputs.append(FormattedOutput(annotation=None, error=f"OpenRouter: Invalid response type: {type(response_val)}"))
+                continue
+
+            # response_val は ChatCompletion 型であることが保証される
+            if not response_val.choices:
+                formatted_outputs.append(FormattedOutput(annotation=None, error="OpenRouter: 応答が空または無効です (no choices)"))
                 continue
 
             try:
                 # OpenRouterのChoice型からメッセージコンテンツを取得
-                choice = response.choices[0]
+                choice = response_val.choices[0]
                 if not choice.message or not choice.message.content:
                     formatted_outputs.append(
-                        FormattedOutput(annotation=None, error="メッセージコンテンツが空です")
+                        FormattedOutput(annotation=None, error="OpenRouter: メッセージコンテンツが空です")
                     )
                     continue
 
+                content_text = choice.message.content
+                
+                # マークダウンコードブロック (`json) が含まれているか確認し、除去する
+                if content_text.startswith("```json") and "```" in content_text:
+                    # コードブロック内の実際のJSONを抽出
+                    json_start = content_text.find("\n", content_text.find("```json")) + 1
+                    json_end = content_text.rfind("```")
+                    if json_start > 0 and json_end > json_start:
+                        content_text = content_text[json_start:json_end].strip()
+                        logger.debug(f"マークダウンコードブロックから抽出されたJSON: {content_text[:100]}...")
+                
                 # メッセージコンテンツから直接JSONを解析
-                formatted = self._parse_common_json_response(choice.message.content)
+                formatted = self._parse_common_json_response(content_text)
                 formatted_outputs.append(formatted)
             except (AttributeError, IndexError) as e:
                 error_message = f"OpenRouter API応答からテキストを抽出できませんでした: {e!s}"

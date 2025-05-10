@@ -48,18 +48,25 @@ class PHashAnnotationResults(dict[str, dict[str, ModelResultDict]]):
 # - 当面の方針:
 #   - 既存の互換性と安定性を優先
 #   - 大規模な改修は次期メジャーバージョンで検討
-def _create_annotator_instance(model_name: str) -> Any:
+def _create_annotator_instance(model_name: str) -> BaseAnnotator:
     """
-    _MODEL_INSTANCE_REGISTRYに登録されているモデルに対応したクラスを取得し、
-    モデル名を引数にモデルインスタンスを生成
+    モデル名に対応するクラスを取得し、インスタンスを生成します。
+    Web API モデルもローカルモデルも、model_name（論理名）をそのまま渡して初期化します。
 
     Args:
-        model_name (str): モデルの名前。
+        model_name (str): モデルの名前 (Web APIの場合は model_name_short)。
 
     Returns:
-        BaseTagger: スコアラーのインスタンス。
+        BaseAnnotator: アノテーターのインスタンス。
+
+    Raises:
+        KeyError: 指定された model_name がレジストリに存在しない場合。
     """
     registry = get_cls_obj_registry()
+    if model_name not in registry:
+        logger.error(f"要求されたモデル名 '{model_name}' はクラスレジストリに見つかりません。")
+        raise KeyError(f"Model '{model_name}' not found in class registry.")
+
     Annotator_class = registry[model_name]
     instance = Annotator_class(model_name=model_name)
     logger.debug(
