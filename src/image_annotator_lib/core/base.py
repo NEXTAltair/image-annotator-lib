@@ -421,6 +421,11 @@ class BaseAnnotator(ABC):
                 logger.error(f"チャンク {i // chunk_size + 1} の処理中に予期せぬエラーが発生: {e}")
                 for j, _ in enumerate(chunk_images):
                     phash = chunk_phash_list[j] if j < len(chunk_phash_list) else None
+                    # ここで、もしeがdictやKnownError型でerror属性を持つ場合はそちらを優先
+                    if hasattr(e, "error"):
+                        error_message = getattr(e, "error")
+                    elif isinstance(e, dict) and "error" in e:
+                        error_message = e["error"]
                     result = self._generate_result(
                         phash=phash, tags=[], formatted_output=None, error=error_message
                     )
@@ -1568,11 +1573,34 @@ class WebApiBaseAnnotator(BaseAnnotator):
         logger.warning(f"どの形式でもタグを抽出できませんでした。テキスト: {text[:100]}...")
         return []
 
-    def _generate_tags(self, formatted_output: WebApiAnnotationOutput) -> list[str]:
+    def _generate_tags(self, formatted_output) -> list[str]:
         """フォーマット済み出力からタグを生成する"""
-        if formatted_output["error"] or formatted_output["annotation"] is None:
+        # デバッグ出力
+        logger.debug(f"[DEBUG _generate_tags] type(formatted_output): {type(formatted_output)}")
+        logger.debug(f"[DEBUG _generate_tags] formatted_output: {formatted_output}")
+
+        # FormattedOutput（pydantic）かdictかで分岐
+        if hasattr(formatted_output, "error"):
+            error = formatted_output.error
+            annotation = formatted_output.annotation
+        else:
+            error = formatted_output.get("error")
+            annotation = formatted_output.get("annotation")
+        logger.debug(f"[DEBUG _generate_tags] (attr) error: {error}, annotation: {annotation}")
+
+        if error or annotation is None:
             return []
-        annotation = formatted_output["annotation"]
-        if "tags" in annotation and isinstance(annotation["tags"], list):
-            return annotation["tags"]
+
+        # pydanticモデル（AnnotationSchema）かdictかで分岐
+        if hasattr(annotation, "tags"):
+            tags = annotation.tags
+        elif isinstance(annotation, dict) and "tags" in annotation:
+            tags = annotation["tags"]
+        else:
+            tags = None
+
+        logger.debug(f"[DEBUG _generate_tags] tags: {tags}")
+
+        if isinstance(tags, list):
+            return tags
         return []

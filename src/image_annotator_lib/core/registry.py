@@ -19,17 +19,16 @@ _MODEL_CLASS_OBJ_REGISTRY: dict[str, ModelClass] = {}
 
 
 def _list_module_files(directory: str) -> list[Path]:
-    """指定されたディレクトリ内のPythonモジュールファイル (__init__.pyを除く) をリストアップします。"""
+    """指定されたディレクトリ内の全てのPythonモジュールファイル（サブディレクトリ含む、__init__.py除く）をリストアップ"""
     try:
-        # 'directory'が'src/image_annotator_lib'ディレクトリからの相対パスであると仮定
         base_dir = Path(__file__).parent.parent
         abs_path = (base_dir / directory).resolve()
-        logger.debug(f"モジュール検索中: {abs_path}")
         if not abs_path.is_dir():
             logger.warning(f"モジュールディレクトリが見つかりません: {abs_path}")
             return []
-        module_files = [p for p in abs_path.glob("*.py") if p.name != "__init__.py"]
-        logger.debug(f"{abs_path} で {len(module_files)} 個のモジュールファイルが見つかりました")
+        # 再帰的に.pyファイルを取得
+        module_files = [p for p in abs_path.rglob("*.py") if p.name != "__init__.py"]
+        logger.debug(f"{abs_path} 以下で {len(module_files)} 個のモジュールファイルが見つかりました")
         return module_files
     except Exception as e:
         logger.error(f"{directory} 内のモジュールファイルのリストアップ中にエラー: {e}", exc_info=True)
@@ -37,19 +36,20 @@ def _list_module_files(directory: str) -> list[Path]:
 
 
 def _import_module_from_file(module_file: Path, base_module_path: str) -> ModuleType | None:
-    """ファイルパスからPythonモジュールをインポートします。"""
-    module_name = module_file.stem
-    full_module_path = f"{base_module_path}.{module_name}"
+    # base_dirはmodel_classディレクトリ
+    base_dir = Path(__file__).parent.parent / "model_class"
+    rel_path = module_file.relative_to(base_dir)
+    # 拡張子を除去し、パス区切りをドットに変換
+    module_path = rel_path.with_suffix("").as_posix().replace("/", ".")
+    full_module_path = f"{base_module_path}.{module_path}"
     try:
         module = importlib.import_module(full_module_path)
         logger.debug(f"モジュールのインポート成功: {full_module_path}")
         return module
     except ImportError as e:
-        # ImportErrorは一般的であるため、具体的にログに記録
         logger.error(f"モジュール {full_module_path} のインポート中にエラー: {e}", exc_info=True)
         return None
     except Exception as e:
-        # インポート中に発生する可能性のある他の例外をキャッチ
         logger.error(f"モジュール {full_module_path} のインポート中に予期せぬエラー: {e}", exc_info=True)
         return None
 

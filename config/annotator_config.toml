@@ -533,9 +533,6 @@ max_output_tokens = 1800
 class = "GoogleApiAnnotator"
 max_output_tokens = 1800
 
-[test_tf]
-estimated_size_gb = 0.0
-
 ["Mistral Medium 3"]
 class = "OpenRouterApiAnnotator"
 max_output_tokens = 1800
@@ -575,6 +572,3 @@ max_output_tokens = 1800
 ["GPT-4.1 Mini"]
 class = "OpenAIApiAnnotator"
 max_output_tokens = 1800
-
-[test_transformers_ved_dummy]
-estimated_size_gb = 0.006

@@ -20,16 +20,7 @@ image = Image.open("tests/resources/img/1_img/file01.webp")
 #         print(f"タグ: {result['tags']}")
 #         print(f"エラー: {result['error']}")
 
-# with AnthropicApiAnnotator("Claude 3.5 Sonnet") as annotator:
-#     # 単一画像に対する処理
-#     results = annotator.predict([image], ["test_hash"])
-#     print(results)
-#     # 結果を表示
-#     for result in results:
-#         print(f"タグ: {result['tags']}")
-#         print(f"エラー: {result['error']}")
-
-with GoogleApiAnnotator("Gemma 3 1B (free)") as annotator:
+with AnthropicApiAnnotator("Claude 3.5 Sonnet (2024-06-20)") as annotator:
     # 単一画像に対する処理
     results = annotator.predict([image], ["test_hash"])
     print(results)
@@ -37,6 +28,15 @@ with GoogleApiAnnotator("Gemma 3 1B (free)") as annotator:
     for result in results:
         print(f"タグ: {result['tags']}")
         print(f"エラー: {result['error']}")
+
+# with GoogleApiAnnotator("Gemma 3 1B (free)") as annotator:
+#     # 単一画像に対する処理
+#     results = annotator.predict([image], ["test_hash"])
+#     print(results)
+#     # 結果を表示
+#     for result in results:
+#         print(f"タグ: {result['tags']}")
+#         print(f"エラー: {result['error']}")
 
 # with OpenAIApiAnnotator("GPT-4.1 Nano") as annotator:
 #     # 単一画像に対する処理

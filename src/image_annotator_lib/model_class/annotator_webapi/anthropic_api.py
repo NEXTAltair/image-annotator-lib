@@ -5,7 +5,7 @@ import anthropic
 from ...core.base import WebApiBaseAnnotator
 from ...core.config import config_registry
 from ...core.utils import logger
-from ...exceptions.errors import ConfigurationError, WebApiError
+from ...exceptions.errors import ModelNotFoundError, WebApiError
 from .webapi_shared import (
     BASE_PROMPT,
     JSON_SCHEMA,
@@ -32,9 +32,7 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator):
         """Anthropic API を使用して推論を実行する"""
         if not all(isinstance(item, str) for item in processed_images):
             logger.error("AnthropicApiAnnotator received non-string input for _run_inference")
-            return [{"response": None, "error": "Invalid input type for Anthropic API"}] * len(
-                processed_images
-            )
+            return [{"response": None, "error": "Invalid input type for Anthropic API"}] * len(processed_images)
 
         processed_images_str: list[str] = cast(list[str], processed_images)
 
@@ -42,10 +40,6 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator):
             raise WebApiError(
                 "API クライアントまたはモデル ID が初期化されていません",
                 provider_name=getattr(self, "provider_name", "Unknown"),
-            )
-        if not isinstance(self.client, anthropic.Anthropic):
-            raise ConfigurationError(
-                f"予期しないクライアントタイプ: {type(self.client)}"
             )
 
         logger.debug(f"Anthropic API 呼び出しに使用するモデルID: {self.api_model_id}")
@@ -105,9 +99,22 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator):
                 results.append({"response": annotation, "error": None})
 
             except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.APIStatusError) as e:
-                logger.error(f"Anthropic API error: {e}", exc_info=True)
-                results.append({"response": None, "error": str(e)})
-
+                # 404エラーの場合はModelNotFoundErrorでラップ
+                error_str = str(e)
+                if "404" in error_str or "not_found_error" in error_str:
+                    # モデル名を抽出(なければそのまま)
+                    import re
+                    m = re.search(r"model: ([\w\.\-\:]+)", error_str)
+                    model_name = m.group(1) if m else "不明"
+                    custom_error = ModelNotFoundError(model_name)
+                    logger.error(f"Anthropic API モデル未検出: {custom_error}")
+                    results.append({"response": None, "error": str(custom_error)})
+                else:
+                    logger.error(f"Anthropic API error: {e}")
+                    results.append({"response": None, "error": f"Anthropic API error: {e}"})
+            except Exception as e:
+                logger.error(f"Anthropic API unknown error: {e}")
+                results.append({"response": None, "error": f"Anthropic API unknown error: {e}"})
         return results
 
     def _format_predictions(self, raw_outputs: list[Responsedict]) -> list[FormattedOutput]:

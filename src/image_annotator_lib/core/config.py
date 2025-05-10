@@ -217,11 +217,11 @@ class ModelConfigRegistry:
 
         # Save the system config file only if a setting was actually added
         if setting_added:
-            logger.debug(f"デフォルト設定が追加されたため、システム設定ファイルを保存します。")
+            logger.debug("デフォルト設定が追加されたため、システム設定ファイルを保存します。")
             self.save_system_config()
         else:
             logger.debug(
-                f"デフォルト設定の追加はスキップされたため、システム設定ファイルの保存は行いません。"
+                "デフォルト設定の追加はスキップされたため、システム設定ファイルの保存は行いません。"
             )
 
     def save_user_config(self, user_config_path: str | Path | None = None) -> None:
@@ -307,7 +307,7 @@ def load_available_api_models() -> dict[str, Any]:
                 f"{file_path} が見つかりません。初回実行の可能性があります。空のデータで開始します。"
             )
             return {}
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             data = toml.load(f)
         if not isinstance(data, dict) or "available_vision_models" not in data:
             logger.warning(
