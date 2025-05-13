@@ -44,7 +44,16 @@ def init_logger():
         backtrace=True,
         diagnose=True,
     )
-    # ファイルシンク (DEFAULT_PATHS["log_file"] を使用)
+
+    # 特定のモジュールのDEBUGログをフィルタするための関数
+    def filter_module_logs(record):
+        # 'registry' または 'config' モジュールからのDEBUGログをフィルタ
+        if record["name"].startswith("image_annotator_lib.core.registry") or record["name"].startswith("image_annotator_lib.core.config"):
+            # INFOレベル以上のログだけを許可する (DEBUGレベルは除外)
+            return record["level"].no >= logger.level("INFO").no
+        # その他のモジュールのログはすべて通す
+        return True
+    # ファイルシンク (DEFAULT_PATHS["log_file"] を使用) - フィルタを追加
     try:
         log_file_path = Path(DEFAULT_PATHS["log_file"])
         log_file_path.parent.mkdir(parents=True, exist_ok=True)  # フォルダ作成
@@ -57,8 +66,10 @@ def init_logger():
             encoding="utf-8",
             backtrace=True,
             diagnose=True,
+            filter=filter_module_logs,  # フィルタ関数を追加
         )
         logger.info(f"Logging to file: {log_file_path}")
+        logger.info("registry と config モジュールのDEBUGログは出力されません (INFO以上のみ出力)")
     except Exception as e:
         logger.error(f"Failed to configure file logging to '{DEFAULT_PATHS['log_file']}': {e}")
         logger.error("File logging disabled.")
