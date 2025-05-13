@@ -25,6 +25,17 @@
     - [ ] テスト・実装・設定ファイルの整合性確認
     - [ ] 必要に応じてdocs/architecture.md, docs/technical.mdも更新
     - [ ] 異常系テストの網羅性強化
+- **[進行中] Web API アノテーター (`annotator_webapi`) のリファクタリング (PydanticAI 導入準備)**
+    - [済] `core/types.py` を導入し、共通の型定義 (WebApiComponents, AnnotationSchema, RawOutput, WebApiFormattedOutput, WebApiInput など) を集約。
+    - [済] `_run_inference` の戻り値を `list[RawOutput]` (`response: AnnotationSchema | None`, `error: str | None`) に統一。
+    - [済] `_format_predictions` を `WebApiBaseAnnotator` に共通実装し、戻り値を `list[WebApiFormattedOutput]` (`annotation: dict | None`, `error: str | None`) に統一。
+    - [済] 各サブクラス (`google_api.py`, `anthropic_api.py`) から `_format_predictions` を削除。
+    - [済] 関連テストコード (`test_google_api.py`, `test_anthropic_api.py`) を修正し、パスを確認。
+    - [済] `tasks/rfc/pydanticai_integration_plan.md` を更新。
+    - [済] `tasks/active_context.md` を更新。
+    - [TODO] `core/base.py` の `self.components` 周りの型エラーを解消する。
+    - [TODO] PydanticAI の Agent/tool 等の導入を検討・実装する。
+    - [TODO] 関連ドキュメント (`architecture.md`, `technical.md`, `lessons-learned.mdc` 等) に今回のリファクタリング内容を反映させる。
 
 ### 2.2. バックログ / 今後の展望 (Backlog / Future Outlook)
 - **ドキュメント・コード整理:**
@@ -92,7 +103,7 @@
 ## [2025-05-10] Google Gemini annotator レスポンス型・エラーハンドリング設計変更
 
 ### 完了タスク
-- google_api.py のレスポンス型を WebApiAnnotationOutput (annotation: dict[str, Any] | None, error: str | None) に統一
+- google_api.py のレスポンス型を WebApiFormattedOutput (annotation: dict[str, Any] | None, error: str | None) に統一
 - スキーマ不一致・APIエラー時のエラー格納設計実装
 - テスト・型定義の修正
 - ドキュメント(technical.md, architecture.md, active_context.md)への記録
@@ -103,13 +114,13 @@
 
 ## 2025-05-10 OpenAIApiAnnotator関連タスク
 
-- OpenAI API画像入力（base64）はimage_url: dict型で渡すよう修正
-- 型エラー（ImageURL型）を辞書型指定で解消
-- 構造化出力モデルをAnnotationSchema（webapi_shared.py）に統一
+- OpenAI API画像入力(base64)はimage_url: dict型で渡すよう修正
+- 型エラー(ImageURL型)を辞書型指定で解消
+- 構造化出力モデルをAnnotationSchema(webapi_shared.py)に統一
 - _run_inference/_format_predictionsの型安全・エラーハンドリングを整理
-- ユニットテスト（test_openai_api_response.py）を追加し、正常系・異常系・API例外を網羅
+- ユニットテスト(test_openai_api_response.py)を追加し、正常系・異常系・API例外を網羅
 
-## 2025-05-10 AnthropicApiAnnotator関連タスク（テスト用ToolUseBlockクラス名修正・型判定整理）
+## 2025-05-10 AnthropicApiAnnotator関連タスク(テスト用ToolUseBlockクラス名修正・型判定整理)
 
 - テスト用ダミークラスのクラス名をToolUseBlockに合わせ、type(obj).__name__ == "ToolUseBlock" の判定に合致させることでテストがパス。
 - _format_predictionsでAnnotationSchema型を許容し、APIレスポンスの型安全性・一貫性を向上。
@@ -119,17 +130,36 @@
 
 - annotator_webapi.py から OpenAIApiAnnotator を openai_api_response.py へ、AnthropicApiAnnotator を anthropic_api.py へ分離
 - 分離に伴い、型定義・エラーハンドリング・テストを整理
-- 共通スキーマ（AnnotationSchema）は webapi_shared.py に集約
+- 共通スキーマ(AnnotationSchema)は webapi_shared.py に集約
 - テスト用ダミークラスのクラス名・型判定ロジックを実装と一致させ、テストの信頼性を担保
 - テスト全パスを確認
 
 ### 今後のタスク
-- 他API（Google, OpenRouter等）も同様の分離・整理を検討
+- 他API(Google, OpenRouter等)も同様の分離・整理を検討
 - ドキュメント・設計方針の定期的な見直し
 
 ### 2024/05/10 OpenRouterApiAnnotator テスト・設計・ドキュメント反映
 - テストカバレッジ向上・異常系網羅のためのテスト設計・修正を実施。
 - テスト通過後、設計・技術ドキュメントも最新状態に更新。
 - AnnotationSchemaによる型安全化・エラーハンドリング明確化を反映。
+
+### BDDテストスイートの安定化とPydantic導入準備 (2025-05-13)
+
+- **完了:**
+    - Web API連携テストにおけるタイムアウト処理のシミュレーション方法を改善 (`webapi_annotate_steps.py`)
+        - `google-genai` SDK利用時のタイムアウトを `RuntimeError` でシミュレートするように修正。
+    - APIエラーレスポンス時のテストステップにおけるアサーションを強化 (`webapi_annotate_steps.py`)
+        - エラーメッセージの検証を小文字化比較に変更し、安定性を向上。
+    - Linter (Mypy/Ruff) による型エラーおよびコーディングスタイル違反の修正 (`webapi_annotate_steps.py`)
+        - ロガーの型不整合を解消。
+        - 不要なインポートの整理。
+    - `tasks/rfc/pydanticai_integration_plan.md` の更新。
+        - `types.py` 作成経緯を追記。
+        - BDDテスト修正(APIキー未設定、タイムアウト、エラーレスポンス)の記録を追記。
+- **進行中:**
+    - `pydanticai_integration_plan.md` に基づくPydanticモデルの設計と既存コードへの適用。
+    - Web APIクライアントライブラリ (`annotator_webapi/`) のリファクタリング(PydanticAI適用を見据えた準備)。
+- **残課題:**
+    - (特になし。Pydanticモデル導入後に新たな課題が発生する可能性あり)
 
 ---

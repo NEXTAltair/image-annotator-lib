@@ -70,6 +70,7 @@ flowchart TD
         CoreRegistry[registry.py]
         CoreConfig[config.py]
         CoreUtils[utils.py]
+        CoreTypes[types.py]
         CoreDiscovery[api_model_discovery.py]
         CoreConstants[constants.py]
         CoreFactoryStub[factory.pyi]
@@ -84,7 +85,11 @@ flowchart TD
 
     subgraph ModelClass [model_class/]
         direction LR
-        MCWebApi[annotator_webapi.py]
+        MCWebApiDir[annotator_webapi/]
+        MCWebApiDir --> MCWebApiOpenAI[openai_api.py]
+        MCWebApiDir --> MCWebApiGoogle[google_api.py]
+        MCWebApiDir --> MCWebApiAnthropic[anthropic_api.py]
+        MCWebApiDir --> MCWebApiShared[webapi_shared.py]
         MCPipeline[pipeline_scorers.py]
         MCClip[scorer_clip.py]
         MCOnnx[tagger_onnx.py]
@@ -114,6 +119,7 @@ flowchart TD
     subgraph UnitLib [image_annotator_lib/]
         direction LR
         UnitCore[core/]
+        UnitModelClass[model_class/]
     end
 
     subgraph UnitCore [core/]
@@ -122,6 +128,23 @@ flowchart TD
         UnitCoreConfig[test_config.py]
         UnitCoreFactory[test_model_factory_unit.py]
         UnitCoreRegistry[test_registry.py]
+        UnitCoreBase[test_base.py]
+        UnitCoreUtils[test_utils.py]
+        UnitCoreTypes[test_types.py]
+    end
+
+    subgraph UnitModelClass [model_class/]
+        direction LR
+        UnitMCWebApi[annotator_webapi/]
+        UnitMCWebApi --> UnitMCWebApiOpenAI[test_openai_api.py]
+        UnitMCWebApi --> UnitMCWebApiGoogle[test_google_api.py]
+        UnitMCWebApi --> UnitMCWebApiAnthropic[test_anthropic_api.py]
+        UnitMCWebApi --> UnitMCWebApiShared[test_webapi_shared.py]
+        UnitMCPipeline[test_pipeline_scorers.py]
+        UnitMCClip[test_scorer_clip.py]
+        UnitMCOnnx[test_tagger_onnx.py]
+        UnitMCTf[test_tagger_tensorflow.py]
+        UnitMCTransformers[test_tagger_transformers.py]
     end
 ```
 
@@ -137,9 +160,10 @@ flowchart TD
 
 本ディレクトリは、画像のアノテーション(評価、タグ付けなど)に関するコア機能を提供する独立したライブラリである。
 
-- **`core/`**: モデル読み込み、ベースクラス、共通ユーティリティなど、ライブラリの中核となるコンポーネントを配置する。
+- **`core/`**: モデル読み込み、ベースクラス、共通ユーティリティ、共通型定義 (`types.py`) など、ライブラリの中核となるコンポーネントを配置する。
 - **`exceptions/`**: ライブラリ固有の例外クラスを定義する。
 - **`model_class/`**: 各アノテーター(例: スコアラー、タガー)の具体的な実装クラスを配置する。
+    - **`annotator_webapi/`**: Web API系アノテーターはAPIごとに分割実装（`openai_api.py`, `google_api.py`, `anthropic_api.py` など）。共通ロジックは `webapi_shared.py` に集約。APIごとの独立性・保守性・拡張性・テスト容易化のため。
 - **`resources/system/`**: システムデフォルトの設定ファイルなどを配置する。
 - **`__init__.py`**: 主要なクラスや関数を公開するためのエントリーポイント。
 - **`api.py`**: ユーザー向けの高レベルAPI関数 (`annotate` など) を配置する。
@@ -148,14 +172,14 @@ flowchart TD
 ### 2.3. ルート `tests` ディレクトリ構成
 
 - **`unit/`**: ユニットテストを配置する。
-    - **`image_annotator_lib/`**: `image-annotator-lib` の各モジュールに対応するユニットテストを、元の `src/` 内の構造を模倣して配置する。(例: `tests/unit/image_annotator_lib/core/test_base.py`)
+    - **`image_annotator_lib/`**: `image-annotator-lib` の各モジュールに対応するユニットテストを、原則として元の `src/` 内の構造を模倣して配置する。(例: `tests/unit/image_annotator_lib/core/test_base.py`, `tests/unit/image_annotator_lib/model_class/annotator_webapi/test_openai_api.py`)
 - **`integration/`**: 複数のコンポーネントや外部サービスとの連携をテストする統合テストを配置する。
 - **`features/`**: BDD (振る舞い駆動開発) のファイルを配置する。
     - **ルート**: Feature ファイル (`.feature`) を配置する。
-    - **`step_definitions/`**: BDD のステップ定義ファイル (例: `*_steps.py`) を配置する。
+    - **`step_definitions/`**: BDD のステップ定義ファイル (例: `*_steps.py`) を配置する。 (現在は削除済み。将来的に再実装する場合はこの限りではない)
 - **`resources/`**: テストで使用する画像ファイル、設定ファイルなどのリソースを配置する。
 - **`conftest.py`**: プロジェクト全体のテストで共通して使用するフィクスチャやフックを定義する。
 
 **指示:**
-- 新しい `image-annotator-lib` のモジュールを追加した場合、対応するユニットテストファイルを `tests/unit/image_annotator_lib/` 配下の適切な場所に作成する。
-- 新しいBDDシナリオを追加する場合、Feature ファイルを `tests/features/` に、ステップ定義を `tests/features/step_definitions/` に作成する。
+- 新しい `image_annotator_lib` のモジュールを追加した場合、対応するユニットテストファイルを `tests/unit/image_annotator_lib/` 配下の適切な場所に、`src/` の構造を反映して作成する。
+- (将来的に) 新しいBDDシナリオを追加する場合、Feature ファイルを `tests/features/` に、ステップ定義を `tests/features/step_definitions/` に作成する。

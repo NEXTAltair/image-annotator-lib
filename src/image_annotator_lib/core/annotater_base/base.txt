@@ -1,0 +1,10 @@
+"""
+# TODO: src\image_annotator_lib\core\base.py をモデルの種類ごとに分割してこのフォルダにいれる予定
+"""
+
+TransformersBaseAnnotator
+TensorflowBaseAnnotator
+ClipBaseAnnotator
+PipelineBaseAnnotator
+ONNXBaseAnnotator
+WebApiBaseAnnotator

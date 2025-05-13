@@ -193,17 +193,17 @@ pytest-bdd を用いた BDD テスト実行時に、以下のような複数の�
 - 原因: テスト対象の設計・責務を正しく理解していない。
 - 解決策: テストコードは設計・責務を正しく理解した上で書く。論理名(model_name_short)を初期化時に渡す。with文で使う設計を守る。
 
-# [2025-05-10] model_factory BDDテスト: ダミー化・型判定・外部依存エラーの解決記録（過去の経緯）
+# [2025-05-10] model_factory BDDテスト: ダミー化・型判定・外部依存エラーの解決記録(過去の経緯)
 
 ## 状態・背景
 - 過去、model_factory のBDDテストで多数の失敗が発生。
 - 主な失敗要因:
   1. 本物のモデルロード・ファイル依存による例外や型不一致。
   2. featureファイルの型名と実装上の型名の不一致。
-  3. ダミー化の不徹底（部分的に本物のロジックが残存）。
-  4. テスト期待値（推定サイズ等）とダミー値の不一致。
+  3. ダミー化の不徹底(部分的に本物のロジックが残存)。
+  4. テスト期待値(推定サイズ等)とダミー値の不一致。
 
-## 解決策（当時）
+## 解決策(当時)
 - `tests/conftest.py` で `autouse=True` のfixtureを使い、ModelLoadの全ロード・メモリ計算・OOM判定をダミーで強制上書き。
 - 型判定やテスト期待値の柔軟化。
 
@@ -216,12 +216,12 @@ pytest-bdd を用いた BDD テスト実行時に、以下のような複数の�
 
 ## 状態・背景
 - base.feature の「cache_and_release_modelメソッドの動作」シナリオでテスト失敗。
-- 失敗内容: pytest-bdd の StepDefinitionNotFoundError（"Then その後リソースが完全に解放される" のステップ定義が見つからない）。
+- 失敗内容: pytest-bdd の StepDefinitionNotFoundError("Then その後リソースが完全に解放される" のステップ定義が見つからない)。
 - 原因: featureファイルのステップ文言と Python 側の @then デコレータ付き関数の文言が完全一致していなかった。
 
 ## 解決策
 - tests/features/step_definitions/base_steps.py に @then("その後リソースが完全に解放される") のステップ定義を追加。
-- 既存のリソース解放検証ロジック（componentsが空であることのアサート）を流用。
+- 既存のリソース解放検証ロジック(componentsが空であることのアサート)を流用。
 - これにより StepDefinitionNotFoundError が解消し、テストがパス。
 
 ## 教訓・再発防止
@@ -233,6 +233,66 @@ pytest-bdd を用いた BDD テスト実行時に、以下のような複数の�
 
 # [2025-05-10] 現状のBDDテスト関連ファイルについて
 
-- 現在、**BDDのステップ定義ファイル（tests/features/step_definitions/配下）およびconftest.pyはすべて削除済み**。
+- 現在、**BDDのステップ定義ファイル(tests/features/step_definitions/配下)およびconftest.pyはすべて削除済み**。
 - 過去の経緯やエラー記録は参考情報として残すが、現状はBDDテストの実装自体が存在しない。
-- エージェントによるコード生成時、**実際のコード・ディレクトリ構成を必ず確認し、ハルシネーション（実在しないファイル・関数・テスト等の生成）を厳禁とすること**。
+- エージェントによるコード生成時、**実際のコード・ディレクトリ構成を必ず確認し、ハルシネーション(実在しないファイル・関数・テスト等の生成)を厳禁とすること**。
+
+## BDDテスト: APIキー未設定時のエラーメッセージ検証失敗 (2025-05-13)
+
+- **エラー内容:**
+  - BDDテスト `test_apiキーが未設定の場合は認証エラーが発生する` の `@then("'ApiAuthenticationError' のエラーメッセージが返される")` ステップで `AssertionError` が発生。
+  - 具体的には、`annotate` 関数が返す結果辞書内のエラーメッセージ (`error` フィールド) に、期待されるエラータイプ名である文字列 `"ApiAuthenticationError"` が含まれていなかった。
+  - 実際の `error` メッセージ例: `"Google API エラー: Google API エラー: 環境変数 'GOOGLE_API_KEY' が設定されていないか、空です。 (プロバイダー: Google) - Mocked Error (モデル: Gemini 2.5 Pro Preview)"`
+
+- **原因:**
+  - `src/image_annotator_lib/api.py` の `_handle_error` 関数が、捕捉した例外からエラーメッセージを生成する際に、元の例外のクラス名 (型名) をメッセージに含めていなかった。
+  - BDDのステップ定義では、このエラーメッセージ文字列内に例外クラス名が含まれていることを期待して検証していたため、アサーションが失敗した。
+
+- **解決策:**
+  - `src/image_annotator_lib/api.py` の `_handle_error` 関数を修正。
+  - `error_type_name = type(e).__name__` のようにして例外のクラス名を取得し、`error_message = f"{error_type_name}: {str(e)} (モデル: {model_name})"` のように、生成するエラーメッセージの先頭にこのクラス名を含めるように変更した。
+
+- **影響:**
+  - 上記修正により、BDDテスト `test_apiキーが未設定の場合は認証エラーが発生する` が期待通りパスするようになった。
+  - 他のAPIエラー関連のテストケースでも、エラーメッセージに例外の型名が含まれるようになるため、より具体的なエラー内容の検証が可能になることが期待される。
+
+## [2025-05-13] BDDテスト: Google Gemini API タイムアウト処理とステップ定義
+
+- **エラー内容・課題:**
+    - `tests/features/webapi_annotate.feature` のAPIタイムアウトシナリオにおいて、`google.genai.errors.APIError` には直接的なタイムアウトを示す属性や専用の例外クラスが存在しないため、どのようにタイムアウト状態をシミュレートし、検証するかが課題となった。
+- **原因:**
+    - `google-genai` SDKが、ネットワークタイムアウト等を汎用的な `APIError` としてラップしており、エラーメッセージの内容から判断する必要があるが、テストでの確実なシミュレーションが難しい。
+- **解決策:**
+    - `tests/features/step_definitions/webapi_annotate_steps.py` の `api_timeout` (Givenステップ) 関数内で、`google_api.GoogleApiAnnotator._run_inference` をモックし、意図的に `RuntimeError("Simulated API timeout for Google API")` を送出するように変更。
+    - 対応する `timeout_error_message` (Thenステップ) 関数では、結果に含まれるエラーメッセージに "タイムアウト" または "timeout" が含まれていることをアサートするようにした。
+- **影響:**
+    - `google.genai.errors.APIError` を直接利用する代わりに `RuntimeError` を使うことで、テストにおけるタイムアウト状況の模倣と検証が明確になった。
+    - SDKの仕様に依存しすぎない、より安定したテストが可能になった。
+
+## [2025-05-13] Linterエラー: ロガーの型不整合 (`webapi_annotate_steps.py`)
+
+- **エラー内容:**
+    - `tests/features/step_definitions/webapi_annotate_steps.py` 内で、`image_annotator_lib.core.utils.logger` (カスタムロガーの可能性)と `logging.getLogger(__name__)` (標準ロガー)が混在しており、Mypy等のLinterが型不整合としてエラーを報告していた。
+    - 具体的には、`monkeypatch.setattr` でモックする対象のロガーと、ステップ定義内で使用するロガーの型が一致しない可能性があった。
+- **原因:**
+    - プロジェクト内で複数のロガーインスタンスまたはロガー取得方法が使用されていた。
+- **解決策:**
+    - `webapi_annotate_steps.py` 内のロガー取得を `logger = logging.getLogger(__name__)` に統一。
+    - `image_annotator_lib.core.utils.logger` のインポートを削除(またはコメントアウト)。
+- **影響:**
+    - Linterエラーが解消され、コードの静的解析における信頼性が向上した。
+    - ロガーの使用方法が統一され、可読性と保守性が向上した。
+
+## [2025-05-13] BDDテスト: APIエラーメッセージのアサーション失敗
+
+- **エラー内容:**
+    - `tests/features/webapi_annotate.feature` のAPIエラーレスポンスを検証するシナリオ (`Scenario: APIからエラーレスポンスが返された場合は適切に処理する`) のThenステップで `AssertionError` が発生。
+    - エラーメッセージは `Simulated API Processing Error` となっており、アサーション `assert "エラー" in model_result["error"] or "error" in model_result["error"]` が失敗していた。
+- **原因:**
+    - アサーションが日本語の「エラー」または小文字の「error」を期待していたが、実際のエラーメッセージは先頭が大文字の「Error」だったため、Pythonの `in` 演算子(ケースセンシティブ)ではマッチしなかった。
+- **解決策:**
+    - `tests/features/step_definitions/webapi_annotate_steps.py` の `api_error_message_in_result` (Thenステップ) 関数を修正。
+    - アサーションを `assert "error" in model_result["error"].lower() or "エラー" in model_result["error"]` のように変更し、エラーメッセージを小文字に変換してから "error" が含まれるかを確認するようにした。日本語「エラー」のチェックはそのまま残した。
+- **影響:**
+    - 大文字・小文字の違いによるアサーション失敗が解消され、テストの安定性が向上した。
+    - より堅牢なエラーメッセージ検証が可能になった。
