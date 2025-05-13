@@ -7,15 +7,9 @@ from image_annotator_lib.exceptions.errors import ConfigurationError, WebApiErro
 
 from ...core.base import WebApiBaseAnnotator
 from ...core.config import config_registry
+from ...core.types import AnnotationSchema, RawOutput
 from ...core.utils import logger
-from .webapi_shared import (
-    BASE_PROMPT,
-    JSON_SCHEMA,
-    SYSTEM_PROMPT,
-    AnnotationSchema,
-    FormattedOutput,
-    Responsedict,
-)
+from .webapi_shared import BASE_PROMPT, JSON_SCHEMA, SYSTEM_PROMPT
 
 
 class OpenRouterApiAnnotator(WebApiBaseAnnotator):
@@ -25,7 +19,7 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
         super().__init__(model_name)
 
     @override
-    def _run_inference(self, processed_images: list[str] | list[bytes]) -> list[Responsedict]:
+    def _run_inference(self, processed_images: list[str] | list[bytes]) -> list[RawOutput]:
         if not all(isinstance(item, str) for item in processed_images):
             raise ValueError("OpenRouter API annotator requires string (base64) inputs.")
         processed_images_str: list[str] = cast(list[str], processed_images)
@@ -49,7 +43,7 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
         if app_name and isinstance(app_name, str):
             extra_headers["X-Title"] = app_name
 
-        results: list[Responsedict] = []
+        results: list[RawOutput] = []
         for base64_image in processed_images_str:
             try:
                 self._wait_for_rate_limit()
@@ -89,7 +83,11 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
                                 if json_start > 0 and json_end > json_start:
                                     content_text = content_text[json_start:json_end].strip()
                             import json
-                            annotation = AnnotationSchema(**json.loads(content_text))
+                            parsed_dict = json.loads(content_text)
+                            # captions が文字列の場合、リストに変換
+                            if isinstance(parsed_dict.get("captions"), str):
+                                parsed_dict["captions"] = [parsed_dict["captions"]]
+                            annotation = AnnotationSchema(**parsed_dict)
                         else:
                             error = "OpenRouter: メッセージコンテンツが空です"
                     else:
@@ -108,25 +106,11 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
 
         return results
 
-    def _handle_inference_exception(self, e: Exception, results: list[Responsedict]):
+    def _handle_inference_exception(self, e: Exception, results: list[RawOutput]):
         try:
             self._handle_api_error(e)
         except WebApiError as api_e:
             results.append({"response": None, "error": str(api_e)})
-
-    def _format_predictions(self, raw_outputs: list[Responsedict]) -> list[FormattedOutput]:
-        formatted_outputs = []
-        for output in raw_outputs:
-            error = output.get("error")
-            if error:
-                formatted_outputs.append(FormattedOutput(annotation=None, error=error))
-                continue
-            response_val = output.get("response")
-            if not isinstance(response_val, AnnotationSchema):
-                formatted_outputs.append(FormattedOutput(annotation=None, error=f"OpenRouter: Invalid response type: {type(response_val)}"))
-                continue
-            formatted_outputs.append(FormattedOutput(annotation=response_val, error=None))
-        return formatted_outputs
 
     def _call_openrouter_with_json_schema(
         self, base64_image: str, temperature: float, max_tokens: int, timeout: float, extra_headers: dict[str, str]

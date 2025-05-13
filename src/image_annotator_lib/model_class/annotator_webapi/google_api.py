@@ -10,10 +10,11 @@ from image_annotator_lib.exceptions.errors import (
     WebApiError,
 )
 
-from ...core.base import WebApiAnnotationOutput, WebApiBaseAnnotator
+from ...core.base import WebApiBaseAnnotator
 from ...core.config import config_registry
+from ...core.types import AnnotationSchema, RawOutput
 from ...core.utils import logger
-from .webapi_shared import BASE_PROMPT, SYSTEM_PROMPT, AnnotationSchema, FormattedOutput
+from .webapi_shared import BASE_PROMPT, SYSTEM_PROMPT
 
 
 class GoogleApiAnnotator(WebApiBaseAnnotator):
@@ -40,7 +41,7 @@ class GoogleApiAnnotator(WebApiBaseAnnotator):
         return encoded_images
 
     @override
-    def _run_inference(self, processed: list[str] | list[bytes]) -> list[WebApiAnnotationOutput]:
+    def _run_inference(self, processed: list[str] | list[bytes]) -> list[RawOutput]:
         """画像データ (bytes) を Gemini API に送信し、結果を取得する。"""
         if not all(isinstance(item, bytes) for item in processed):
             raise ValueError("Google API annotator requires byte inputs.")
@@ -54,9 +55,11 @@ class GoogleApiAnnotator(WebApiBaseAnnotator):
 
         logger.debug(f"Google API 呼び出しに使用するモデルID: {self.api_model_id}")
 
-        results: list[WebApiAnnotationOutput] = []
+        results: list[RawOutput] = []
         for image_data in processed_bytes:
-            try:
+            annotation = None # ループごとに初期化
+            error = None      # ループごとに初期化
+            try: # API呼び出しとレスポンス処理全体を try で囲む
                 self._wait_for_rate_limit()
 
                 contents = [
@@ -86,43 +89,65 @@ class GoogleApiAnnotator(WebApiBaseAnnotator):
                     contents=contents,
                     config=generation_config,
                 )
-                # ここでAnnotationSchemaバリデーション
-                try:
-                    schema_obj = AnnotationSchema(**json.loads(response))
-                    results.append({"annotation": schema_obj.model_dump(), "error": None})
-                except ValidationError as ve:
-                    logger.error(f"Google API: スキーマ不一致: {ve}")
-                    results.append({"annotation": None, "error": f"スキーマ不一致: {ve}"})
-            except json.JSONDecodeError as e:
-                error_message = f"Google API: レスポンスJSONパース失敗: {e}"
-                logger.error(error_message, exc_info=True)
-                results.append({"annotation": None, "error": error_message})
-            except ValueError as e:
-                error_message = f"Google API: パラメータ不正またはAPIキー未設定: {e}"
-                logger.error(error_message, exc_info=True)
-                results.append({"annotation": None, "error": error_message})
-            except RuntimeError as e:
-                error_message = f"Google API: 実行時エラー: {e}"
-                logger.error(error_message, exc_info=True)
-                results.append({"annotation": None, "error": error_message})
+
+                # --- レスポンス処理 --- #
+                # 1. レスポンスが期待される AnnotationSchema 型か直接確認
+                if isinstance(response, AnnotationSchema):
+                    annotation = response
+                # 2. GenerateContentResponse 型か確認
+                elif isinstance(response, google_types.GenerateContentResponse):
+                    # candidates が存在し、内容が期待通りか確認
+                    if response.candidates and \
+                       response.candidates[0].content and \
+                       response.candidates[0].content.parts and \
+                       hasattr(response.candidates[0].content.parts[0], 'text') and \
+                       isinstance(response.candidates[0].content.parts[0].text, str):
+
+                        content_text = response.candidates[0].content.parts[0].text
+                        if content_text.strip():
+                            try:
+                                parsed_data = json.loads(content_text)
+                                annotation = AnnotationSchema(**parsed_data) # バリデーション
+                                # パース成功時はエラーメッセージを設定しない
+                            except json.JSONDecodeError as je:
+                                error = f"Google API: レスポンスJSONパース失敗: {je}(内容: {content_text!r})"
+                                logger.error(error)
+                            except ValidationError as ve:
+                                error = f"Google API: スキーマ不一致 (GenerateContentResponse): {ve}"
+                                logger.error(error)
+                        else:
+                            error = "Google API: GenerateContentResponse内のtextコンテンツが空です。"
+                            logger.warning(error)
+                    else:
+                        # GenerateContentResponse だが期待する構造ではない場合
+                        block_reason_msg = ""
+                        finish_reason_msg = ""
+                        if response.prompt_feedback and response.prompt_feedback.block_reason:
+                            block_reason_msg = f" ブロック理由: {response.prompt_feedback.block_reason}."
+                        if response.candidates and response.candidates[0].finish_reason:
+                            finish_reason_msg = f" 終了理由: {response.candidates[0].finish_reason}."
+                        error = f"Google API: GenerateContentResponseの構造が予期されるものではありませんでした。{block_reason_msg}{finish_reason_msg} 完全なレスポンス: {response}"
+                        logger.warning(error)
+                # 3. その他の予期しない型を処理
+                else:
+                    error = f"Google API: 未対応のレスポンス型: {type(response)}"
+                    logger.error(error)
+                # --- レスポンス処理ここまで --- #
+
+            # --- 例外処理 --- #
             except errors.APIError as e:
-                error_message = f"Google API: APIError: {e.code} {e.message}"
-                logger.error(error_message, exc_info=True)
-                results.append({"annotation": None, "error": error_message})
+                # Google SDKのAPIエラーをラップ
+                error = f"Google API エラー: APIError: {e.code} {e.message}"
+                logger.error(error, exc_info=True)
+            except ValueError as e: # これは API キーがない場合のエラーだったはず
+                 error = "Google API キーが見つかりません。環境変数 'GOOGLE_API_KEY' を設定してください。"
+                 logger.error(error)
             except Exception as e:
-                error_message = f"Google API エラー: 処理中に予期せぬエラーが発生しました: {str(e)}"
-                logger.error(error_message, exc_info=True)
-                results.append({"annotation": None, "error": error_message})
+                error = f"Google API エラー: 予期せぬエラー: {e!s}"
+                logger.error(error, exc_info=True)
+            # --- 例外処理ここまで --- #
+
+            # 結果を追加 (annotation が None の場合は error がセットされているはず)
+            results.append(RawOutput(response=annotation, error=error))
 
         return results
-
-    @override
-    def _format_predictions(self, raw_outputs: list[WebApiAnnotationOutput]) -> list[FormattedOutput]:
-        """Google Gemini API (google-genai SDK) からの応答をフォーマットする"""
-        formatted_outputs = []
-        for output in raw_outputs:
-            annotation = (
-                AnnotationSchema(**output["annotation"]) if output["annotation"] is not None else None
-            )
-            formatted_outputs.append(FormattedOutput(annotation=annotation, error=output["error"]))
-        return formatted_outputs

@@ -12,7 +12,7 @@ import re
 import traceback
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, NoReturn, Self, TypedDict
+from typing import Any, NoReturn, Self, TypedDict, override
 
 import numpy as np
 import onnxruntime as ort
@@ -39,6 +39,7 @@ from ..exceptions.errors import (
 from . import utils
 from .config import config_registry
 from .model_factory import ModelLoad, prepare_web_api_components
+from .types import AnnotationSchema, RawOutput, WebApiFormattedOutput
 from .utils import logger
 
 # ロガーの初期化
@@ -67,19 +68,13 @@ class CLIPComponents(TypedDict):
     processor: CLIPProcessor
     clip_model: CLIPModel
 
-# WebApiComponents は model_factory.py からインポート想定だが、循環参照を避けるためここで再定義
-class WebApiComponents(TypedDict):
-    client: Any
-    api_model_id: str
-    provider_name: str
 
 LoaderComponents = (
     TransformersComponents |
     TransformersPipelineComponents |
     ONNXComponents |
     TensorFlowComponents |
-    CLIPComponents |
-    WebApiComponents
+    CLIPComponents
 )
 
 
@@ -144,21 +139,6 @@ class FormattedOutput(TypedDict):
     error: str | None
 
 
-# Web API Annotator 用の型定義を追加
-class WebApiAnnotationOutput(TypedDict):
-    """WebApiBaseAnnotator._format_predictions の戻り値の型定義。
-
-    APIからの生のレスポンスを解析した結果を格納します。
-
-    Attributes:
-        annotation: 解析されたアノテーション情報 (タグ、キャプション、スコアなど) を含む辞書。
-                    解析に成功した場合に設定され、失敗した場合は None。
-        error: 解析中にエラーが発生した場合のエラーメッセージ文字列。
-               エラーがない場合は None。
-    """
-
-    annotation: dict[str, Any] | None  # {"tags": list[str], "captions": list[str], "score": float}
-    error: str | None
 
 
 # --- 基底クラス ---
@@ -1285,7 +1265,7 @@ class WebApiBaseAnnotator(BaseAnnotator):
         # APIキーは __enter__ で prepare_web_api_components から取得されるため、ここでは不要
 
         self.client: Any = None
-        self.components: WebApiComponents | None = None  # components の型ヒントを修正
+        self.components: Any | None = None  # 一時的に Any を使用
 
     # @abstractmethod # __enter__ メソッドの実装を削除し、新しい実装を追加
     def __enter__(self) -> Self:
@@ -1437,19 +1417,19 @@ class WebApiBaseAnnotator(BaseAnnotator):
             f"処理中に予期せぬエラーが発生しました: {error_message}", provider_name=provider_name
         ) from e
 
-    def _parse_common_json_response(self, text_content: str | dict[str, Any]) -> WebApiAnnotationOutput:
-        """共通のJSONレスポンス文字列を解析し、WebApiAnnotationOutputを生成するヘルパー。
+    def _parse_common_json_response(self, text_content: str | dict[str, Any]) -> WebApiFormattedOutput:
+        """共通のJSONレスポンス文字列を解析し、WebApiFormattedOutputを生成するヘルパー。
         Anthropicの場合はtoolで作成されたdictなので何もせずreturnする
 
         Args:
             text_content: APIから返されたテキストコンテンツ。
 
         Returns:
-            解析結果を含むWebApiAnnotationOutput辞書。
+            解析結果を含むWebApiFormattedOutput辞書。
             エラーが発生した場合は、errorフィールドにメッセージが含まれる。
         """
         if isinstance(text_content, dict):
-            return WebApiAnnotationOutput(annotation=text_content, error=None)
+            return WebApiFormattedOutput(annotation=text_content, error=None)
 
         logger.debug(f"_parse_common_json_response を開始: text='{text_content[:100]}...'")
         try:
@@ -1468,21 +1448,21 @@ class WebApiBaseAnnotator(BaseAnnotator):
                     logger.debug("JSONのルートレベルに注釈キーが見つかりました。")
                 else:
                     logger.warning("JSON内に 'Annotation' キーまたは期待されるキーが見つかりません。")
-                    return WebApiAnnotationOutput(
+                    return WebApiFormattedOutput(
                         annotation=None,
                         error="JSON内に期待されるキー (Annotation, tags, caption, score) が見つかりません。",
                     )
             else:
                 logger.warning(f"JSONデータが予期しない型 ({type(data)}) です。")
-                return WebApiAnnotationOutput(
+                return WebApiFormattedOutput(
                     annotation=None, error=f"JSONデータが予期しない型 ({type(data)}) です。"
                 )
 
             if annotation_data:
                 logger.debug(f"JSON解析成功。Annotation: {str(annotation_data)[:100]}...")
-                return WebApiAnnotationOutput(annotation=annotation_data, error=None)
+                return WebApiFormattedOutput(annotation=annotation_data, error=None)
             else:
-                return WebApiAnnotationOutput(
+                return WebApiFormattedOutput(
                     annotation=None, error="解析後、有効なAnnotationデータが見つかりませんでした。"
                 )
 
@@ -1491,11 +1471,11 @@ class WebApiBaseAnnotator(BaseAnnotator):
                 f"JSON解析エラー: {json_e!s}. テキスト内容: '{text_content[:100]}...'"  # 末尾の \" を削除
             )
             logger.error(error_message)
-            return WebApiAnnotationOutput(annotation=None, error=error_message)
+            return WebApiFormattedOutput(annotation=None, error=error_message)
         except Exception as e:
             error_message = f"JSON解析中に予期せぬエラー: {e!s}"  # 末尾の \" を削除
             logger.exception(error_message)  # スタックトレースも記録
-            return WebApiAnnotationOutput(annotation=None, error=error_message)
+            return WebApiFormattedOutput(annotation=None, error=error_message)
 
     def _extract_tags_from_text(self, text: str) -> list[str]:
         """API レスポンス (テキスト形式) からタグリストを抽出する基本実装。
@@ -1604,3 +1584,26 @@ class WebApiBaseAnnotator(BaseAnnotator):
         if isinstance(tags, list):
             return tags
         return []
+
+    @override
+    def _format_predictions(self, raw_outputs: list[RawOutput]) -> list[WebApiFormattedOutput]:
+        """Web API からの応答 (RawOutput) を共通の WebApiFormattedOutput にフォーマットする"""
+        formatted_outputs: list[WebApiFormattedOutput] = []
+        for output in raw_outputs:
+            error = output.get("error")
+            response_val = output.get("response")
+
+            if error:
+                formatted_outputs.append(WebApiFormattedOutput(annotation=None, error=error))
+                continue
+
+            if isinstance(response_val, AnnotationSchema):
+                # AnnotationSchema型ならmodel_dump()でdictに変換
+                formatted_outputs.append(WebApiFormattedOutput(annotation=response_val.model_dump(), error=None))
+            else:
+                # response_valがNoneの場合や、予期せぬ型の場合
+                error_message = f"Invalid response type: {type(response_val)}" if response_val is not None else "Response is None"
+                formatted_outputs.append(
+                    WebApiFormattedOutput(annotation=None, error=error_message)
+                )
+        return formatted_outputs

@@ -1,29 +1,3 @@
-
-from typing import TypedDict
-
-from pydantic import BaseModel
-
-
-class AnnotationSchema(BaseModel):
-    """Google API の応答を JSONクラスインスタンスにする
-    Googleの場合
-    example:
-        my_Google_Json_Schema:
-            [Google_Json_Schema(tags=['1girl', 'facing front', ...], captions=['A red-haired or ...', '...'], score=8.75)]
-    """
-    tags: list[str]
-    captions: list[str]
-    score: float
-
-class Responsedict(TypedDict, total=False):
-    response: AnnotationSchema | None
-    error: str | None
-
-class FormattedOutput(BaseModel):
-    annotation: AnnotationSchema | None
-    error: str | None
-
-
 BASE_PROMPT = """As an AI assistant specializing in image analysis, analyze images with particular attention to:
                     Character Details (if present):
 

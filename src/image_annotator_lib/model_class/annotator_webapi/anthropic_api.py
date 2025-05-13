@@ -4,16 +4,10 @@ import anthropic
 
 from ...core.base import WebApiBaseAnnotator
 from ...core.config import config_registry
+from ...core.types import AnnotationSchema, RawOutput
 from ...core.utils import logger
 from ...exceptions.errors import ModelNotFoundError, WebApiError
-from .webapi_shared import (
-    BASE_PROMPT,
-    JSON_SCHEMA,
-    SYSTEM_PROMPT,
-    AnnotationSchema,
-    FormattedOutput,
-    Responsedict,
-)
+from .webapi_shared import BASE_PROMPT, JSON_SCHEMA, SYSTEM_PROMPT
 
 
 class AnthropicApiAnnotator(WebApiBaseAnnotator):
@@ -28,7 +22,7 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator):
         super().__init__(model_name)
 
     @override
-    def _run_inference(self, processed_images: list[str] | list[bytes]) -> list[Responsedict]:
+    def _run_inference(self, processed_images: list[str] | list[bytes]) -> list[RawOutput]:
         """Anthropic API を使用して推論を実行する"""
         if not all(isinstance(item, str) for item in processed_images):
             logger.error("AnthropicApiAnnotator received non-string input for _run_inference")
@@ -44,7 +38,7 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator):
 
         logger.debug(f"Anthropic API 呼び出しに使用するモデルID: {self.api_model_id}")
 
-        results: list[Responsedict] = []
+        results: list[RawOutput] = []
         for base64_image in processed_images_str:
             try:
                 self._wait_for_rate_limit()
@@ -116,24 +110,3 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator):
                 logger.error(f"Anthropic API unknown error: {e}")
                 results.append({"response": None, "error": f"Anthropic API unknown error: {e}"})
         return results
-
-    def _format_predictions(self, raw_outputs: list[Responsedict]) -> list[FormattedOutput]:
-        """Anthropic API からの応答をフォーマットする"""
-        formatted_outputs: list[FormattedOutput] = []
-        for output in raw_outputs:
-            error = output.get("error")
-            if error:
-                formatted_outputs.append(FormattedOutput(annotation=None, error=error))
-                continue
-
-            response_val = output.get("response")
-            # AnnotationSchema型ならそのまま
-            if isinstance(response_val, AnnotationSchema):
-                formatted_outputs.append(FormattedOutput(annotation=response_val, error=None))
-                continue
-
-            # それ以外は従来通り
-            formatted_outputs.append(
-                FormattedOutput(annotation=None, error=f"Invalid response type: {type(response_val)}")
-            )
-        return formatted_outputs

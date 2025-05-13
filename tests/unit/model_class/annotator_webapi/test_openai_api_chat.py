@@ -3,8 +3,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from openai import OpenAI
 
+from image_annotator_lib.core.types import AnnotationSchema
 from image_annotator_lib.model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
-from image_annotator_lib.model_class.annotator_webapi.webapi_shared import AnnotationSchema, FormattedOutput
 
 DUMMY_BASE64 = "dGVzdGltYWdlYmFzZTY0"
 DUMMY_MODEL = "test-model"
@@ -94,27 +94,3 @@ def test_run_inference_api_error(annotator):
     results = annotator._run_inference([DUMMY_BASE64])
     assert results[0]["response"] is None
     assert "Unexpected error" in results[0]["error"]
-
-def test_format_predictions_success():
-    output = [{"response": AnnotationSchema(tags=["cat"], captions=["A cat"], score=1.0), "error": None}]
-    annotator = OpenRouterApiAnnotator(DUMMY_MODEL)
-    formatted = annotator._format_predictions(output)  # type: ignore[arg-type]
-    assert isinstance(formatted[0], FormattedOutput)
-    assert formatted[0].annotation is not None
-    assert formatted[0].annotation.tags == ["cat"]
-    assert formatted[0].error is None
-
-def test_format_predictions_type_error():
-    output = [{"response": "not_schema", "error": None}]
-    annotator = OpenRouterApiAnnotator(DUMMY_MODEL)
-    formatted = annotator._format_predictions(output)  # type: ignore[arg-type]
-    assert formatted[0].annotation is None
-    assert formatted[0].error is not None
-    assert "Invalid response type" in formatted[0].error
-
-def test_format_predictions_error():
-    output = [{"response": None, "error": "some error"}]
-    annotator = OpenRouterApiAnnotator(DUMMY_MODEL)
-    formatted = annotator._format_predictions(output)  # type: ignore[arg-type]
-    assert formatted[0].annotation is None
-    assert formatted[0].error == "some error"

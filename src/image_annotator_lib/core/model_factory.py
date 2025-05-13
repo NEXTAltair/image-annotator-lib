@@ -9,12 +9,12 @@ import dotenv
 import onnxruntime as ort
 import psutil
 import tensorflow as tf
-from tensorflow import keras # Keras のインポートを追加
 import torch
 import torch.nn as nn
 from anthropic import Anthropic
 from google import genai
 from openai import OpenAI
+from tensorflow import keras  # Keras のインポートを追加
 from transformers.models.auto.modeling_auto import AutoModelForVision2Seq
 from transformers.models.auto.processing_auto import AutoProcessor
 from transformers.models.clip import CLIPModel, CLIPProcessor
@@ -29,6 +29,7 @@ from ..exceptions.errors import (
 )
 from . import config, utils
 from .config import config_registry
+from .types import WebApiComponents
 from .utils import logger
 
 
@@ -58,14 +59,6 @@ class CLIPComponents(TypedDict):
     clip_model: CLIPModel
 
 
-class WebApiComponents(TypedDict):
-    """Web API アノテーターが `__enter__` で準備するコンポーネント。"""
-
-    client: Any  # 各プロバイダーのAPIクライアント (型は異なる)
-    api_model_id: str  # APIコールに使用する加工済みモデルID
-    provider_name: str  # プロバイダー名を追加
-
-
 # Union type for all possible loader component results
 LoaderComponents = Union[  # noqa: UP007
     TransformersComponents,
@@ -73,7 +66,6 @@ LoaderComponents = Union[  # noqa: UP007
     ONNXComponents,
     TensorFlowComponents,
     CLIPComponents,
-    WebApiComponents,
 ]
 
 # --- Web API Component Preparation ---

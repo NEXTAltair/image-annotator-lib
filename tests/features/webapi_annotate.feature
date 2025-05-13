@@ -19,13 +19,12 @@ Feature: WebAPIアノテーターによる画像アノテーション
             | Google     | Gemini 2.5 Pro Preview              |
             | OpenAI     | GPT-4.1 Mini                        |
             | Anthropic  | Claude 3 Haiku (self-moderated)     |
-            | OpenRouter | Gemini 2.5 Flash Preview (thinking) |
+            | OpenRouter | Qwen2.5 VL 72B Instruct             |
 
-    Scenario: APIキーが未設定の場合は適切なエラーを返す
+    Scenario: APIキーが未設定の場合は認証エラーが発生する
         Given APIキーが未設定の状態になっている
         When 画像を指定してアノテーションを実行する
-        Then APIキー未設定のエラーメッセージが返される
-        And 結果のタグリストは空である
+        Then "ApiAuthenticationError" のエラーメッセージが返される
 
     Scenario: APIリクエストがタイムアウトした場合は適切なエラーを返す
         Given APIがタイムアウトするよう設定されている

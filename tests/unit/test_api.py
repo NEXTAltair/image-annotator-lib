@@ -5,12 +5,10 @@ import pytest
 from image_annotator_lib import api
 
 # Import the real classes for the registry
-from image_annotator_lib.model_class.annotator_webapi import (
-    AnthropicApiAnnotator,
-    GoogleApiAnnotator,
-    OpenAIApiAnnotator,
-    OpenRouterApiAnnotator,
-)
+from image_annotator_lib.model_class.annotator_webapi.anthropic_api import AnthropicApiAnnotator
+from image_annotator_lib.model_class.annotator_webapi.google_api import GoogleApiAnnotator
+from image_annotator_lib.model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
+from image_annotator_lib.model_class.annotator_webapi.openai_api_response import OpenAIApiAnnotator
 from image_annotator_lib.model_class.tagger_onnx import WDTagger
 
 # --- Mock Data ---

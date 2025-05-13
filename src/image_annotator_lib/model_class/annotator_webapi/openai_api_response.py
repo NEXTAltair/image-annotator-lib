@@ -2,21 +2,19 @@ from typing import cast, override
 
 import openai
 from openai import APIConnectionError
-from openai.types.chat import (
-    ChatCompletionContentPartImageParam,
-    ChatCompletionContentPartTextParam,
-    ChatCompletionSystemMessageParam,
-    ChatCompletionUserMessageParam,
-)
+from pydantic import ValidationError
 
 from image_annotator_lib.exceptions.errors import WebApiError
 
-from ...core.base import WebApiAnnotationOutput, WebApiBaseAnnotator
-from .webapi_shared import BASE_PROMPT, SYSTEM_PROMPT, AnnotationSchema, Responsedict
+from ...core.base import WebApiBaseAnnotator
+from ...core.config import config_registry
+from ...core.types import AnnotationSchema, RawOutput
+from ...core.utils import logger
+from .webapi_shared import BASE_PROMPT, SYSTEM_PROMPT
 
 
 class OpenAIApiAnnotator(WebApiBaseAnnotator):
-    """OpenAI API の `client.responses.parse` を使用するアノテーター"""
+    """OpenAI API の `client.responses.create` (`parse`) を使用するアノテーター"""
 
     # Pydanticモデルの定義
     # OpenAI SDKの `client.responses.parse` を使用し、構造化された出力を得るために定義。
@@ -33,66 +31,88 @@ class OpenAIApiAnnotator(WebApiBaseAnnotator):
         super().__init__(model_name)
 
     @override
-    def _run_inference(self, processed: list[str] | list[bytes]) -> list[Responsedict]:
+    def _run_inference(self, processed: list[str] | list[bytes]) -> list[RawOutput]:
         """OpenAI APIを使用して推論を実行し、構造化された応答を取得します。"""
-        # processed は base64エンコードされた画像の文字列のリスト
         if not all(isinstance(item, str) for item in processed):
             raise WebApiError(
                 "OpenAIApiAnnotator expects a list of base64 encoded image strings."
             )
         processed_str = cast(list[str], processed)
 
-        results: list[Responsedict] = []
+        if self.client is None or self.api_model_id is None:
+            raise WebApiError(
+                "API クライアントまたはモデル ID が初期化されていません"
+            )
+        if not isinstance(self.client, openai.OpenAI):
+             raise WebApiError(f"Invalid client type: {type(self.client)}. Expected openai.OpenAI.")
+
+        # config_registry から直接取得する
+        max_output_tokens = config_registry.get(self.model_name, "max_output_tokens", default=2000)
+        temperature = config_registry.get(self.model_name, "temperature", default=0.7)
+
+        results: list[RawOutput] = []
         for image_data_base64 in processed_str:
+            annotation = None
+            error = None
             try:
                 self._wait_for_rate_limit()
-                messages = [
-                    ChatCompletionSystemMessageParam(role="system", content=SYSTEM_PROMPT),
-                    ChatCompletionUserMessageParam(
-                        role="user",
-                        content=[
-                            ChatCompletionContentPartTextParam(type="text", text=BASE_PROMPT),
-                            ChatCompletionContentPartImageParam(
-                                type="image_url",
-                                image_url={
-                                    "url": f"data:image/jpeg;base64,{image_data_base64}",
-                                    "detail": "auto"
-                                },
-                            ),
-                        ],
-                    ),
-                ]
-                response = self.client.responses.create(
-                    model=self.api_model_id,
-                    input=messages,
-                    text_format=AnnotationSchema,
-                    max_output_tokens=self.config.get("max_output_tokens", 2000),
-                    temperature=float(self.config.get("temperature", 0.7)),
-                )
-                results.append(Responsedict(response=response.output_parsed, error=None))
-            except (APIConnectionError, openai.APIError) as e:
-                results.append(Responsedict(response=None, error=str(e)))
-            except Exception as e:
-                results.append(Responsedict(response=None, error=f"Unexpected error: {e}"))
-        return results
 
-    @override
-    def _format_predictions(self, raw_outputs: list[Responsedict]) -> list[WebApiAnnotationOutput]:
-        """OpenAI APIからの応答を標準形式にフォーマットします。"""
-        formatted_results: list[WebApiAnnotationOutput] = []
-        for output in raw_outputs:
-            error = output.get("error")
-            if error:
-                formatted_results.append(WebApiAnnotationOutput(annotation=None, error=error))
-                continue
-            parsed = output.get("response")
-            if not isinstance(parsed, AnnotationSchema):
-                formatted_results.append(WebApiAnnotationOutput(annotation=None, error="No response data or invalid type"))
-                continue
-            annotation_data = {
-                "tags": parsed.tags,
-                "caption": parsed.captions[0] if parsed.captions else "",
-                "score": float(parsed.score),
-            }
-            formatted_results.append(WebApiAnnotationOutput(annotation=annotation_data, error=None))
-        return formatted_results
+                # client.responses.parse を使用して構造化レスポンスを取得
+                response = self.client.responses.parse(
+                    model=self.api_model_id,
+                    input=[
+                        {
+                            "role": "system",
+                            "content": [
+                                {"type": "input_text", "text": SYSTEM_PROMPT},
+                            ],
+                        },
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": BASE_PROMPT},
+                                {"type": "input_image", "image_url": f"data:image/jpeg;base64,{image_data_base64}", "detail": "auto"},
+                            ]
+                        }
+                    ],
+                    text_format=AnnotationSchema, # Pydanticモデルを指定
+                    max_output_tokens=max_output_tokens,
+                    temperature=cast(float, temperature),
+                )
+
+                # response.output_parsed から直接 AnnotationSchema を取得
+                # response.refusal など、他の応答タイプも考慮する必要があるかもしれない
+                if hasattr(response, 'output_parsed') and response.output_parsed:
+                    if isinstance(response.output_parsed, AnnotationSchema):
+                         annotation = response.output_parsed
+                    else:
+                         # 稀に output_parsed があっても型が違う場合 (SDKのバグ等)
+                         error = f"OpenAIレスポンスのoutput_parsedが予期せぬ型です: {type(response.output_parsed)}"
+                         logger.warning(error)
+                elif hasattr(response, 'refusal') and response.refusal: # type: ignore
+                     error = f"OpenAIがリクエストを拒否しました: {response.refusal}" # type: ignore
+                     logger.warning(error)
+                elif hasattr(response, 'error') and response.error: # APIレベルのエラー
+                    error = f"OpenAI API Error response: {response.error}"
+                    logger.error(error)
+                else:
+                     # output_parsed も refusal も error もない場合
+                     error = f"OpenAIから予期せぬレスポンス形式: {response.to_dict() if hasattr(response, 'to_dict') else str(response)}"
+                     logger.warning(error)
+
+            except APIConnectionError as e:
+                error = f"OpenAI API Connection Error: {e}"
+                logger.error(error, exc_info=True)
+            except openai.APIError as e: # APIError をキャッチ (RateLimitError などを含む)
+                 error = f"OpenAI API Error: {e}"
+                 logger.error(error, exc_info=True)
+            except ValidationError as ve: # Pydanticのバリデーションエラー
+                 error = f"OpenAIレスポンスのパース/バリデーション失敗 (Pydantic): {ve}\nRaw Response (potential): {response if 'response' in locals() else 'N/A'}"
+                 logger.error(error, exc_info=True)
+            except Exception as e:
+                error = f"OpenAI: Unexpected error during parse: {e}"
+                logger.error(error, exc_info=True)
+
+            results.append(RawOutput(response=annotation, error=error))
+
+        return results
