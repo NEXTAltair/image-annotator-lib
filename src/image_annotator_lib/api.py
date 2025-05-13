@@ -149,35 +149,27 @@ def _process_model_results(
 
 
 def _handle_error(
+    e: Exception,
     model_name: str,
-    error: Exception,
-    num_images: int,
-    results_by_phash: PHashAnnotationResults,
-    phash_map: dict[int, str],
+    image_hash: str,
+    results_dict: dict[str, dict[str, Any]],
+    idx: int,
+    total_models: int,
 ) -> None:
-    """エラー発生時の結果処理を行います。
-
-    Args:
-        model_name: エラーが発生したモデルの名前
-        error: 発生した例外
-        num_images: 処理対象の画像数
-        results_by_phash: pHash をキーとする結果辞書(更新対象)
-        phash_map: インデックスとpHashのマッピング辞書
-    """
-    error_msg = str(error)
-    logger.error(f"モデル '{model_name}' でエラーが発生しました: {error_msg}")
-
-    # エラー結果を各画像の結果に設定
-    for i in range(num_images):
-        phash_key = phash_map.get(i) or f"unknown_image_{i}"
-        if phash_key not in results_by_phash:
-            results_by_phash[phash_key] = {}
-
-        results_by_phash[phash_key][model_name] = {
-            "tags": None,
-            "formatted_output": None,
-            "error": error_msg,
-        }
+    """エラーを処理し、結果辞書に記録する。"""
+    error_type_name = type(e).__name__ # 例外のクラス名を取得
+    error_message = f"{error_type_name}: {e!s} (モデル: {model_name})" # メッセージに含める
+    logger.error(
+        f"モデル '{model_name}' (画像 {idx + 1}/{total_models}) でエラーが発生しました: {e!s}"
+    )
+    if image_hash not in results_dict:
+        results_dict[image_hash] = {}
+    results_dict[image_hash][model_name] = {
+        "error": error_message,
+        "formatted_output": None,
+        "tags": None, # エラー時はNoneまたは空リストを返す
+        # 必要に応じて他のフィールドもエラー時のデフォルト値を設定
+    }
 
 
 def annotate(
@@ -263,7 +255,7 @@ def annotate(
 
         except Exception as e:
             # エラーハンドリング (エラー結果を results_by_phash に設定)
-            _handle_error(model_name, e, len(images_list), results_by_phash, phash_map)
+            _handle_error(e, model_name, "", results_by_phash, 0, len(model_name_list))
 
     logger.info(f"全モデル ({len(model_name_list)}個) の評価完了。画像キー数: {len(results_by_phash)}")
     return results_by_phash
