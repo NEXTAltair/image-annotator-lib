@@ -16,30 +16,30 @@
 ---
 #### OpenRouter API経由でモデルリストを取得する設計とした経緯
 
-- 各API公式（Anthropic, Google, OpenAI等）のモデルリストAPIでは、そのモデルがVisionタスク（画像入力）に対応しているかどうかを直接判別できない。
+- 各API公式(Anthropic, Google, OpenAI等)のモデルリストAPIでは、そのモデルがVisionタスク(画像入力)に対応しているかどうかを直接判別できない。
 - OpenRouter APIは、全モデルに対して`architecture.input_modalities`フィールドを返し、ここに`"image"`が含まれているかでVision対応モデルを機械的に抽出できる。
-- このため、本ライブラリではVisionタスク対応モデルの自動発見・管理はOpenRouter API経由の情報に依存する設計とした。
+- このため、本ライブラリではVisionタスク対応モデルの自動発見･管理はOpenRouter API経由の情報に依存する設計とした。
 ---
 
 ## 3. 方針
 
-1.  **API仕様調査:** 各プロバイダー (Google Generative AI API, OpenAI API, Anthropic API, OpenRouter API) の公式ドキュメントやSDKを調査し、利用可能なモデル一覧を取得するAPIエンドポイント/メソッドとその仕様（認証方法、レスポンス形式など）を確認する。特に、Visionタスクが実行可能なモデルをどのように識別・フィルタリングできるか重点的に調査する。
+1.  **API仕様調査:** 各プロバイダー (Google Generative AI API, OpenAI API, Anthropic API, OpenRouter API) の公式ドキュメントやSDKを調査し、利用可能なモデル一覧を取得するAPIエンドポイント/メソッドとその仕様(認証方法、レスポンス形式など)を確認する。特に、Visionタスクが実行可能なモデルをどのように識別･フィルタリングできるか重点的に調査する。
 2.  **実装場所:** モデル一覧取得ロジックを `src/image_annotator_lib/core/api_model_discovery.py` 内に実装する。(新規作成)
-3.  **処理実装:** 上記ファイル内に、OpenRouter API を呼び出してモデル一覧を取得し、Vision モデルをフィルタリングする関数を実装する。適切なエラーハンドリング（ネットワークエラー、API エラー、レスポンス形式変更など）も行う。**エラーハンドリングには `src/image_annotator_lib/exceptions/errors.py` で定義された適切な例外クラス (`WebApiError` のサブクラスなど) を使用すること。**
+3.  **処理実装:** 上記ファイル内に、OpenRouter API を呼び出してモデル一覧を取得し、Vision モデルをフィルタリングする関数を実装する。適切なエラーハンドリング(ネットワークエラー、API エラー、レスポンス形式変更など)も行う。**エラーハンドリングには `src/image_annotator_lib/exceptions/errors.py` で定義された適切な例外クラス (`WebApiError` のサブクラスなど) を使用すること。**
 4.  **外部公開関数の実装:** 引数を取らず、モデル取得を試みる公開関数 `discover_available_vision_models() -> dict[str, list[str] | str]` を実装する。戻り値は辞書で、キーは成功時は `"models"` (値はモデルIDのリスト)、失敗時は `"error"` (値はエラーメッセージ文字列) とする。この関数を `src/image_annotator_lib/__init__.py` 等で公開する。
 5.  **キャッシュ/更新戦略 & TOML 保存:**
     *   **関数呼び出し時:** `discover_available_vision_models` 呼び出し時、`force_refresh=False` の場合は、まず `available_api_models.toml` ファイルを `load_available_api_models` で読み込む。ファイルが存在し内容があれば、その情報を基に結果を返す。
     *   **API 取得 (`force_refresh=True` 時):** `force_refresh=True` が指定された場合は、ローカルの `available_api_models.toml` ファイルの存在や内容に関わらず、**常に** OpenRouter API から最新のモデルリストを取得する。
-    *   **API 取得 (`force_refresh=False` 時):** `force_refresh=False` で、かつ `load_available_api_models` が空の結果を返した場合（ファイルが存在しない、または空の場合）も、OpenRouter API から最新のモデルリストを取得する。
+    *   **API 取得 (`force_refresh=False` 時):** `force_refresh=False` で、かつ `load_available_api_models` が空の結果を返した場合(ファイルが存在しない、または空の場合)も、OpenRouter API から最新のモデルリストを取得する。
     *   **TOML 保存:** API から取得成功した場合、取得した Vision モデル情報を整形し (詳細は Point 8 を参照)、`src/image_annotator_lib/core/config.py` の `save_available_api_models` 関数を使用して `available_api_models.toml` ファイルに保存する。既存の TOML データ (`config.py` の `load_available_api_models` で読み込み) と比較し、`last_seen` の更新と、API から取得できなくなったモデルへの `deprecated_on` の追加を行う。
     *   **エラー発生時の対応:** API 呼び出しや TOML 読み書きに失敗した場合、TOML ファイルは更新しない。エラー情報を関数の戻り値で返す。
-    *   **再取得不要:** 実行中の動的な再取得は行わない（関数の再呼び出しまでは TOML ファイルの内容が基になる）。
+    *   **再取得不要:** 実行中の動的な再取得は行わない(関数の再呼び出しまでは TOML ファイルの内容が基になる)。
 6.  **(任意) 既存コードへの統合:** 必要に応じて、既存のアノテータークラス (`GoogleApiAnnotator` など) やUI部分で、新しい `available_api_models.toml` ファイルまたは `discover_available_vision_models` 関数の結果を利用するように修正する (今回のスコープとするか要検討)。
 7.  **設定ファイルの扱い:**
     *   `annotator_config.toml` (プロジェクトルート下 `config/`): ライブラリの基本的な設定ファイル。
-        *   **初回生成:** このファイルがプロジェクトの `config/` ディレクトリに存在しない場合、`config.py` の `ModelConfigRegistry.load` が初回に呼び出された際に、パッケージ同梱のテンプレート (`src/.../annotator_config.toml`) から**自動的にコピー・生成される**。
+        *   **初回生成:** このファイルがプロジェクトの `config/` ディレクトリに存在しない場合、`config.py` の `ModelConfigRegistry.load` が初回に呼び出された際に、パッケージ同梱のテンプレート (`src/.../annotator_config.toml`) から**自動的にコピー･生成される**。
         *   **理由:** `importlib.resources` で取得されるパッケージ内リソースパスは、インストール環境での書き込みが保証されないため、ユーザーが書き込み可能なプロジェクトルート下に設定ファイルを配置する必要がある。
-    *   `available_api_models.toml` (プロジェクトルート下 `config/`): 動的に取得・更新されるモデル情報は、このファイルに保存・管理される。
+    *   `available_api_models.toml` (プロジェクトルート下 `config/`): 動的に取得･更新されるモデル情報は、このファイルに保存･管理される。
         *   **初回生成:** このファイルが存在しない場合、`config.py` の `load_available_api_models` または `save_available_api_models` が初回に呼び出された際に**自動的に空ファイルまたはディレクトリが生成される**。
         *   **理由:** `annotator_config.toml` と同様の理由で、ユーザーが書き込み可能なプロジェクトルート下に配置する。
 8.  **TOML 保存詳細 (`available_api_models.toml`):**
@@ -63,7 +63,7 @@
 ## 4. 非目標 (スコープ外)
 
 *   モデル一覧取得以外のAPI機能の追加。
-*   アノテータークラスの初期化ロジックの大幅な変更（今回のスコープではモデル取得関数の提供を主とし、統合は別途検討する）。
+*   アノテータークラスの初期化ロジックの大幅な変更(今回のスコープではモデル取得関数の提供を主とし、統合は別途検討する)。
 
 ## 5. 実装フェーズとタスクチェックリスト
 
@@ -72,7 +72,7 @@
     *   [X] Visionモデルの具体的なフィルタリング基準の決定 (API情報 or キーワード)。
         *   **全てのプロバイダー共通:** OpenRouter API からモデルリストを取得後、`architecture.input_modalities` リストに `"image"` が含まれているモデルを抽出する。
     *   [X] `discover_available_vision_models` 関数の詳細設計 (エラーハンドリング詳細、戻り値の型確定)。
-    *   [X] `available_api_models.toml` の扱い方針最終決定 (動的取得・更新用の新規ファイルとしてプロジェクトルート下の `config` ディレクトリに作成・管理する)。
+    *   [X] `available_api_models.toml` の扱い方針最終決定 (動的取得･更新用の新規ファイルとしてプロジェクトルート下の `config` ディレクトリに作成･管理する)。
 *   **フェーズ 2: 実装**
     *   [X] `constants.py` で `SYSTEM_CONFIG_PATH` もプロジェクトルート下の `config/` を指すように変更。
     *   [X] `constants.py` にプロジェクトルート下の `config/available_api_models.toml` へのパス定義を追加。
@@ -110,7 +110,7 @@
     *   **対策:** エラーハンドリングを堅牢にし、APIエラー発生時はログ出力や空リスト返却などで対応。定期的な動作確認。
 *   **リスク2:** Visionモデルの識別方法がプロバイダーによって異なる、または不明確。
     *   **対策:** OpenRouter API の `architecture.input_modalities` を使用する。
-*   **リスク4:** OpenRouterのようなプロキシAPIの場合、モデルの能力（Vision対応か）をOpenRouter API自身が提供していない可能性。
+*   **リスク4:** OpenRouterのようなプロキシAPIの場合、モデルの能力(Vision対応か)をOpenRouter API自身が提供していない可能性。
     *   **対策:** `architecture.input_modalities` を確認済み。
 
 ## 7. 検討事項 (仕様確定待ち)

@@ -10,7 +10,7 @@
     - 全ファイル操作(read_file, write_to_file等)は原則本ディレクトリからの相対パス指定。
     - ユーザー設定ファイルは `config/annotator_config.toml` に配置推奨。
 - **`image-annotator-lib` パッケージソースルート:** `src/image_annotator_lib`
-    - ライブラリ内部モジュール参照・編集時の基点。
+    - ライブラリ内部モジュール参照･編集時の基点。
     - 例: `src/image_annotator_lib/core/base.py`
 - **システム設定ファイル:** `src/image_annotator_lib/resources/system/annotator_config.toml`
 - **共通型定義ファイル:** `src/image_annotator_lib/core/types.py` (2025-08-07 追加)
@@ -168,7 +168,7 @@ graph TD
     - **`Any` 回避:** `Any` 型の使用は最小限に留め、可能な限り具体的な型を指定。
     - **オーバーライド:** 親クラスメソッドをオーバーライドする際は `@override` デコレーターを使用。
     - **エラー抑制禁止:** Mypy/Ruff のエラーや警告は `# type: ignore` や `# noqa` で抑制せず、根本的な解決を目指す。
-- **半角文字:** コード、コメント、ドキュメント内では、**絶対に全角英数字・全角記号を使用しないこと**。
+- **半角文字:** コード、コメント、ドキュメント内では、**絶対に全角英数字･全角記号を使用しないこと**。
 - **カプセル化:**
     - 他クラスの内部変数 (`_` 始まり) への直接アクセスは禁止。
     - Tell, Don't Ask の原則に従う。
@@ -179,18 +179,18 @@ graph TD
 
 ## 3. 主要技術決定 (履歴)
 
-以下はプロジェクト開発中主要技術決定記録。詳細背景・理由は `.cursor/rules/lessons-learned.mdc` や関連コミットログ参照。
+以下はプロジェクト開発中主要技術決定記録。詳細背景･理由は `.cursor/rules/lessons-learned.mdc` や関連コミットログ参照。
 
 - **ログ出力多重化問題修正 (2025-04-19):**
     - `core/utils.py` logger 初期化処理複数回実行問題修正。`init_logger` 関数分離、`__init__.py` で一度のみ呼出変更。
-- **レジストリ・logger初期化明示化 (2025-04-19):**
+- **レジストリ･logger初期化明示化 (2025-04-19):**
     - `core/registry.py` import 時自動初期化(ログ出力、`register_annotators()` 呼出)廃止。初期化はエントリーポイント等で明示実行設計変更、import 時副作用排除。
 - **CUDA非対応環境CPUフォールバック実装 (2025-04-19):**
     - `core/utils.py` に `determine_effective_device` 関数追加、環境応じ利用可能デバイス(`cuda` or `cpu`)判定。CUDA 利用不可でも CPU 動作可能モデルは自動フォールバック修正。
 - **`annotator_config.toml` キー設計維持決定 (2024-07-28):**
-    - Web API モデル設定セクションキーとして、可読性・実装シンプルさから `model_name_short` (例: `"Gemini 1.5 Pro"`) 維持決定。プレフィックス除去済 ID (例: `"gemini-pro-1.5"`) 不採用。
+    - Web API モデル設定セクションキーとして、可読性･実装シンプルさから `model_name_short` (例: `"Gemini 1.5 Pro"`) 維持決定。プレフィックス除去済 ID (例: `"gemini-pro-1.5"`) 不採用。
 - **Web API アノテーター初期化フロー変更 (2024-07-28):**
-    - Web API アノテーター `__init__` は `model_name` のみ受取統一。API コール使用最終モデル ID (`api_model_id`) 解決・加工は `__enter__` メソッド内実行変更。
+    - Web API アノテーター `__init__` は `model_name` のみ受取統一。API コール使用最終モデル ID (`api_model_id`) 解決･加工は `__enter__` メソッド内実行変更。
 - **レジストリ機能テストにおける設定ファイル扱いの変更 (2025-05-07):**
     - BDDテスト (`tests/features/registry.feature`) において、当初検討された設定ファイルのモック化は、ライブラリ初期化時の挙動との兼ね合いでテストコードが複雑化する懸念があった。
     - テストのシンプルさと実環境への近さを優先し、原則として実際の設定ファイル (`annotator_config.toml`) を直接読み込んでテストする方針に変更。
@@ -218,7 +218,7 @@ graph TD
     - `webapi_annotate_steps.py` でのロガー取得方法を標準の `logging.getLogger()` に統一し、型不整合エラーを解消。
 
 
-## WebAPIアノテーターの設定反映・テスト安定化に関する修正(2025-08-xx)
+## WebAPIアノテーターの設定反映･テスト安定化に関する修正(2025-08-xx)
 
 - **背景**:
   WebAPI系アノテーターのテストで「API model ID not set」等のエラーが頻発。原因は、テスト用TOMLの内容が`config_registry`に反映されていない、またはアノテーター初期化時に設定取得が不十分なため。
@@ -231,14 +231,14 @@ graph TD
 
 - **今後の注意点**:
   - テスト用TOMLを編集した場合は、必ず`config_registry.load()`で再読込すること。
-  - モデル名・API ID・provider名の一貫性に注意。
-  - レスポンスの型・属性は公式ドキュメントで都度確認すること。
+  - モデル名･API ID･provider名の一貫性に注意。
+  - レスポンスの型･属性は公式ドキュメントで都度確認すること。
 
 ## 4. 新モデル追加方法
 
 本セクションでは、新しい画像アノテーションモデル(従来のMLモデル、Web APIベースモデルを含む)を `image-annotator-lib` に追加する手順を説明します。
 
-### 4.1 アーキテクチャ・クラス階層理解
+### 4.1 アーキテクチャ･クラス階層理解
 
 ライブラリは、コードの重複を最小限に抑えつつ、多様なアノテーターを管理するために、3層のクラス階層を採用しています。詳細は `docs/architecture.md` を参照してください。
 
@@ -321,22 +321,22 @@ print(available)
 **【現状のテスト戦略 (2025-05-10 更新)】**
 
 -   **BDDテスト:** 現在、BDDのステップ定義ファイル (`tests/features/step_definitions/` 配下) および関連する `conftest.py` の記述は一時的に削除されています。Featureファイル (`*.feature`) のみ将来の再実装を見越して残存しています。
-    -   **今後の再実装方針:** BDDテストは、システムの振る舞いを検証する統合テストとして位置づけ、原則としてモック・ダミー・スタブ等は使用せずに実装します。
+    -   **今後の再実装方針:** BDDテストは、システムの振る舞いを検証する統合テストとして位置づけ、原則としてモック･ダミー･スタブ等は使用せずに実装します。
 -   **ユニットテスト/インテグレーションテスト:** `pytest` を用いて実行します。こちらが現在の主要なテスト手段となります。
     -   実行コマンド: `uv run pytest`
     -   カバレッジ測定: `uv run pytest --cov=src/image_annotator_lib tests/ --cov-report=xml` (結果は `coverage.xml` に出力)
 
 ---
 
-(以降、過去のBDDテスト運用・改善経緯は参考情報として残す)
+(以降、過去のBDDテスト運用･改善経緯は参考情報として残す)
 
-## API/SDK実装・修正時の参照・根拠記録ルール
+## API/SDK実装･修正時の参照･根拠記録ルール
 
-- 公式ドキュメント(バージョン・URL)を必ず明記
-- 参照した外部記事・サンプルコード・Q&A等もURL・日付付きで記録
-- 参照内容の要点・注意点・バージョン差異も簡潔にまとめる
+- 公式ドキュメント(バージョン･URL)を必ず明記
+- 参照した外部記事･サンプルコード･Q&A等もURL･日付付きで記録
+- 参照内容の要点･注意点･バージョン差異も簡潔にまとめる
 - 「AIの推測のみでのAPI実装は絶対に禁止」
-- ルール違反が発覚した場合、該当修正は即時ロールバック・再実装とする
+- ルール違反が発覚した場合、該当修正は即時ロールバック･再実装とする
 
 - **OpenAI API `client.responses.parse` の利用 (2025-05-09頃):**
     - `OpenAIApiAnnotator` において、OpenAI SDK v1.x以降の `client.responses.parse` メソッドを利用して構造化されたJSON出力を得るように修正。
@@ -385,43 +385,43 @@ print(available)
 
 ## 変更理由
 - 外部API(Gemini)のレスポンスが常にスキーマ通りとは限らず、バリデーション失敗や不正データも考慮する必要があるため。
-- エラー情報と正常レスポンスを一元管理し、利用側での分岐・例外処理を簡潔にするため。
+- エラー情報と正常レスポンスを一元管理し、利用側での分岐･例外処理を簡潔にするため。
 - 型の重複(WebApiFormattedOutput/Responsedict)を排除し、全体の設計をシンプルに保つため。
 
 ## 影響範囲
-- `google_api.py` の推論・フォーマット処理
+- `google_api.py` の推論･フォーマット処理
 - テストコード
 - 型定義の整理
 
 ## 参照ルール
-- @implement.mdc, @memory.mdc の設計原則・型設計方針に準拠
+- @implement.mdc, @memory.mdc の設計原則･型設計方針に準拠
 
 ## 参照日
 - 2025-05-10
 
 # 変更履歴(2025-05-10)
 
-## annotator_webapi.py から OpenAIApiAnnotator・AnthropicApiAnnotator 分離の技術的詳細
-- OpenAI/Anthropic で画像入力・構造化出力の型仕様が異なるため、共通部分(AnnotationSchema, JSON_SCHEMA等)は webapi_shared.py に集約し、API固有部分は各ファイルで管理。
-- OpenAI: image_urlはstr型ではなくdict型({"url": ..., "detail": ...})で渡す必要がある。公式SDK型定義・ドキュメントを参照し、型エラー(ImageURL型)を解消。
+## annotator_webapi.py から OpenAIApiAnnotator･AnthropicApiAnnotator 分離の技術的詳細
+- OpenAI/Anthropic で画像入力･構造化出力の型仕様が異なるため、共通部分(AnnotationSchema, JSON_SCHEMA等)は webapi_shared.py に集約し、API固有部分は各ファイルで管理。
+- OpenAI: image_urlはstr型ではなくdict型({"url": ..., "detail": ...})で渡す必要がある。公式SDK型定義･ドキュメントを参照し、型エラー(ImageURL型)を解消。
 - Anthropic: ToolUseBlock型のinput属性からdictを抽出し、AnnotationSchemaへ変換。APIレスポンスの型判定はtype(obj).__name__ == "ToolUseBlock"で厳密化。
-- テスト用ダミークラスのクラス名・型判定ロジックを実装と一致させることで、テストの信頼性を担保。
-- 共通スキーマ(AnnotationSchema)を全APIで利用し、型の重複・分岐処理の煩雑化を排除。
+- テスト用ダミークラスのクラス名･型判定ロジックを実装と一致させることで、テストの信頼性を担保。
+- 共通スキーマ(AnnotationSchema)を全APIで利用し、型の重複･分岐処理の煩雑化を排除。
 - エラーハンドリングはSDK公式例外のみcatchし、冗長なtry/exceptや独自ラップを削除。
 
-## annotator_webapi.py 分割・移動(2025-xx-xx)
+## annotator_webapi.py 分割･移動(2025-xx-xx)
 - 旧: 全WebAPIアノテーターを `annotator_webapi.py` で一括管理
 - 新: `model_class/annotator_webapi/` ディレクトリ配下にAPIごと(`openai_api.py`, `google_api.py`, `anthropic_api.py` など)で分割
-- 共通型・スキーマは `webapi_shared.py` へ
-- 理由: APIごとの仕様差・型定義の違い、保守性・拡張性向上のため
-- 設計意図: 各APIの独立性を高め、今後の追加・修正・テスト容易化を図るため
+- 共通型･スキーマは `webapi_shared.py` へ
+- 理由: APIごとの仕様差･型定義の違い、保守性･拡張性向上のため
+- 設計意図: 各APIの独立性を高め、今後の追加･修正･テスト容易化を図るため
 
 ---
 
 ## 7. 型管理と静的解析
 
 ### 7.1. 型ヒント
-- **基本方針**: すべての関数・メソッドの引数と戻り値に、可能な限り具体的な型ヒントを付与する (PEP 484)。
+- **基本方針**: すべての関数･メソッドの引数と戻り値に、可能な限り具体的な型ヒントを付与する (PEP 484)。
 - **モダンな型**: `typing.List` や `typing.Dict` ではなく、Python 3.9+ の組み込み型 (`list`, `dict`) や `collections.abc` の型を使用する。`Optional[X]` ではなく `X | None` を使用する。
 - **複雑な型**: 複雑な辞書構造には `TypedDict` を活用する。
 - **オーバーライド**: 親クラスメソッドのオーバーライド時には `@override` デコレーターを使用する。

@@ -150,7 +150,7 @@ flowchart TD
 
 ## 2. ディレクトリ構成ルール (AI向け指示)
 
-本ドキュメントは、`image-annotator-lib` ライブラリと `tests` ディレクトリの内部構成に関するルールを定義する。AI はファイルやディレクトリを作成・移動する際に、以下の指示に従うこと。
+本ドキュメントは、`image-annotator-lib` ライブラリと `tests` ディレクトリの内部構成に関するルールを定義する。AI はファイルやディレクトリを作成･移動する際に、以下の指示に従うこと。
 
 ### 2.1. 基本ルール
 
@@ -163,7 +163,7 @@ flowchart TD
 - **`core/`**: モデル読み込み、ベースクラス、共通ユーティリティ、共通型定義 (`types.py`) など、ライブラリの中核となるコンポーネントを配置する。
 - **`exceptions/`**: ライブラリ固有の例外クラスを定義する。
 - **`model_class/`**: 各アノテーター(例: スコアラー、タガー)の具体的な実装クラスを配置する。
-    - **`annotator_webapi/`**: Web API系アノテーターはAPIごとに分割実装（`openai_api.py`, `google_api.py`, `anthropic_api.py` など）。共通ロジックは `webapi_shared.py` に集約。APIごとの独立性・保守性・拡張性・テスト容易化のため。
+    - **`annotator_webapi/`**: Web API系アノテーターはAPIごとに分割実装(`openai_api.py`, `google_api.py`, `anthropic_api.py` など)。共通ロジックは `webapi_shared.py` に集約。APIごとの独立性･保守性･拡張性･テスト容易化のため。
 - **`resources/system/`**: システムデフォルトの設定ファイルなどを配置する。
 - **`__init__.py`**: 主要なクラスや関数を公開するためのエントリーポイント。
 - **`api.py`**: ユーザー向けの高レベルAPI関数 (`annotate` など) を配置する。

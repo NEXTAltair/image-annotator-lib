@@ -1,11 +1,11 @@
 # Image Annotator Lib
 
-`image-annotator-lib` は、様々な画像アノテーションモデル（タガー、スコアラーなど）を統一されたインターフェースで利用するための Python ライブラリです。`scorer_wrapper_lib` と `tagger_wrapper_lib` を統合し、コードの重複削減、API の統一、メンテナンス性の向上、機能拡張の容易化を目指しています。
+`image-annotator-lib` は、様々な画像アノテーションモデル(タガー、スコアラーなど)を統一されたインターフェースで利用するための Python ライブラリです。`scorer_wrapper_lib` と `tagger_wrapper_lib` を統合し、コードの重複削減、API の統一、メンテナンス性の向上、機能拡張の容易化を目指しています。
 
 ## 主な機能
 
 - 複数の画像タギングモデルと画像スコアリングモデルをサポート
-- 統一された API (`annotate`) による複数モデル・複数画像の一括処理
+- 統一された API (`annotate`) による複数モデル･複数画像の一括処理
 - pHash に基づく画像と結果の紐付け
 - 設定ファイル (`annotator_config.toml`) によるモデル選択と設定
 - メモリ使用量に基づく効率的なモデルキャッシュ管理 (LRU, CPU 退避/CUDA 復元)
@@ -209,7 +209,7 @@ for phash, model_results in multi_results.items():
 
 ### 7. エラーハンドリング
 
-モデル実行中のエラー（モデルロード失敗、推論エラーなど）は、特定モデル・画像の `error` キーの下にある結果辞書内に捕捉されます。`annotate` 関数自体は、個々のモデルの失敗に対して通常は例外を発生させず、部分的な結果を返すことができます。
+モデル実行中のエラー(モデルロード失敗、推論エラーなど)は、特定モデル･画像の `error` キーの下にある結果辞書内に捕捉されます。`annotate` 関数自体は、個々のモデルの失敗に対して通常は例外を発生させず、部分的な結果を返すことができます。
 
 ```python
 # エラーチェックの例
@@ -226,7 +226,7 @@ for phash, model_results in results.items():
 
 -   [**製品要求仕様書 (Product Requirement Document)**](./docs/product_requirement_docs.md): プロジェクトの目標、対象ユーザー、主要機能など。
 -   [**システムアーキテクチャ (System Architecture)**](./docs/architecture.md): ライブラリの構造、主要コンポーネント、ワークフロー、設計決定など。
--   [**技術仕様書 (Technical Specifications)**](./docs/technical.md): 開発環境、技術スタック、依存関係、コーディング規約、モデル追加・テスト・ロギング手順など。
+-   [**技術仕様書 (Technical Specifications)**](./docs/technical.md): 開発環境、技術スタック、依存関係、コーディング規約、モデル追加･テスト･ロギング手順など。
 
 (古いドキュメントへのリンクは削除されました。)
 テスト完了

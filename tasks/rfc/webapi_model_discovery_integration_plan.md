@@ -2,13 +2,13 @@
 
 ## 1. 目的
 
-`discover_available_vision_models` 関数によって動的に取得・更新される利用可能な Web API モデルの情報 (`available_api_models.toml`) を、`image-annotator-lib` の Web API ベースのアノテータークラス (`GoogleApiAnnotator`, `OpenAIApiAnnotator`, `AnthropicApiAnnotator`, `OpenRouterApiAnnotator`) の初期化プロセスに統合する。
+`discover_available_vision_models` 関数によって動的に取得･更新される利用可能な Web API モデルの情報 (`available_api_models.toml`) を、`image-annotator-lib` の Web API ベースのアノテータークラス (`GoogleApiAnnotator`, `OpenAIApiAnnotator`, `AnthropicApiAnnotator`, `OpenRouterApiAnnotator`) の初期化プロセスに統合する。
 
 ## 2. 背景
 
 *   現状、各 Web API アノテーターは、プロバイダー側で使用する実際のモデル名 (`model_name_on_provider`) を、クラス内のデフォルト値や設定ファイル (`annotator_config.toml`) で静的に決定している。
-*   `api_model_discovery` 機能により、利用可能な Vision モデルとその詳細（プロバイダー上の正式な ID を含む）を動的に取得できるようになった。
-*   この動的情報を活用することで、ライブラリが最新のモデルに追従しやすくなり、ユーザーが設定ファイルで指定するモデル名（例: `"Gemini 1.5 Pro"`） と、実際に API で使用されるモデル名（例: `"google/gemini-pro-1.5"`）の間のマッピングを自動化できる。
+*   `api_model_discovery` 機能により、利用可能な Vision モデルとその詳細(プロバイダー上の正式な ID を含む)を動的に取得できるようになった。
+*   この動的情報を活用することで、ライブラリが最新のモデルに追従しやすくなり、ユーザーが設定ファイルで指定するモデル名(例: `"Gemini 1.5 Pro"`) と、実際に API で使用されるモデル名(例: `"google/gemini-pro-1.5"`)の間のマッピングを自動化できる。
 
 ## 3. 方針
 
@@ -22,7 +22,7 @@
     *   `available_api_models.toml` 内の各 Web API モデルについて、`model_name_short` と `provider` を取得する。
     *   `annotator_config.toml` 内に `[model_name_short]` セクションが存在しない場合のみ、そのセクションを自動作成する。
     *   自動作成するセクションには、`provider` 文字列がクラス名に含まれるかで特定した正しい `class` 名 (例: `class = "GoogleApiAnnotator"`) と、固定の `max_output_tokens = 1800` を書き込む。一致するクラスが見つからない場合は `OpenRouterApiAnnotator` を使用する。
-    *   既に存在するセクションやその中の既存設定は変更・上書きしない。
+    *   既に存在するセクションやその中の既存設定は変更･上書きしない。
 *   **モデル名解決とインスタンス化 (`ModelFactory`):**
     *   `annotate` 関数などから `model_name_short` を受け取る。
     *   `available_api_models.toml` を検索し、値の辞書内の `model_name_short` が渡された名前と一致するエントリを探す。
@@ -35,11 +35,11 @@
     *   `__init__` メソッドを変更し、`model_name` (`model_name_short`) と `model_id_on_provider` (プロバイダーAPIで使う実際のモデルID) を引数として受け取り、インスタンス変数として保持する。
     *   コンストラクタ内で `config_registry.get(self.model_name, "parameter_name", default_value)` を使用して、`max_tokens` (デフォルト1800), `temperature`, `timeout` などの API パラメータを `annotator_config.toml` から読み込む。
     *   `_run_inference` メソッド内で API を呼び出す際には、インスタンス変数に保持した `self.model_id_on_provider` を使用する。
-    *   **重要 (Google):** `GoogleApiAnnotator` を実装または修正する際は、**必ず Google AI Python SDK (`google-genai` パッケージ) を使用してください。** 公式ドキュメントに従い、**`from google import genai` および `from google.genai import types` を使用すること。** **絶対に `google-generativeai` パッケージを使用してはいけません。これらは異なるパッケージであり、このプロジェクトでは `google-genai` を使用します。** 過去のバージョンのドキュメントや実装例に見られる `from google.generativeai` は現在の推奨パスではありません。また、SDK のドキュメントには初期リリース版に関する注意書き（本番環境での使用非推奨など）が含まれていたため、利用する SDK のバージョンとドキュメントをよく確認すること。
+    *   **重要 (Google):** `GoogleApiAnnotator` を実装または修正する際は、**必ず Google AI Python SDK (`google-genai` パッケージ) を使用してください。** 公式ドキュメントに従い、**`from google import genai` および `from google.genai import types` を使用すること。** **絶対に `google-generativeai` パッケージを使用してはいけません。これらは異なるパッケージであり、このプロジェクトでは `google-genai` を使用します。** 過去のバージョンのドキュメントや実装例に見られる `from google.generativeai` は現在の推奨パスではありません。また、SDK のドキュメントには初期リリース版に関する注意書き(本番環境での使用非推奨など)が含まれていたため、利用する SDK のバージョンとドキュメントをよく確認すること。
     *   **重要 (OpenAI):** `OpenAIApiAnnotator` や `OpenRouterApiAnnotator` を実装または修正する際は、**OpenAI Python ライブラリの公式ドキュメントに従い、`from openai import OpenAI` を使用してクライアントを初期化すること (`client = OpenAI()`)。** 以前の `import openai` のみを使用するスタイルは非推奨です。
 *   **設定ファイルの扱い:**
     *   `annotator_config.toml` の Web API モデルセクションにあった従来の `model_name_on_provider` キーは**削除**する。
-    *   API パラメータ (`max_tokens`, `temperature`, `timeout` など) は、`annotator_config.toml` の `[model_name_short]` セクションでユーザーが設定・調整できるようにする。
+    *   API パラメータ (`max_tokens`, `temperature`, `timeout` など) は、`annotator_config.toml` の `[model_name_short]` セクションでユーザーが設定･調整できるようにする。
     *   `class` は `annotator_config.toml` の `[model_name_short]` セクションで管理される (初期化時に自動追加される)。
 
 ## 4. 実装フェーズとタスクチェックリスト
@@ -54,12 +54,12 @@
         *   **モデルID (TOMLキー) に `:` が含まれる場合 (例: `google/gemma-3-27b-it:free`) は `OpenRouterApiAnnotator` を使用する。**
         *   それ以外の場合、`provider` 文字列がクラス名に含まれるかで判断し、なければ `OpenRouterApiAnnotator` をフォールバックとして使用する。
     *   [X] Web API アノテーターの初期化方法 (`__init__` は `model_name` のみ) を決定 (7.1)。
-    *   [X] API コール時のモデル ID 解決・加工方法 (`__enter__` で実施) を決定 (7.2)。
+    *   [X] API コール時のモデル ID 解決･加工方法 (`__enter__` で実施) を決定 (7.2)。
     *   [X] `WebApiComponents` の内容 (`client`, `api_model_id`, `provider_name`) を決定 (7.3)。
 *   **フェーズ 2: 実装**
     *   [ ] `registry.py` の初期化処理における無駄な処理を特定し、修正する。 # 最優先タスク
     *   [X] `config.py` の `load_available_api_models` が期待通り動作するか再確認。
-    *   [X] `config.py` に `annotator_config.toml` を**編集・保存**する機能を追加する。既存セクションを上書きせず、指定セクションにキーと値を追加できる必要がある (**`config_registry.add_default_setting(section, key, value)`** として実装)。
+    *   [X] `config.py` に `annotator_config.toml` を**編集･保存**する機能を追加する。既存セクションを上書きせず、指定セクションにキーと値を追加できる必要がある (**`config_registry.add_default_setting(section, key, value)`** として実装)。
     *   [ ] `registry.py` の `initialize_registry` (またはその呼び出し元) に、初期モデル情報取得と `annotator_config.toml` の自動更新処理を実装する。
         *   [ ] `config/available_api_models.toml` の存在を確認。
         *   [ ] 存在しない場合、`api_model_discovery._fetch_and_update_vision_models()` を実行。
@@ -116,8 +116,8 @@
     *   **対策:** 修正箇所を Web API アノテーターの処理に限定し、既存のテストスイートでリグレッションがないことを確認する。
 *   **リスク3:** `annotator_config.toml` の自動更新処理が、ユーザーの手動変更と競合したり、予期せぬ上書きを行う。
     *   **対策:** 更新処理はセクションが存在しない場合のみ追加するように限定し、既存の設定は変更しないことを徹底する。処理内容をログで明確に出力する。
-*   **リスク4:** `model_name_short` が異なるプロバイダ間で重複する（ユーザー確認済みだが念のため）。
-    *   **対策:** `available_api_models.toml` の検索時に `model_name_short` が複数見つかった場合の処理（警告ログ、エラー、最初のものを使うなど）を検討・実装する。
+*   **リスク4:** `model_name_short` が異なるプロバイダ間で重複する(ユーザー確認済みだが念のため)。
+    *   **対策:** `available_api_models.toml` の検索時に `model_name_short` が複数見つかった場合の処理(警告ログ、エラー、最初のものを使うなど)を検討･実装する。
 *   **リスク5:** 初回起動時にネットワーク接続がない、または API サーバーがダウンしている場合、`available_api_models.toml` が作成されず、Web API モデルが利用できない。
     *   **対策:** エラーハンドリングを実装し、問題をログに出力する。ドキュメントで初回起動時のネットワーク要件を明記する。
 *   **リスク6:** `provider` 文字列を含むクラス名が意図せず複数存在する場合、間違ったクラスが選択される可能性がある。
@@ -134,18 +134,18 @@ Web API アノテーター (`GoogleApiAnnotator` など) の `__init__` メソ�
 **`__init__` は `model_name` のみを受け取る**ように変更する。
 
 **理由:**
-ユーザーの視点から見て、アノテーターの初期化インターフェースがローカルモデルと統一され、分かりやすくなる。Web API モデルとローカルモデルの本質的な違い（ID解決の必要性）は、`__enter__` メソッド内で吸収する。
+ユーザーの視点から見て、アノテーターの初期化インターフェースがローカルモデルと統一され、分かりやすくなる。Web API モデルとローカルモデルの本質的な違い(ID解決の必要性)は、`__enter__` メソッド内で吸収する。
 
-### 7.2. API コール時のモデル ID 解決・加工方法
+### 7.2. API コール時のモデル ID 解決･加工方法
 
 **検討事項:**
-各 Web API クライアント (Google, OpenAI, Anthropic など) の API 呼び出し時に `model` 引数として渡す最終的なモデル ID を、どのように準備・決定するのが最も分かりやすいか検討した。
+各 Web API クライアント (Google, OpenAI, Anthropic など) の API 呼び出し時に `model` 引数として渡す最終的なモデル ID を、どのように準備･決定するのが最も分かりやすいか検討した。
 
 **決定:**
 **`__enter__` メソッド内で ID 解決と加工を行う**ように変更する。
 1.  `__enter__` 内で `available_api_models.toml` を読み込む。
 2.  `self.model_name` を基に `model_id_on_provider` を特定する。
-3.  特定した `model_id_on_provider` をプロバイダー固有のルールで加工し、最終的な API 用 ID (`api_model_id`) を生成・保持する。
+3.  特定した `model_id_on_provider` をプロバイダー固有のルールで加工し、最終的な API 用 ID (`api_model_id`) を生成･保持する。
 4.  `_run_inference` は保持された `api_model_id` を直接使用する。
 5.  従来の `_get_processed_model_id` メソッドは削除する。
 
@@ -157,7 +157,7 @@ Web API アノテーター (`GoogleApiAnnotator` など) の `__init__` メソ�
 ### 7.3. `WebApiComponents` 内容の定義
 
 **検討事項:**
-`__enter__` メソッドで生成・保持する `WebApiComponents` (TypedDict) に何を含めるべきか検討した。
+`__enter__` メソッドで生成･保持する `WebApiComponents` (TypedDict) に何を含めるべきか検討した。
 
 **決定:**
 `WebApiComponents` には以下を含める。

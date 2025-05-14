@@ -41,11 +41,11 @@ globs:
 過去、定義ルールとドキュメント内容間に複数矛盾点指摘あり。以下要約。
 
 -   **`Any` 型扱い:** ドキュメント内 `Any` 型理由コメント無使用箇所あり。 -> **推奨対応:** 理由コメント必須、可能限り具体的型へ置換。
--   **ドキュメント更新徹底:** ドキュメント統合・削減後リンク切れ・古情報残存可能性あり。 -> **推奨対応:** 変更後全ファイルリンク・内容再点検。
+-   **ドキュメント更新徹底:** ドキュメント統合･削減後リンク切れ･古情報残存可能性あり。 -> **推奨対応:** 変更後全ファイルリンク･内容再点検。
 -   **`predict()` オーバーライド禁止:** ルール禁止だが、ドキュメントサンプルコード等で誤解招く表現無か注意必要だった。
 -   **命名規則:** クラス名「*er」禁止ルールに対し、既存有名モデル (`WDTagger` 等) 例外であることドキュメント明記必要あった。
 -   **設定ファイルパス:** ドキュメント間設定ファイルパス表記 (`config/` vs `src/.../resources/system/`) 不統一だった。 -> **推奨対応:** パス表記統一。
--   **テストディレクトリ構造:** ルール定義厳密構造が、ドキュメントで十分説明・統一されていなかった。 -> **推奨対応:** 説明統一、ルールへのリンク明記。
+-   **テストディレクトリ構造:** ルール定義厳密構造が、ドキュメントで十分説明･統一されていなかった。 -> **推奨対応:** 説明統一、ルールへのリンク明記。
 
 **現状:** これら指摘事項多くは、その後開発や今回ドキュメント整理で解消可能性あるが、引続き注意必要。
 
@@ -75,7 +75,7 @@ CUDA非対応環境で `device="cuda"` 指定モデル (例: `aesthetic_shadow_v
 
 ### 影響
 
--   CUDA非対応環境でも `device="cuda"` 指定モデルがCPUでロード・実行されるようになった。
+-   CUDA非対応環境でも `device="cuda"` 指定モデルがCPUでロード･実行されるようになった。
 -   関連 `TypeError` 解消。
 -   フォールバック時警告ログ出力されるようになった。
 
@@ -100,8 +100,8 @@ CUDA非対応環境で `device="cuda"` 指定モデル (例: `aesthetic_shadow_v
 
 ### 影響
 
--   ログ出力正常化(1回のみ出力)、可読性・運用性向上。
--   import 時副作用排除、テスト・再利用性・保守性向上。
+-   ログ出力正常化(1回のみ出力)、可読性･運用性向上。
+-   import 時副作用排除、テスト･再利用性･保守性向上。
 
 
 -   logger/レジストリ初期化はエントリーポイント等で明示呼出必要生じた。
@@ -132,15 +132,15 @@ pytest-bdd を用いた BDD テスト実行時に、以下のような複数の�
 
 ### 原因 (推定含む)
 
--   `StepDefinitionNotFoundError`: `pyproject.toml` の pytest-bdd 設定 (`python_files`, `bdd_step_defs_paths` 等) が不十分、または pytest-bdd のステップ探索ロジックと現在のディレクトリ構造・命名規則との間に不整合がある可能性。
+-   `StepDefinitionNotFoundError`: `pyproject.toml` の pytest-bdd 設定 (`python_files`, `bdd_step_defs_paths` 等) が不十分、または pytest-bdd のステップ探索ロジックと現在のディレクトリ構造･命名規則との間に不整合がある可能性。
 -   `fixture 'datatable' not found`: Feature ファイルとステップ定義の引数の不一致。
--   `KeyError` / `AssertionError` (レジストリ): `config_registry` シングルトンの状態をテスト間で分離・モックする方法が不適切。
+-   `KeyError` / `AssertionError` (レジストリ): `config_registry` シングルトンの状態をテスト間で分離･モックする方法が不適切。
 -   `AssertionError` (パス): `load_file` 関数の内部ロジック、または `requests.get` のモック方法に問題がある可能性。
 -   `FileNotFoundError`: `test_env` フィクスチャの実行順序、またはログファイルパスの指定方法に問題がある可能性。
 -   Integration Test Errors: テストセットアップ時に `available_api_models.toml` が正しく配置または読み込まれていない。
 -   `fixture 'test_env' not found`: テストスコープとフィクスチャスコープの不一致。
 
-### 解決策 (試行中・実施済)
+### 解決策 (試行中･実施済)
 
 -   `StepDefinitionNotFoundError`:
     -   `pyproject.toml` に `bdd_step_defs_paths` を追加。
@@ -173,48 +173,48 @@ pytest-bdd を用いた BDD テスト実行時に、以下のような複数の�
   - テスト用TOML生成後にconfig_registry.load()が呼ばれていない。
 
 - **解決策**:
-  - __init__で必ずapi_model_id・provider・configをセット。
+  - __init__で必ずapi_model_id･provider･configをセット。
   - テスト用TOML生成後にconfig_registry.load()を呼ぶ。
 
-## [2025-08-06] Google Gemini API・テスト設計に関する主なエラー・解決策
+## [2025-08-06] Google Gemini API･テスト設計に関する主なエラー･解決策
 
 ### エラー1: google.api_core例外のimportエラー
 - 内容: google.api_coreの例外をimportしようとして "インポートを解決できません" エラー。
 - 原因: google.genai (google-genai) SDKはgoogle.api_coreに依存しない。APIクライアントが返す例外も異なる。
-- 解決策: google.api_core例外のimport・catchを削除し、google.genaiが返す例外(ValueError, RuntimeError, json.JSONDecodeError, requests.exceptions.RequestException, Exception)のみに限定。
+- 解決策: google.api_core例外のimport･catchを削除し、google.genaiが返す例外(ValueError, RuntimeError, json.JSONDecodeError, requests.exceptions.RequestException, Exception)のみに限定。
 
 ### エラー2: Gemini API candidates.parts[0].textが空文字/Noneになる
 - 内容: Gemini 2.5 Pro/Flash APIでcandidates.parts[0].textが空文字やNoneになる。
 - 原因: プロンプト設計不備、モデル制約、API仕様変更、SDKバージョン不整合など。
-- 解決策: プロンプト設計・タスク設計を見直し、SDKアップグレードで解消する場合もある。APIレスポンスの型・構造・エラーハンドリングを都度見直す。
+- 解決策: プロンプト設計･タスク設計を見直し、SDKアップグレードで解消する場合もある。APIレスポンスの型･構造･エラーハンドリングを都度見直す。
 
-### エラー3: テストコードが設計・責務を理解せずに書かれている
+### エラー3: テストコードが設計･責務を理解せずに書かれている
 - 内容: annotator_clsの初期化時にAPIモデルIDを渡す、with文で使わない等、設計無視のテスト実装。
-- 原因: テスト対象の設計・責務を正しく理解していない。
-- 解決策: テストコードは設計・責務を正しく理解した上で書く。論理名(model_name_short)を初期化時に渡す。with文で使う設計を守る。
+- 原因: テスト対象の設計･責務を正しく理解していない。
+- 解決策: テストコードは設計･責務を正しく理解した上で書く。論理名(model_name_short)を初期化時に渡す。with文で使う設計を守る。
 
-# [2025-05-10] model_factory BDDテスト: ダミー化・型判定・外部依存エラーの解決記録(過去の経緯)
+# [2025-05-10] model_factory BDDテスト: ダミー化･型判定･外部依存エラーの解決記録(過去の経緯)
 
-## 状態・背景
+## 状態･背景
 - 過去、model_factory のBDDテストで多数の失敗が発生。
 - 主な失敗要因:
-  1. 本物のモデルロード・ファイル依存による例外や型不一致。
+  1. 本物のモデルロード･ファイル依存による例外や型不一致。
   2. featureファイルの型名と実装上の型名の不一致。
   3. ダミー化の不徹底(部分的に本物のロジックが残存)。
   4. テスト期待値(推定サイズ等)とダミー値の不一致。
 
 ## 解決策(当時)
-- `tests/conftest.py` で `autouse=True` のfixtureを使い、ModelLoadの全ロード・メモリ計算・OOM判定をダミーで強制上書き。
+- `tests/conftest.py` で `autouse=True` のfixtureを使い、ModelLoadの全ロード･メモリ計算･OOM判定をダミーで強制上書き。
 - 型判定やテスト期待値の柔軟化。
 
 ## 現方針
-- **BDDテストは統合テストとして実施し、原則としてモック・ダミー・スタブ等は使用しない。**
-- モック・ダミー化はユニットテストまたは明示的な例外ケースに限定。
+- **BDDテストは統合テストとして実施し、原則としてモック･ダミー･スタブ等は使用しない。**
+- モック･ダミー化はユニットテストまたは明示的な例外ケースに限定。
 - 過去のダミー化戦略は現方針では採用しない。
 
 # [2025-05-10] base.feature BDDテスト: StepDefinitionNotFoundError の解決記録
 
-## 状態・背景
+## 状態･背景
 - base.feature の「cache_and_release_modelメソッドの動作」シナリオでテスト失敗。
 - 失敗内容: pytest-bdd の StepDefinitionNotFoundError("Then その後リソースが完全に解放される" のステップ定義が見つからない)。
 - 原因: featureファイルのステップ文言と Python 側の @then デコレータ付き関数の文言が完全一致していなかった。
@@ -224,9 +224,9 @@ pytest-bdd を用いた BDD テスト実行時に、以下のような複数の�
 - 既存のリソース解放検証ロジック(componentsが空であることのアサート)を流用。
 - これにより StepDefinitionNotFoundError が解消し、テストがパス。
 
-## 教訓・再発防止
+## 教訓･再発防止
 - pytest-bdd では featureファイルのステップ文言と Python 側のデコレータ文言が1文字でも違うとマッチしない。
-- ステップ定義の追加・修正時は、featureファイルと完全一致する文言で実装すること。
+- ステップ定義の追加･修正時は、featureファイルと完全一致する文言で実装すること。
 - 類似文言の既存ステップがある場合も、完全一致する新ステップを追加することを徹底する。
 
 ---
@@ -235,7 +235,7 @@ pytest-bdd を用いた BDD テスト実行時に、以下のような複数の�
 
 - 現在、**BDDのステップ定義ファイル(tests/features/step_definitions/配下)およびconftest.pyはすべて削除済み**。
 - 過去の経緯やエラー記録は参考情報として残すが、現状はBDDテストの実装自体が存在しない。
-- エージェントによるコード生成時、**実際のコード・ディレクトリ構成を必ず確認し、ハルシネーション(実在しないファイル・関数・テスト等の生成)を厳禁とすること**。
+- エージェントによるコード生成時、**実際のコード･ディレクトリ構成を必ず確認し、ハルシネーション(実在しないファイル･関数･テスト等の生成)を厳禁とすること**。
 
 ## BDDテスト: APIキー未設定時のエラーメッセージ検証失敗 (2025-05-13)
 
@@ -258,7 +258,7 @@ pytest-bdd を用いた BDD テスト実行時に、以下のような複数の�
 
 ## [2025-05-13] BDDテスト: Google Gemini API タイムアウト処理とステップ定義
 
-- **エラー内容・課題:**
+- **エラー内容･課題:**
     - `tests/features/webapi_annotate.feature` のAPIタイムアウトシナリオにおいて、`google.genai.errors.APIError` には直接的なタイムアウトを示す属性や専用の例外クラスが存在しないため、どのようにタイムアウト状態をシミュレートし、検証するかが課題となった。
 - **原因:**
     - `google-genai` SDKが、ネットワークタイムアウト等を汎用的な `APIError` としてラップしており、エラーメッセージの内容から判断する必要があるが、テストでの確実なシミュレーションが難しい。
@@ -294,5 +294,5 @@ pytest-bdd を用いた BDD テスト実行時に、以下のような複数の�
     - `tests/features/step_definitions/webapi_annotate_steps.py` の `api_error_message_in_result` (Thenステップ) 関数を修正。
     - アサーションを `assert "error" in model_result["error"].lower() or "エラー" in model_result["error"]` のように変更し、エラーメッセージを小文字に変換してから "error" が含まれるかを確認するようにした。日本語「エラー」のチェックはそのまま残した。
 - **影響:**
-    - 大文字・小文字の違いによるアサーション失敗が解消され、テストの安定性が向上した。
+    - 大文字･小文字の違いによるアサーション失敗が解消され、テストの安定性が向上した。
     - より堅牢なエラーメッセージ検証が可能になった。

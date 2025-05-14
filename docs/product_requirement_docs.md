@@ -8,15 +8,15 @@ image-annotator-lib
 
 ### 1.2 プロジェクト目標
 
-- 多様な画像アノテーションタスク（スコアリング、タギング）のための再利用可能なPythonライブラリ提供。
-- 異なるアノテーションタイプ・モデル（ローカルMLモデル、**Google Gemini, OpenAI GPT, Anthropic Claudeなどの主要な外部Web APIを含む多様な**アノテーションソース）に対応する柔軟で拡張可能なアーキテクチャ提供。
-- 他アプリケーション・ワークフローとの容易な統合。
+- 多様な画像アノテーションタスク(スコアリング、タギング)のための再利用可能なPythonライブラリ提供。
+- 異なるアノテーションタイプ･モデル(ローカルMLモデル、**Google Gemini, OpenAI GPT, Anthropic Claudeなどの主要な外部Web APIを含む多様な**アノテーションソース)に対応する柔軟で拡張可能なアーキテクチャ提供。
+- 他アプリケーション･ワークフローとの容易な統合。
 - 高コード品質、テストカバレッジ、明確なドキュメント維持。
 - `scorer-wrapper-lib` と `tagger-wrapper-lib` 統合によるコード重複削減。
 - 統一API提供。
 - メンテナンス性向上。
 - 機能拡張容易化。
-- `ModelLoad`（メモリ管理）と`ModelRegistry`（クラス登録）標準化。
+- `ModelLoad`(メモリ管理)と`ModelRegistry`(クラス登録)標準化。
 
 ### 1.3 対象ユーザー
 
@@ -28,34 +28,34 @@ image-annotator-lib
 
 ### 2.1 主要機能
 
-- 共通アノテーション形式サポート（モデル出力を通じて暗黙的に）。
-- 基本アノテーションツール（描画、編集） - ライブラリ自体は対象外、バックエンド処理に焦点。
-- データインポート/エクスポート機能（ユーザーアプリが担当、ライブラリは処理に焦点）。
-- カスタムアノテーションタイプ/機能のための拡張可能プラグインシステム（`ModelRegistry`とクラス継承、設定ファイルで実現）。
-- 複数画像・モデル（ローカル/Web API問わず、**多様なプロバイダーに対応したWeb API**）を一括処理のための統一 `annotate` 関数。
-- 効率的なローカルモデルロードとメモリ管理（`ModelLoad`）。
-- 集中型モデルクラス登録（`ModelRegistry`）。
-- 設定管理（`core/config.py`）。
+- 共通アノテーション形式サポート(モデル出力を通じて暗黙的に)。
+- 基本アノテーションツール(描画、編集) - ライブラリ自体は対象外、バックエンド処理に焦点。
+- データインポート/エクスポート機能(ユーザーアプリが担当、ライブラリは処理に焦点)。
+- カスタムアノテーションタイプ/機能のための拡張可能プラグインシステム(`ModelRegistry`とクラス継承、設定ファイルで実現)。
+- 複数画像･モデル(ローカル/Web API問わず、**多様なプロバイダーに対応したWeb API**)を一括処理のための統一 `annotate` 関数。
+- 効率的なローカルモデルロードとメモリ管理(`ModelLoad`)。
+- 集中型モデルクラス登録(`ModelRegistry`)。
+- 設定管理(`core/config.py`)。
 - 外部Web APIを利用したアノテーション機能のサポート。
 
 ## 3. プロジェクト概要
 
-`image-annotator-lib` は `scorer-wrapper-lib` と `tagger-wrapper-lib` を統合し、ローカルの機械学習モデルや外部のWeb APIを利用して、画像アノテーション（タギング、スコアリング）機能を提供するPythonライブラリである。統一されたAPIを通じて、多様なアノテーションソースを透過的に扱うことを目指す。
+`image-annotator-lib` は `scorer-wrapper-lib` と `tagger-wrapper-lib` を統合し、ローカルの機械学習モデルや外部のWeb APIを利用して、画像アノテーション(タギング、スコアリング)機能を提供するPythonライブラリである。統一されたAPIを通じて、多様なアノテーションソースを透過的に扱うことを目指す。
 
-# 変更履歴（2025-05-10）
+# 変更履歴(2025-05-10)
 
-## OpenAIApiAnnotatorの画像入力・構造化出力の型仕様統一
-- OpenAI APIの画像入力仕様（base64エンコード画像はimage_url: dict型で渡す）を明確化。
-- 型エラー解消・構造化出力モデルのAnnotationSchema統一により、保守性・拡張性を向上。
+## OpenAIApiAnnotatorの画像入力･構造化出力の型仕様統一
+- OpenAI APIの画像入力仕様(base64エンコード画像はimage_url: dict型で渡す)を明確化。
+- 型エラー解消･構造化出力モデルのAnnotationSchema統一により、保守性･拡張性を向上。
 - ユニットテスト追加で品質保証を強化。
 
-## AnthropicApiAnnotatorのテスト用ToolUseBlockクラス名修正・型判定整理
+## AnthropicApiAnnotatorのテスト用ToolUseBlockクラス名修正･型判定整理
 - テスト用ダミークラスのクラス名をToolUseBlockに合わせ、実装の型判定と一致させることでテストがパス。
-- _format_predictionsでAnnotationSchema型を許容し、構造化出力の一貫性・保守性を向上。
+- _format_predictionsでAnnotationSchema型を許容し、構造化出力の一貫性･保守性を向上。
 - これにより、Anthropic系APIのユニットテストが全て正常に通過。
 
-## annotator_webapi.py から OpenAIApiAnnotator・AnthropicApiAnnotator 分離のユーザー価値・目的
-- APIごとの実装が明確に分離され、拡張・保守が容易に。
+## annotator_webapi.py から OpenAIApiAnnotator･AnthropicApiAnnotator 分離のユーザー価値･目的
+- APIごとの実装が明確に分離され、拡張･保守が容易に。
 - 新API追加や既存APIの仕様変更時も、他APIへの影響を最小化。
-- テスト・型定義の一貫性向上により、品質保証が強化。
-- ユーザーは各APIの責務・依存関係を明確に把握でき、開発・運用の効率が向上。
+- テスト･型定義の一貫性向上により、品質保証が強化。
+- ユーザーは各APIの責務･依存関係を明確に把握でき、開発･運用の効率が向上。
