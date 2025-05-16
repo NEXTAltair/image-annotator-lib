@@ -221,5 +221,5 @@ def api_error_message_in_result(annotation_result):
     for image_key_results in annotation_result.values():
         for model_result in image_key_results.values():
             assert model_result["error"]
-            # 大文字・小文字を区別せずに "error" が含まれているか確認
+            # 大文字･小文字を区別せずに "error" が含まれているか確認
             assert "error" in model_result["error"].lower() or "エラー" in model_result["error"]

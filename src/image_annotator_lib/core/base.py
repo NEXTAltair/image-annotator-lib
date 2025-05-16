@@ -12,7 +12,7 @@ import re
 import traceback
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, NoReturn, Self, TypedDict, override
+from typing import Any, NoReturn, Self, TypedDict, cast, override
 
 import numpy as np
 import onnxruntime as ort
@@ -39,7 +39,7 @@ from ..exceptions.errors import (
 from . import utils
 from .config import config_registry
 from .model_factory import ModelLoad, prepare_web_api_components
-from .types import AnnotationSchema, RawOutput, WebApiFormattedOutput
+from .types import AnnotationSchema, RawOutput, WebApiComponents, WebApiFormattedOutput
 from .utils import logger
 
 # ロガーの初期化
@@ -60,7 +60,7 @@ class ONNXComponents(TypedDict):
     csv_path: Path
 
 class TensorFlowComponents(TypedDict):
-    model_dir: Path
+    model_dir: Path | None
     model: Any
 
 class CLIPComponents(TypedDict):
@@ -74,7 +74,8 @@ LoaderComponents = (
     TransformersPipelineComponents |
     ONNXComponents |
     TensorFlowComponents |
-    CLIPComponents
+    CLIPComponents |
+    WebApiComponents
 )
 
 
@@ -166,7 +167,7 @@ class BaseAnnotator(ABC):
         self.model_name = model_name
         self.config = config_registry.get_all_config()  # TODO: これはいらないかも
         if not self.config:
-            raise ValueError(f"モデル '{model_name}' の設定が見つかりません。")
+            raise ConfigurationError(f"モデル '{model_name}' の設定が config_registry に見つかりません。")
 
         # 要求されたデバイスを取得
         requested_device_from_config = config_registry.get(self.model_name, "device", "cuda")
@@ -193,9 +194,12 @@ class BaseAnnotator(ABC):
         logger.debug(
             f"{self.__class__.__name__} をモデル '{self.model_name}' で初期化中 (デバイス: {self.device})..."
         )  # ログにデバイス情報追加
-        self.model_path = config_registry.get(
-            self.model_name, "model_path"
-        )  # config_registry から取得するように変更
+        model_path_config = config_registry.get(self.model_name, "model_path")
+        if not isinstance(model_path_config, str) and model_path_config is not None: # WebAPIではNoneになりうる
+            logger.warning(f"モデル '{self.model_name}' の model_path 設定が無効です: {model_path_config}。Noneとして扱います。")
+            self.model_path: str | None = None
+        else:
+            self.model_path = model_path_config
         logger.debug(f"モデルパス: {self.model_path}")
 
         logger.debug(f"{self.__class__.__name__} '{self.model_name}' の初期化完了。")
@@ -440,6 +444,8 @@ class TransformersBaseAnnotator(BaseAnnotator):
         メモリ不足エラーをハンドリングし、VRAM使用量をログに出力
         """
         try:
+            if self.model_path is None:
+                raise ConfigurationError(f"モデル '{self.model_name}' の model_path が設定されていません。")
             # --- モデルロード処理 ---
             logger.info(f"モデルコンポーネントのロード試行: {self.model_name} をデバイス {self.device} へ")
             loaded_model = ModelLoad.load_transformers_components(
@@ -475,9 +481,15 @@ class TransformersBaseAnnotator(BaseAnnotator):
     def _preprocess_images(self, images: list[Image.Image]) -> list[dict[str, Any]]:
         """画像バッチを前処理します。各画像を個別に処理して結果をリストで返します。"""
         results = []
+        if not self.components or not isinstance(self.components, dict) or "processor" not in self.components:
+            raise ConfigurationError("Transformersプロセッサがロードされていません。")
+        processor = self.components.get("processor")
+        if not callable(processor): # callable かどうかでチェック
+             raise ConfigurationError(f"プロセッサが呼び出し可能ではありません: {type(processor)}")
+
         for image in images:
             # プロセッサの出力を取得してデバイスに移動
-            processed_output = self.components["processor"](images=image, return_tensors="pt").to(
+            processed_output = processor(images=image, return_tensors="pt").to(
                 self.device
             )
             logger.debug(f"辞書のキー: {processed_output.keys()}")
@@ -486,9 +498,9 @@ class TransformersBaseAnnotator(BaseAnnotator):
 
     def _run_inference(self, processed: list[dict[str, torch.Tensor]]) -> list[torch.Tensor]:
         """前処理済みバッチで推論を実行します (Transformers用)。"""
-        if "model" not in self.components or self.components["model"] is None:
+        if not self.components or not isinstance(self.components, dict) or "model" not in self.components or self.components.get("model") is None:
             raise RuntimeError("Transformer モデルがロードされていません。")
-        model: Any = self.components["model"]
+        model: Any = self.components.get("model")
         outputs = []
         # generateメソッドの一般的な引数やモデルのforwardメソッドの引数を想定
         KNOWN_ARGS = {
@@ -507,10 +519,13 @@ class TransformersBaseAnnotator(BaseAnnotator):
 
                 if hasattr(model, "generate"):
                     # generateメソッドにmax_lengthを追加
-                    model_kwargs["max_length"] = self.max_length
-                    model_out = model.generate(**model_kwargs)
-                else:
-                    model_out = model(**model_kwargs)
+                    if self.max_length is not None: # Noneチェック
+                        # model_kwargs の型は Dict[str, Tensor] だが、generateは他の型の引数も取る
+                        model_kwargs_any: dict[str, Any] = model_kwargs # Anyにキャスト
+                        model_kwargs_any["max_length"] = self.max_length
+                        model_out = model.generate(**model_kwargs_any)
+                    else:
+                        model_out = model(**model_kwargs)
                     if hasattr(model_out, "last_hidden_state"):
                         model_out = model_out.last_hidden_state
                     elif hasattr(model_out, "logits"):
@@ -520,17 +535,34 @@ class TransformersBaseAnnotator(BaseAnnotator):
 
     def _format_predictions(self, token_ids_list: list[torch.Tensor]) -> list[str]:
         """生出力バッチをフォーマットします (Transformers用、テキストデコード)。"""
-        if "processor" not in self.components or self.components["processor"] is None:
+        if not self.components or not isinstance(self.components, dict) or "processor" not in self.components or self.components.get("processor") is None:
             raise RuntimeError("Transformer プロセッサがロードされていません。")
-        processor: AutoProcessor = self.components["processor"]
+
+        processor_obj = self.components.get("processor")
+        # processor_obj が AutoProcessor インスタンスであることを期待。
+        # AutoProcessor の実体はモデルによって異なるため、batch_decodeを持つか動的にチェック。
+
         all_formatted = []
         try:
             for token_ids in token_ids_list:
-                decoded_texts: list[str] | str = processor.batch_decode(token_ids, skip_special_tokens=True)
-                if isinstance(decoded_texts, str):
-                    all_formatted.append(decoded_texts)
+                if hasattr(processor_obj, 'batch_decode') and callable(processor_obj.batch_decode):
+                    # batch_decode を持つ場合 (一般的な AutoProcessor)
+                    # ここで actual_processor にキャストするのは、mypyに属性の存在を知らせるため。
+                    # 実際には processor_obj の具体的な型によって挙動が変わる。
+                    actual_processor = cast(AutoProcessor, processor_obj) 
+                    decoded_texts: list[str] | str = actual_processor.batch_decode(token_ids, skip_special_tokens=True)
+                    if isinstance(decoded_texts, str):
+                        all_formatted.append(decoded_texts)
+                    else:
+                        all_formatted.append(decoded_texts[0] if decoded_texts else "")
+                elif isinstance(processor_obj, CLIPProcessor):
+                    # CLIPProcessorの場合のデコード処理 (もし必要なら具体的な実装を追加)
+                    # ここでは仮に空文字列を返す
+                    logger.warning("CLIPProcessorにはbatch_decodeがありません。デコード処理をスキップします。")
+                    all_formatted.append("")
                 else:
-                    all_formatted.append(decoded_texts[0] if decoded_texts else "")
+                    raise TypeError(f"Unsupported processor type: {type(processor_obj)}")
+
             return all_formatted
         except Exception as e:
             logger.exception(f"予測結果のフォーマット中にエラー発生: {e}")
@@ -711,6 +743,11 @@ class TensorflowBaseAnnotator(BaseAnnotator):
         # 生出力が NumPy 配列であることを確認し、適切な次元から予測値を取得
         if isinstance(raw_output, tf.Tensor):  # TFテンソルの場合 NumPy に変換
             try:
+                # raw_output が None でないことを確認 (tf_model呼び出しがNoneを返さない想定)
+                # tf_modelの呼び出し結果がNoneになるケースは現状考えにくいが、より安全にするならNoneチェック
+                if raw_output is None:
+                    logger.error("TensorFlow推論結果がNoneです。")
+                    return {"error": {}}
                 predictions = raw_output.numpy().astype(float)
             except Exception as e:
                 logger.exception(f"TF テンソルの NumPy 変換中にエラー: {e}")
@@ -1090,7 +1127,7 @@ class ONNXBaseAnnotator(BaseAnnotator):
         return [tag for tag, _ in sorted(unique_tags.items(), key=lambda x: x[1], reverse=True)]
 
     def _analyze_model_input_format(self) -> None:
-        """モデル入力形式を分析し、ターゲットサイズと次元形式を判定・保存する"""
+        """モデル入力形式を分析し、ターゲットサイズと次元形式を判定･保存する"""
         if "session" not in self.components or self.components["session"] is None:
             raise RuntimeError("ONNX セッションがロードされていません。")
         session = self.components["session"]
@@ -1220,27 +1257,27 @@ class WebApiBaseAnnotator(BaseAnnotator):
             self.model_name, "prompt_template", "Describe this image."
         )
 
-        timeout_val = config_registry.get(self.model_name, "timeout", 60)
+        timeout_val: Any = config_registry.get(self.model_name, "timeout", 60)
         try:
-            self.timeout = int(timeout_val)
+            self.timeout = int(timeout_val) if timeout_val is not None else 60
         except (ValueError, TypeError):
             logger.warning(
                 f"timeout に不正な値 {timeout_val} が設定されました。デフォルトの 60 を使用します。"
             )
             self.timeout = 60
 
-        retry_count_val = config_registry.get(self.model_name, "retry_count", 3)
+        retry_count_val: Any = config_registry.get(self.model_name, "retry_count", 3)
         try:
-            self.retry_count = int(retry_count_val)
+            self.retry_count = int(retry_count_val) if retry_count_val is not None else 3
         except (ValueError, TypeError):
             logger.warning(
                 f"retry_count に不正な値 {retry_count_val} が設定されました。デフォルトの 3 を使用します。"
             )
             self.retry_count = 3
 
-        retry_delay_val = config_registry.get(self.model_name, "retry_delay", 1.0)
+        retry_delay_val: Any = config_registry.get(self.model_name, "retry_delay", 1.0)
         try:
-            self.retry_delay = float(retry_delay_val)
+            self.retry_delay = float(retry_delay_val) if retry_delay_val is not None else 1.0
         except (ValueError, TypeError):
             logger.warning(
                 f"retry_delay に不正な値 {retry_delay_val} が設定されました。デフォルトの 1.0 を使用します。"
@@ -1248,9 +1285,9 @@ class WebApiBaseAnnotator(BaseAnnotator):
             self.retry_delay = 1.0
 
         self.last_request_time = 0.0
-        min_interval_val = config_registry.get(self.model_name, "min_request_interval", 1.0)
+        min_interval_val: Any = config_registry.get(self.model_name, "min_request_interval", 1.0)
         try:
-            self.min_request_interval = float(min_interval_val)
+            self.min_request_interval = float(min_interval_val) if min_interval_val is not None else 1.0
         except (ValueError, TypeError):
             logger.warning(
                 f"min_request_interval に不正な値 {min_interval_val} が設定されました。デフォルトの 1.0 を使用します。"
@@ -1259,13 +1296,18 @@ class WebApiBaseAnnotator(BaseAnnotator):
 
         self.model_id_on_provider: str | None = None  # __enter__ で設定される
         self.api_model_id: str | None = None  # __enter__ で設定される (加工済みID)
+        self.provider_name: str | None = None # __enter__ で設定される
 
         self.max_output_tokens: int | None = config_registry.get(self.model_name, "max_output_tokens", 1800)
+        if self.max_output_tokens is not None and not isinstance(self.max_output_tokens, int):
+            logger.warning(f"max_output_tokens に不正な値 {self.max_output_tokens} が設定されました。None を使用します。")
+            self.max_output_tokens = None
+
 
         # APIキーは __enter__ で prepare_web_api_components から取得されるため、ここでは不要
 
-        self.client: Any = None
-        self.components: Any | None = None  # 一時的に Any を使用
+        self.client: Any = None # __enter__ で ApiClient 型に設定される
+        self.components: WebApiComponents | None = None # WebApiComponents 型を明示
 
     # @abstractmethod # __enter__ メソッドの実装を削除し、新しい実装を追加
     def __enter__(self) -> Self:
@@ -1293,14 +1335,14 @@ class WebApiBaseAnnotator(BaseAnnotator):
             self.components = None
             self.client = None
             self.api_model_id = None
-            self.provider_name = "Error"
+            self.provider_name = None # エラー時は None
             raise  # エラーを再送出してコンテキストの失敗を通知
         except Exception as e:
             logger.exception(f"Web API コンポーネントの準備中に予期せぬエラーが発生: {e}")
             self.components = None
             self.client = None
             self.api_model_id = None
-            self.provider_name = "Error"
+            self.provider_name = None # エラー時は None
             raise ConfigurationError(f"Web API コンポーネント準備中の予期せぬエラー: {e}") from e
 
         return self
@@ -1429,7 +1471,16 @@ class WebApiBaseAnnotator(BaseAnnotator):
             エラーが発生した場合は、errorフィールドにメッセージが含まれる。
         """
         if isinstance(text_content, dict):
-            return WebApiFormattedOutput(annotation=text_content, error=None)
+            # 構造が AnnotationSchema に合うかバリデーションするのが望ましい
+            # ここでは簡略化のため、dict であればそのまま通す
+            # TODO: AnnotationSchema.model_validate(text_content) のようなバリデーションを追加検討
+            try:
+                validated_annotation = AnnotationSchema.model_validate(text_content).model_dump()
+                return WebApiFormattedOutput(annotation=validated_annotation, error=None)
+            except Exception as val_e:
+                error_msg = f"Received dict does not match AnnotationSchema: {val_e}. Dict: {str(text_content)[:200]}"
+                logger.warning(error_msg)
+                return WebApiFormattedOutput(annotation=None, error=error_msg)
 
         logger.debug(f"_parse_common_json_response を開始: text='{text_content[:100]}...'")
         try:

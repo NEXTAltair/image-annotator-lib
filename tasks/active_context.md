@@ -1,10 +1,15 @@
 # アクティブコンテキスト
 
 ## 1. 現作業焦点 (Current Focus)
+- PydanticAI対応に向けた改修（進行中）
 - Linterエラーおよび型エラーの完全解消(特に `annotator_webapi.py` 周辺)。
 - ユニットテストの全パス達成とテストカバレッジ75%以上維持･向上。
 
 ## 2. 進行中の主要課題･決定事項 (Ongoing Key Issues and Decisions)
+- **PydanticAI 統合:**
+    - 現在、`pydanticai` ライブラリへの対応を進めており、改修作業は進行中です。
+    - LLM連携部分の型安全性向上と開発効率化を目指しています。
+    - 関連ユニットテストの修正･拡充も並行して実施中です。
 - **BDDテスト戦略:**
     - 現状: ステップ定義ファイルおよび関連 `conftest.py` は削除済み。Featureファイルのみ再実装前提で残存。
     - 方針: ユニットテストとインテグレーションテストに注力。BDDステップは将来的に高品質なものを再実装。
@@ -19,12 +24,14 @@
     - 全てのルールファイルおよびドキュメントは、常に最新の状態を反映するように維持･管理する。
 
 ## 3. 最近の主要な変更点 (Recent Key Changes)
+- PydanticAI 対応に向けた初期改修に着手。
 - テスト戦略の大幅見直し:BDDステップ定義を全て削除し、Featureファイルのみ残存。
 - テストのクリーンアップ作業完了。
 - 主要な実装バグ(UnboundLocalError等)の修正完了。
 - `tasks/tasks_plan.md` のフォーマットを `memory.mdc` ルールに基づき修正。
 
 ## 4. 次のステップ (Next Steps)
+- PydanticAI 統合を引き続き推進し、未対応箇所の改修と関連ユニットテストの拡充を行う。
 - Linterエラーおよび型エラーの完全な解消。
 - 全てのユニットテストをパスさせる。
 - テストカバレッジの目標値達成と維持。
@@ -93,7 +100,7 @@
 
 ## 現在のフォーカス
 - Web API アノテーター (`annotator_webapi` 関連) のリファクタリング。
-- Pydantic および PydanticAI の導入による型安全性と保守性の向上。
+- Pydantic および PydanticAI の導入による型安全性と保守性の向上。(進行中)
 - `_run_inference` と `_format_predictions` のインターフェース(型シグネチャ)統一。
 
 ## 最近の主な変更･決定事項
@@ -110,7 +117,7 @@
 
 ## 次のステップ
 1.  **`src/image_annotator_lib/core/base.py` の型エラー解消:** `self.components` の型ヒント問題を解決する。(一時的に `Any` にしている箇所)
-2.  **リファクタリング内容のドキュメント反映:** `architecture.md`, `technical.md`, `lessons-learned.mdc` など、関連する他のドキュメントに今回の変更内容(`types.py` の導入、`_format_predictions` の共通化など)を反映させる。
+2.  **リファクタリング内容のドキュメント反映:** `architecture.md`, `technical.md`, `lessons-learned.mdc` など、関連する他のドキュメントに今回の変更内容(`types.py` の導入、`_format_predictions` の共通化、PydanticAI導入の進捗など)を反映させる。
 3.  **PydanticAI の Agent/tool 等の導入検討:** 依存性注入やエージェント設計をさらに進めるか検討。
 
 ## 関連 RFC/ドキュメント
@@ -140,8 +147,8 @@
 
 ### 次ステップ
 - `src/image_annotator_lib/api.py` の `annotate` 関数の戻り値型ヒントに関するリンターエラーを修正する。
+- PydanticAI 統合に関するテストとリファクタリングを継続する。
 - 他のエラー関連BDDシナリオ(タイムアウト、APIエラーレスポンス)が、今回の `api.py` の `_handle_error` 関数の変更によって影響を受けていないか(意図せず失敗するようになっていないか等)、念のためテストを実行して確認する。
-- 上記確認後、問題がなければ、今回のリファクタリングとテスト修正に関する一連の作業を完了とする。
 
 ### 既知問題点
 - (特になし)
@@ -158,6 +165,6 @@
 
 ## 次のステップ
 
-- 引き続き `pydanticai_integration_plan.md` に基づき、Pydanticモデルの導入とリファクタリング作業を進める。
+- 引き続き `pydanticai_integration_plan.md` に基づき、Pydanticモデルの導入とリファクタリング作業を進める。(現在はPydanticAI本体の対応が主)
 - 未解決のテスト失敗があれば、原因調査と修正を行う。
 - 関連ドキュメント(`error-documentation.mdc`, `lessons-learned.mdc`, `technical.md` 等)に必要な情報を追記･更新する。

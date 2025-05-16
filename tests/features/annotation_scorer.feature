@@ -13,7 +13,7 @@ Scenario Outline: 様々な条件下でのScorerアノテーション
     When アノテーションアクション "<action_key>" を実行する
     Then (Scorer) アノテーション結果タイプ "<result_type_key>" の検証が成功する
 
-    Examples: 画像数・モデル数・アクション・結果タイプ
+    Examples: 画像数･モデル数･アクション･結果タイプ
         | num_images | num_models | action_key                       | result_type_key                |
         | 1          | 1          | single_image_single_model        | single_image_single_model_eval |
         | 5          | 1          | multiple_images_single_model     | multiple_images_single_model_eval|
@@ -26,7 +26,7 @@ Scenario Outline: Scorerのストレステスト
     And すべての利用可能なスコアラーモデルが指定されている
     When これらの画像を複数回連続でアノテーションを実行する
     Then 全ての評価が正常に完了している
-    And GPU・CPUメモリの使用状況が許容範囲内である
+    And GPU･CPUメモリの使用状況が許容範囲内である
 
     Examples: 大量画像
         | num_images |

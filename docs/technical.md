@@ -48,7 +48,7 @@
 - `google-genai` (API用)
 - `openai` (API用)
 - `pydantic` (データバリデーション、型定義)
-- `pydantic-ai` (PydanticモデルとAIモデルの連携)
+- `pydantic-ai` (PydanticモデルとLLMの連携、現在部分的に導入･検証中)
 
 ### 1.4 ディレクトリ構造 (主要部分)
 
@@ -180,6 +180,13 @@ graph TD
 ## 3. 主要技術決定 (履歴)
 
 以下はプロジェクト開発中主要技術決定記録。詳細背景･理由は `.cursor/rules/lessons-learned.mdc` や関連コミットログ参照。
+
+- **PydanticAI の段階的導入 (2025-08-DD 時点、進行中):**
+    - 大規模言語モデル(LLM)との連携部分における型安全性向上、開発効率化、保守性向上を目的とし、`pydantic-ai` ライブラリの導入を決定。
+    - まずは既存のWeb APIアノテーター群 (`annotator_webapi/`) を対象に、LLMからのレスポンスをPydanticモデルで定義･パースする部分から段階的に適用を開始。
+    - 初期段階では、`PydanticAI` の全機能を利用するのではなく、主にレスポンスの構造化とバリデーションにPydanticモデルを活用。
+    - 関連するユニットテストも、この変更に合わせて適宜修正･拡充を実施中。
+    - 今後、`PydanticAI` のより高度な機能（Agent、Toolなど）の活用も視野に入れ、検討を進める予定。
 
 - **ログ出力多重化問題修正 (2025-04-19):**
     - `core/utils.py` logger 初期化処理複数回実行問題修正。`init_logger` 関数分離、`__init__.py` で一度のみ呼出変更。

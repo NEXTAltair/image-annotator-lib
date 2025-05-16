@@ -33,9 +33,15 @@
     - [済] 関連テストコード (`test_google_api.py`, `test_anthropic_api.py`) を修正し、パスを確認。
     - [済] `tasks/rfc/pydanticai_integration_plan.md` を更新。
     - [済] `tasks/active_context.md` を更新。
+    - [TODO] PydanticAI 対応に向けた改修（進行中）
+        - [TODO] LLMレスポンスの基本的なパース処理をPydanticAIベースで試行。
+        - [TODO] 関連する一部データ構造のPydanticモデル定義に着手。
+        - [TODO] ユニットテストの一部をPydanticAI対応に合わせて更新開始。
     - [TODO] `core/base.py` の `self.components` 周りの型エラーを解消する。
-    - [TODO] PydanticAI の Agent/tool 等の導入を検討･実装する。
-    - [TODO] 関連ドキュメント (`architecture.md`, `technical.md`, `lessons-learned.mdc` 等) に今回のリファクタリング内容を反映させる。
+    - [TODO] PydanticAI の Agent/tool 等の導入を本格的に検討･実装する。
+    - [TODO] 未対応箇所のPydanticAIへの移行。
+    - [TODO] 関連するユニットテストの拡充と全体的な検証。
+    - [TODO] 関連ドキュメント (`architecture.md`, `technical.md`, `lessons-learned.mdc` 等) にPydanticAI導入の進捗と変更内容を反映させる。
 
 ### 2.2. バックログ / 今後の展望 (Backlog / Future Outlook)
 - **ドキュメント･コード整理:**

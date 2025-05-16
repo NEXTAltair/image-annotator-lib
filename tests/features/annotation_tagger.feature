@@ -12,7 +12,7 @@ Scenario Outline: 様々な条件下でのTaggerアノテーション
     When アノテーションアクション "<action_key>" を実行する
     Then (Tagger) アノテーション結果タイプ "<result_type_key>" の検証が成功する
 
-    Examples: 画像数・モデル数・アクション・結果タイプ
+    Examples: 画像数･モデル数･アクション･結果タイプ
         | num_images | num_models | action_key                       | result_type_key                |
         | 1          | 1          | single_image_single_model        | single_image_single_model_tags |
         | 5          | 1          | multiple_images_single_model     | multiple_images_single_model_tags|

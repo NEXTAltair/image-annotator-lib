@@ -324,72 +324,10 @@ PydanticAI推奨形式の採用に伴い、`model_factory.prepare_web_api_compon
 *   `WebApiBaseAnnotator` およびそのサブクラスの `__init__`、`__enter__`(不要になる可能性あり)、`_run_inference` 等を、新しい依存性モデルを受け取り利用するように改修する。
 *   `WebApiBaseAnnotator` のインスタンス化と実行を行う箇所のロジックを修正する(`prepare_web_api_components` の呼び出しと依存性モデルの構築･注入)。
 *   関連するテストコードの修正。
+*   **`model_factory.py` における型定義と型推論のさらなる精緻化 (YYYY-MM-DD実施予定):**
+    *   **OpenAI関連の型インポート修正:** `ChatCompletionNamedToolChoiceParam` のインポート元を正しいモジュールパス (`openai.types.chat.chat_completion_named_tool_choice_param`) に修正する。
+    *   **OpenAI `tools` パラメータの型整合性向上:** `OpenAIAdapter` 内で `chat.completions.create` に渡す `tools` パラメータの型が、OpenAI SDKの `FunctionDefinition` と互換性を持つように、`AnnotationSchema.model_json_schema()` の利用方法や型アサーションを見直す。
+    *   **`_initialize_api_client` の型推論改善:** `Anthropic` やその他のプロバイダーのクライアントを初期化する際に、`raw_client` 変数が正しい型で推論され、適切なアダプターに渡されるように条件分岐と型アノテーションを修正する。特に、`Anthropic` の処理が意図せず `else` ブロックの `OpenAI` クライアント初期化で上書きされないようにする。
+    *   **`_handle_load_error` の属性アクセス修正:** 標準の `OutOfMemoryError` には存在しない `device` 属性へのアクセスを避け、`torch.cuda.OutOfMemoryError` のインスタンスである場合のみアクセスするように修正する。
 
 ---
-
-## 型定義専用モジュール(types.py)新設と型管理方針
-
-### 概要
-- 2025-05-11頃、共通型(TypedDict, Pydanticモデル等)を一元管理するため、`src/image_annotator_lib/core/types.py` を新設。
-- 当初は `WebApiComponents` などの基本的な型定義から開始。
-- 型定義専用モジュールは「依存の最下層」に置き、他の自作モジュールに依存しない設計とする。
-- これにより循環参照を防止し、保守性･型安全性･拡張性を最大化。
-- `base.py`, `model_factory.py`, 各APIサブクラス等はすべて `types.py` から型をimportして利用する。
-
-### 詳細設計･運用ルールと変更経緯
-- **初期 (2025-05-11頃):**
-    - `types.py` を作成し、Web API関連で共通的に利用できそうな型として `WebApiComponents` などを定義。
-- **Pydanticモデル導入とインターフェース統一 (2025-05-06 - 2025-05-07頃):**
-    1.  **`AnnotationSchema` の導入:** Web APIのレスポンス構造をPydanticモデル `AnnotationSchema(BaseModel)` として `types.py` に定義。これにより、APIレスポンスのバリデーションと型安全なデータアクセスを強化。
-    2.  **`RawOutput` の変更:**
-        - 当初 `_run_inference` の戻り値に含まれるアノテーションデータ (`response` キー) は `dict | None` であった。
-        - `AnnotationSchema` 導入に伴い、`RawOutput` の `response` を `AnnotationSchema | None` に変更。これにより、`_run_inference` の段階でレスポンスがバリデーション済みPydanticモデルとして扱えるようになった。
-    3.  **`WebApiFormattedOutput` の変更と `_format_predictions` の共通化:**
-        - 当初、各Web APIサブクラスは独自の `_format_predictions` を持ち、戻り値の `annotation` 部分の型も統一されていなかった (Pydanticモデルを直接返すものもあった)。
-        - ライブラリ全体 (ローカルモデル等、`BaseAnnotator` を継承する他のクラス) との出力形式の互換性を最優先とし、`BaseAnnotator.predict()` が返す最終結果 (`AnnotationResult`) の構造を維持するため、`_format_predictions` の `annotation` は辞書型 (`dict | None`) であるべきと判断。
-        - これに伴い、`WebApiFormattedOutput` の `annotation` を `dict | None` に変更。
-        - `WebApiBaseAnnotator` に `_format_predictions` メソッドを共通実装。このメソッド内で、`RawOutput` の `response` (`AnnotationSchema`) を `.model_dump()` を使って辞書に変換し、`WebApiFormattedOutput` の `annotation` に格納する処理を統一。
-        - これにより、各Web APIサブクラスから `_format_predictions` の実装を削除し、基底クラスの共通処理を利用する形にリファクタリング。
-    4.  **`WebApiInput` の導入:** Web APIへの入力(画像データ)を表現するPydanticモデル `WebApiInput(BaseModel)` を `types.py` に定義し、バリデーション(base64かbytesのどちらかが必須)を追加。
-    5.  **影響:** これらの変更により、`_run_inference` (戻り値 `list[RawOutput]`) と `_format_predictions` (戻り値 `list[WebApiFormattedOutput]`) のインターフェースがWeb APIアノテーター間で統一され、型安全性が向上し、コードの重複が削減された。
-- **現在の主要な型定義 (抜粋):**
-    - `WebApiComponents(TypedDict)`: APIクライアント、モデルID、プロバイダー名を保持。
-    - `WebApiInput(BaseModel)`: base64またはbytes形式の画像入力とバリデーション。
-    - `AnnotationSchema(BaseModel)`: tags, captions, score を持つPydanticスキーマ。
-    - `RawOutput(TypedDict)`: `response: AnnotationSchema | None`, `error: str | None` を持つ。
-    - `WebApiFormattedOutput(TypedDict)`: `annotation: dict | None`, `error: str | None` を持つ。
-- 型定義が膨大になる場合は、`types_webapi.py`, `types_core.py`等に細分化してもよいが、「依存の最下層」ルールは厳守。
-- API固有の拡張型が必要な場合は、`types.py`の共通型を継承し、各APIサブモジュールで拡張。
-- PydanticAI化後も、外部APIとのやりとりや型安全なデータ流通にはPydanticモデル、内部の辞書型構造や既存コード互換にはTypedDictを使い分ける。
-
-### 循環参照防止の観点
-- 型定義専用モジュールは「依存の最下層」に置くことで、どの実装ファイルからもimportでき、循環参照が絶対に発生しない。
-- 型定義モジュールは他の自作モジュールに依存しないことが鉄則。
-- 依存関係の流れ:types.py → base.py, model_factory.py, 各APIサブクラス → 上位ロジック
-
-### 今後の型管理方針
-- 型定義の重複･分散を防ぎ、どこからでもimportできるようにする。
-- PydanticAI化やAPI追加時も型の一元管理が容易。
-- テスト･型チェック･自動ドキュメント生成にも流用しやすい。
-- 型定義の変更･追加時は必ずtypes.py(または分割型定義モジュール)を更新し、ドキュメントにも記録する。
-- **`RawOutput` と `WebApiFormattedOutput` の定義は、最新の `types.py` と常に同期させること。**
-
----
-
-## _format_predictionsの戻り値･WebApiFormattedOutputの型方針について {#format-predictions-policy}
-
-### 決定事項(2025-05-12, 更新 2025-08-07)
-- [x] `_format_predictions` メソッドは **`WebApiBaseAnnotator` に共通実装**された。(2025-08-07頃 実施)
-- [x] 戻り値の型は **`list[WebApiFormattedOutput]`** で統一する。
-- [x] `WebApiFormattedOutput` の `annotation` キーには、`RawOutput` の `response` フィールド(`AnnotationSchema` オブジェクト)を **`.model_dump()` で変換した `dict` 型**のデータ、またはエラー時は `None` を格納する。(2025-05-07頃 方針決定･実装)
-- [x] Pydanticモデル(`AnnotationSchema`等)は主に `_run_inference` での**内部バリデーション･型安全化のために利用し、外部インターフェース (`_format_predictions` の戻り値) では `dict` へ変換して返す**。
-- [x] これは、API経由でないローカルモデルや従来型モデルも含め、ライブラリ全体の出力形式の一貫性･保守性･テスト互換性を最優先するため。
-
-### 理由
-- `BaseAnnotator` の抽象メソッド `_format_predictions` は多様なモデルに対応しており、戻り値の主要データ (`annotation`) を `dict` で統一することで全体の一貫性･保守性が高まる。
-- 一部のアノテーターのみPydanticモデルで返すと、呼び出し側 (例: `BaseAnnotator.predict`) で型分岐や変換が必要となり、保守性･可読性が低下する。
-- テスト･後続処理･既存コードとの互換性を維持しやすい。
-
-### 今後の型移行方針
-- 将来的に全モデルの出力形式をPydanticモデルで統一する場合は、`BaseAnnotator.predict` の戻り値型 (`AnnotationResult`) や関連する抽象クラス･全サブクラスの型アノテーションを一括で見直すタイミングで実施する。
-- それまでは「`_run_inference` で Pydantic モデルを内部的に利用し、`_format_predictions` で `

@@ -105,7 +105,7 @@ sequenceDiagram
 - **サブクラス** (例: `GoogleApiAnnotator`, `AnthropicApiAnnotator`):
   - 各 API 固有のクライアント初期化、認証処理を実装。
   - `_preprocess_images`: API が要求する形式 (例: base64 文字列、bytes) に画像を変換。
-  - `_run_inference`: 実際に API を呼び出し、レスポンスを取得。内部で Pydantic モデル (`AnnotationSchema`) によるバリデーションを行い、`RawOutput` 型で結果を返す。
+  - `_run_inference`: 実際に API を呼び出し、レスポンスを取得。内部で Pydantic モデル (`AnnotationSchema`, `core/types.py` で定義) を用いてレスポンスのパースとバリデーションを行い、型安全性を確保する。成功時はパース済み `AnnotationSchema` オブジェクトを、失敗時はエラー情報を `RawOutput` 型で返す。
   - `_generate_tags`: `_format_predictions` (基底クラスで実行) の結果からタグ情報を抽出 (これは `BaseAnnotator` の抽象メソッド)。
 
 ### 2.3. コアモジュール (`core/`)

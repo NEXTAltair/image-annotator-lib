@@ -466,7 +466,7 @@ def test_discover_from_existing_toml(mock_load_toml):
 @mock.patch("image_annotator_lib.core.api_model_discovery.load_available_api_models")
 @mock.patch("requests.get")
 def test_discover_force_refresh_success(mock_requests_get, mock_load_toml, mock_save_toml):
-    """force_refresh=True でAPIから正常に取得・更新するケース。"""
+    """force_refresh=True でAPIから正常に取得･更新するケース。"""
     # モックの設定
     mock_response = mock.Mock()
     mock_response.raise_for_status.return_value = None
@@ -502,7 +502,7 @@ def test_discover_force_refresh_success(mock_requests_get, mock_load_toml, mock_
 @mock.patch("image_annotator_lib.core.api_model_discovery.load_available_api_models")
 @mock.patch("requests.get")
 def test_discover_initial_load_success(mock_requests_get, mock_load_toml, mock_save_toml):
-    """初回起動時 (TOML空) にAPIから正常に取得・更新するケース。"""
+    """初回起動時 (TOML空) にAPIから正常に取得･更新するケース。"""
     # モックの設定
     mock_response = mock.Mock()
     mock_response.raise_for_status.return_value = None

@@ -1,4 +1,4 @@
-from typing import cast, override
+from typing import Any, cast, override
 
 import openai
 from openai import APIConnectionError
@@ -8,7 +8,7 @@ from image_annotator_lib.exceptions.errors import WebApiError
 
 from ...core.base import WebApiBaseAnnotator
 from ...core.config import config_registry
-from ...core.types import AnnotationSchema, RawOutput
+from ...core.types import AnnotationSchema, RawOutput, WebApiInput
 from ...core.utils import logger
 from .webapi_shared import BASE_PROMPT, SYSTEM_PROMPT
 
@@ -43,76 +43,57 @@ class OpenAIApiAnnotator(WebApiBaseAnnotator):
             raise WebApiError(
                 "API クライアントまたはモデル ID が初期化されていません"
             )
-        if not isinstance(self.client, openai.OpenAI):
-             raise WebApiError(f"Invalid client type: {type(self.client)}. Expected openai.OpenAI.")
+        # isinstance(self.client, openai.OpenAI) のチェックは削除。
+        # self.client は OpenAIAdapter インスタンスであることを期待。
 
-        # config_registry から直接取得する
         max_output_tokens = config_registry.get(self.model_name, "max_output_tokens", default=2000)
         temperature = config_registry.get(self.model_name, "temperature", default=0.7)
 
         results: list[RawOutput] = []
         for image_data_base64 in processed_str:
-            annotation = None
-            error = None
+            annotation: AnnotationSchema | None = None
+            error_message: str | None = None
             try:
                 self._wait_for_rate_limit()
 
-                # client.responses.parse を使用して構造化レスポンスを取得
-                response = self.client.responses.parse(
-                    model=self.api_model_id,
-                    input=[
-                        {
-                            "role": "system",
-                            "content": [
-                                {"type": "input_text", "text": SYSTEM_PROMPT},
-                            ],
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "input_text", "text": BASE_PROMPT},
-                                {"type": "input_image", "image_url": f"data:image/jpeg;base64,{image_data_base64}", "detail": "auto"},
-                            ]
-                        }
-                    ],
-                    text_format=AnnotationSchema, # Pydanticモデルを指定
-                    max_output_tokens=max_output_tokens,
-                    temperature=cast(float, temperature),
+                web_api_input = WebApiInput(image_b64=image_data_base64)
+
+                api_params: dict[str, Any] = {
+                    "prompt": BASE_PROMPT, # Adapter側でinputの一部として利用される想定
+                    "system_prompt": SYSTEM_PROMPT, # 同上
+                    "temperature": cast(float, temperature),
+                    "max_output_tokens": max_output_tokens,
+                    "use_responses_parse": True, # OpenAIAdapter に responses.parse を使うよう指示
+                }
+
+                # self.client は OpenAIAdapter インスタンス
+                annotation = self.client.call_api(
+                    model_id=self.api_model_id,
+                    web_api_input=web_api_input,
+                    params=api_params,
+                    output_schema=AnnotationSchema # Adapter はこれを見てレスポンスをパースする
                 )
+                # call_api が None を返し、エラー情報を別途提供する設計も考えられるが、
+                # ここでは成功時は AnnotationSchema を、失敗時は WebApiError を送出すると仮定。
 
-                # response.output_parsed から直接 AnnotationSchema を取得
-                # response.refusal など、他の応答タイプも考慮する必要があるかもしれない
-                if hasattr(response, 'output_parsed') and response.output_parsed:
-                    if isinstance(response.output_parsed, AnnotationSchema):
-                         annotation = response.output_parsed
-                    else:
-                         # 稀に output_parsed があっても型が違う場合 (SDKのバグ等)
-                         error = f"OpenAIレスポンスのoutput_parsedが予期せぬ型です: {type(response.output_parsed)}"
-                         logger.warning(error)
-                elif hasattr(response, 'refusal') and response.refusal: # type: ignore
-                     error = f"OpenAIがリクエストを拒否しました: {response.refusal}" # type: ignore
-                     logger.warning(error)
-                elif hasattr(response, 'error') and response.error: # APIレベルのエラー
-                    error = f"OpenAI API Error response: {response.error}"
-                    logger.error(error)
-                else:
-                     # output_parsed も refusal も error もない場合
-                     error = f"OpenAIから予期せぬレスポンス形式: {response.to_dict() if hasattr(response, 'to_dict') else str(response)}"
-                     logger.warning(error)
-
+            except WebApiError as e: # Adapterから送出されるエラー
+                error_message = f"OpenAI Adapter Error: {e.message}"
+                logger.error(error_message, exc_info=True)
+            # Adapter が openai.APIError や ValidationError を WebApiError にラップすることを期待。
+            # もしラップされないケースも考慮するなら、以下のようなキャッチも残す。
             except APIConnectionError as e:
-                error = f"OpenAI API Connection Error: {e}"
-                logger.error(error, exc_info=True)
+                error_message = f"OpenAI API Connection Error: {e}"
+                logger.error(error_message, exc_info=True)
             except openai.APIError as e: # APIError をキャッチ (RateLimitError などを含む)
-                 error = f"OpenAI API Error: {e}"
-                 logger.error(error, exc_info=True)
+                 error_message = f"OpenAI API Error: {e}"
+                 logger.error(error_message, exc_info=True)
             except ValidationError as ve: # Pydanticのバリデーションエラー
-                 error = f"OpenAIレスポンスのパース/バリデーション失敗 (Pydantic): {ve}\nRaw Response (potential): {response if 'response' in locals() else 'N/A'}"
-                 logger.error(error, exc_info=True)
+                 error_message = f"OpenAI Response Validation Error: {ve}"
+                 logger.error(error_message, exc_info=True)
             except Exception as e:
-                error = f"OpenAI: Unexpected error during parse: {e}"
-                logger.error(error, exc_info=True)
+                error_message = f"OpenAI Annotator Unexpected Error: {e!s}"
+                logger.error(error_message, exc_info=True)
 
-            results.append(RawOutput(response=annotation, error=error))
+            results.append(RawOutput(response=annotation, error=error_message))
 
         return results
