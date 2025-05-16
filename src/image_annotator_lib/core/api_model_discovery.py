@@ -116,7 +116,7 @@ def discover_available_vision_models(force_refresh: bool = False) -> dict[str, l
             成功時: {"models": ["openai/gpt-4o", "google/gemini-pro-vision", ...]}
             失敗時: {"error": "API 接続エラー: <詳細>"}
     """
-    # global _cache_expiry  # グローバル変数を参照・更新することを宣言 -> 削除
+    # global _cache_expiry  # グローバル変数を参照･更新することを宣言 -> 削除
     # now = dt.now(timezone.utc) # 削除
 
     # 1. キャッシュ確認 -> TOML読み込みに変更
@@ -137,7 +137,7 @@ def discover_available_vision_models(force_refresh: bool = False) -> dict[str, l
 
     try:
         # === API 取得と TOML 更新処理をヘルパー関数で実行 ===
-        logger.info("APIから最新のモデル情報を取得・更新します。")
+        logger.info("APIから最新のモデル情報を取得･更新します。")
         updated_model_ids = _fetch_and_update_vision_models()
         # === ここまで ===
 

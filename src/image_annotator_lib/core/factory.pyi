@@ -98,7 +98,7 @@ class ModelLoad:
             device (str): The device to load the model onto ("cuda" or "cpu"). / モデルをロードするデバイス ("cuda" または "cpu")。
 
         Returns:
-            Optional[TransformersComponents]: Dictionary with "model" and "processor", or None if load fails or already loaded. / "model" と "processor" を含む辞書、またはロード失敗・ロード済みの場合は None。
+            Optional[TransformersComponents]: Dictionary with "model" and "processor", or None if load fails or already loaded. / "model" と "processor" を含む辞書、またはロード失敗･ロード済みの場合は None。
         """
         ...
 
@@ -117,7 +117,7 @@ class ModelLoad:
             device (str): The device to run inference on ("cuda" or "cpu"). / 推論を実行するデバイス ("cuda" または "cpu")。
 
         Returns:
-            Optional[ONNXComponents]: Dictionary with "session" and "csv_path", or None if load fails or already loaded. / "session" と "csv_path" を含む辞書、またはロード失敗・ロード済みの場合は None。
+            Optional[ONNXComponents]: Dictionary with "session" and "csv_path", or None if load fails or already loaded. / "session" と "csv_path" を含む辞書、またはロード失敗･ロード済みの場合は None。
         """
         ...
 
@@ -138,7 +138,7 @@ class ModelLoad:
             model_format (str): The format of the model ("h5", "saved_model", "pb"). / モデルのフォーマット ("h5", "saved_model", "pb")。
 
         Returns:
-            Optional[TensorFlowComponents]: Dictionary with "model" and "model_dir", or None if load fails or already loaded. / "model" と "model_dir" を含む辞書、またはロード失敗・ロード済みの場合は None。
+            Optional[TensorFlowComponents]: Dictionary with "model" and "model_dir", or None if load fails or already loaded. / "model" と "model_dir" を含む辞書、またはロード失敗･ロード済みの場合は None。
         """
         ...
 
@@ -158,7 +158,7 @@ class ModelLoad:
 
 
         Returns:
-            Optional[TransformersPipelineComponents]: Dictionary with "pipeline", or None if load fails or already loaded. / "pipeline" を含む辞書、またはロード失敗・ロード済みの場合は None。
+            Optional[TransformersPipelineComponents]: Dictionary with "pipeline", or None if load fails or already loaded. / "pipeline" を含む辞書、またはロード失敗･ロード済みの場合は None。
         """
         ...
 
@@ -183,7 +183,7 @@ class ModelLoad:
             final_activation_type (Optional[str]): Type of activation for the final layer. / 最終層の活性化関数のタイプ。
 
         Returns:
-            Optional[CLIPComponents]: Dictionary with "model", "processor", "clip_model", or None if load fails or already loaded. / "model", "processor", "clip_model" を含む辞書、またはロード失敗・ロード済みの場合は None。
+            Optional[CLIPComponents]: Dictionary with "model", "processor", "clip_model", or None if load fails or already loaded. / "model", "processor", "clip_model" を含む辞書、またはロード失敗･ロード済みの場合は None。
         """
         ...
 

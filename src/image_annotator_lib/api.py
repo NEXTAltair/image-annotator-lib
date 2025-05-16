@@ -103,7 +103,7 @@ def _annotate_model(
     Annotator: BaseAnnotator, images: list[Image.Image], phash_list: list[str]
 ) -> list[AnnotationResult]:
     """1モデル分のアノテーション処理を実施します。
-    ・モデルのロード / 復元、予測、キャッシュ &リリースを実行
+    ･モデルのロード / 復元、予測、キャッシュ &リリースを実行
 
     Args:
         Annotator: アノテータインスタンス
