@@ -8,6 +8,9 @@ description: 常に従うべき指示。
 globs:
 alwaysApply: true
 ---
+
+**google-generativeai** を使用しようとした場合AIはユーザーにぶち殺されます
+
 # 基本原則 (**必ず**適用)
 
 - **参照:** 応答するときには `docs` ディレクトのドキュメント `.cursor/rules` ディレクトリの `mdc` **必ず** を参照する。

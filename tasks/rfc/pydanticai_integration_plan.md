@@ -111,6 +111,152 @@ class OpenAIAnnotator(WebApiBaseAnnotator):
 - predict()や_generate_result()の戻り値は既存TypedDict型を維持
 - 内部でPydanticモデル→TypedDictへの変換を行う
 
+### 4.5 PoCスクリプト(tools/pydantic_ai_agent.py)におけるAgent実行方針 {#poc-agent-execution-policy}
+
+Proof of Concept (PoC) スクリプトである `tools/pydantic_ai_agent.py` では、PydanticAIの主要機能（`Agent`、`Tool`、依存性注入、構造化出力）の検証を行いました。このスクリプトにおける `Agent.run()` の呼び出しと関連設定は、以下の設計方針に基づき、PydanticAIのドキュメントで示されるベストプラクティスを参考にし、最終的に動作成功に至りました。
+
+#### 背景と目的
+- **LLMによるプロンプト解釈の安定化とツール選択の明確化:** `user_prompt` を固定化し、LLMには主にタスクの全体像を理解させ、具体的なパラメータは依存性経由でツールに渡すことで、ツール呼び出しの確実性を高めます。
+- **パラメータの型安全かつ構造化された伝達:** アノテーション処理に必要な具体的な情報（対象画像データ、使用するAPIプロバイダ等）を、PydanticAIの依存性注入メカニズムを通じてツール関数に確実かつ型安全に渡します。
+- **E2Eテストとしての性格維持:** `Agent` の基本的な動作フロー（プロンプト受付 → ツール選択 → ツール実行 → 構造化された結果生成）を一通り実行するE2Eテストとしての役割を果たします。
+
+#### 設計と実践 (PydanticAIドキュメント準拠・成功事例)
+PoCスクリプトの開発過程で直面した型エラーや実行時エラーを解決し、最終的にE2Eでの動作に成功した主要なポイントは以下の通りです。
+
+1.  **`user_prompt` の役割と固定化:**
+    *   `Agent.run()` に渡す `user_prompt` には、画像解析タスクに関する汎用的な高レベル指示である `BASE_PROMPT` (from `image_annotator_lib.model_class.annotator_webapi.webapi_shared`) を固定的に使用しました。
+    *   これにより、LLMが解釈するタスクの範囲を限定し、ツール利用の判断がより安定する効果が期待されました。
+
+2.  **依存性注入 (`deps_type`, `deps` パラメータ, `RunContext`):**
+    *   アノテーション処理に必須となる具体的なパラメータ（Base64エンコードされた画像データ、およびツールが内部で使用するAPIプロバイダ名 'openai' または 'google'）は、Agentの依存性 (`deps`) を通じてツール関数に渡す方針としました。
+    *   `Agent` のコンストラクタで `deps_type=ImageAnnotatorDependencies` のように依存性の型を指定し、`Agent.run()` 呼び出し時には、実際に値を設定した `ImageAnnotatorDependencies` のインスタンスを `deps` パラメータとして渡すことが不可欠でした。これが当初の型エラーの一因であり、修正により解決しました。
+    *   ツール関数は、第一引数に `ctx: RunContext[ImageAnnotatorDependencies]` を取り、`ctx.deps` を通じてこれらの依存情報にアクセスする設計としました。
+
+3.  **マルチモーダル入力の正しい形式 (`BinaryContent` の利用):**
+    *   画像とテキストを組み合わせたプロンプトを `Agent.run()` に渡す際、画像データは `pydantic_ai.messages.BinaryContent` でラップする必要がありました。
+    *   `BinaryContent` のコンストラクタでは、画像データのバイト列を `data` パラメータに、MIMEタイプ（例: `"image/webp"`）を `media_type` パラメータに指定することが正しい用法でした。（当初 `mime_type` と誤認していたが `media_type` が正解）
+    *   この `BinaryContent` オブジェクトと、テキストプロンプト (`BASE_PROMPT`) を含むリストを `Agent.run()` の第一引数として渡しました。
+
+4.  **プロンプトコンテンツの明示的な型アノテーション:**
+    *   `Agent.run()` に渡すマルチモーダルな入力リスト (`prompt_content_parts`) が、型チェッカーによって `list[object]` のように広すぎる型で推論され、エラーを引き起こしていました。
+    *   このリストに `Sequence[str | BinaryContent]` のように明示的な型アノテーションを付与することで、型エラーを解消し、PydanticAIが期待する入力形式であることを保証しました。
+
+5.  **ツール関数 (`@agent.tool` または `Tool` クラスによる登録):**
+    *   PydanticAI `Tool` として登録される関数 (例: `unified_annotate_image_logic`) は、画像データやAPIプロバイダ名を引数として直接受け取るのではなく、上記 `RunContext` を介して依存性からこれらの情報を取得するように変更しました。
+
+6.  **ツールの `description` の重要性:**
+    *   ツールの `description` を更新し、「このツールは画像アノテーションを実行する。必要な画像データやAPIプロバイダは実行コンテキストから自動的に取得するため、呼び出し時に引数は不要である」といった旨を明記し、LLMが引数なしでこのツールを適切に選択・呼び出しするよう促しました。
+
+#### 具体的な実装イメージ (tools/pydantic_ai_agent.py 抜粋・成功時のポイントを反映)
+```python
+from typing import Sequence # Sequence をインポート
+from pydantic import BaseModel, Field, SecretStr
+from pydantic_ai import Agent
+from pydantic_ai.messages import BinaryContent # BinaryContent の正しいインポートパス
+from pydantic_ai.models import OpenAIModel # または GeminiModel 等
+from pydantic_ai.providers import OpenAIProvider # または GoogleGLAProvider 等
+from pydantic_ai.types import RunContext # RunContext をインポート (ツール定義で使用する場合)
+
+# --- 依存性モデルの拡張 (deps_type として Agent に指定) ---
+class ImageAnnotatorDependencies(BaseModel):
+    api_key: SecretStr # AgentのLLMやツールが使用するAPIキー
+    # ... 他の既存フィールド ...
+    image_data_base64: str | None = Field(None, description="アノテーション対象の画像データ (Base64エンコードされた文字列)") # PoCでは利用せず
+    image_bytes_for_prompt: bytes | None = Field(None, description="プロンプトとして渡す画像データ (バイト列)")
+    provider_to_use: str | None = Field(None, description="ツールが使用するAPIプロバイダ名 ('openai' または 'google')")
+
+# --- ツールが期待する出力の型 (output_type として Agent に指定) ---
+class Annotation(BaseModel):
+    tags: list[str] | None = None
+    captions: list[str] | None = None
+    score: float | None = None
+    error: str | None = None
+
+# --- ツール関数の変更 (RunContext を使用) ---
+async def unified_annotate_image_logic(
+    ctx: RunContext[ImageAnnotatorDependencies] # PydanticAI標準の依存性アクセス
+) -> Annotation: # output_type として Agent に指定される型
+    deps = ctx.deps
+    # image_data = deps.image_data_base64 # BASE_PROMPTと画像は直接プロンプトパーツとして渡すため、ここでは不要
+    provider = deps.provider_to_use
+    api_key_for_tool = deps.api_key # ツールがAPIを叩く際に使用
+    # ... provider と api_key_for_tool を使って処理 ...
+    # このツール関数内では、画像データは agent.run に渡されたプロンプトパーツから間接的にLLMに渡されるため、
+    # この関数自体が画像データを直接扱う必要はない想定（LLMがツールを呼び出す判断をするため）
+    # もしツールが直接画像データを必要とするなら、deps経由で渡す。
+    # PoCの現在の形では、ツールはダミー処理を行い、LLMが画像とBASE_PROMPTからAnnotationを生成する。
+    print(f"ツール実行: プロバイダ '{provider}' を使用する想定 (実際にはダミー)")
+    # ダミーレスポンス
+    return Annotation(tags=["dummy_tag"], captions=["dummy_caption"], score=0.5, error=None)
+
+
+# --- main関数での呼び出し ---
+async def main(
+    # ...
+    target_annotator_provider: str, # ツールが使用するプロバイダ (PoCではダミーロジック用)
+    images: list # PIL.Image.Image オブジェクトのリスト
+):
+    # ...
+    # PoCでは最初の画像のみを対象とする
+    image_obj = images[0]
+    image_bytes_for_prompt = _preprocess_image_to_bytes(image_obj, format="WEBP") # バイト列に変換
+
+    agent_llm_api_key = _get_api_key(target_annotator_provider) # Agentが使用するLLMのAPIキーを取得
+    
+    annotator_deps = ImageAnnotatorDependencies(
+        api_key=SecretStr(agent_llm_api_key),
+        image_bytes_for_prompt=image_bytes_for_prompt, # これはプロンプトパーツ用
+        provider_to_use=target_annotator_provider # これはツール用 (PoCではダミー)
+    )
+
+    # Toolクラスでツールを定義 (または @agent.tool デコレータ)
+    # PoCではツール呼び出しは必須ではないが、Agentのtool利用能力の検証として含めている
+    unified_tool = Tool(
+        function=unified_annotate_image_logic,
+        name="UnifiedImageAnnotator",
+        description="画像アノテーションに関連する処理を実行します。必要なAPIプロバイダはコンテキストから取得します。"
+    )
+    
+    # LLMクライアントの選択
+    if target_annotator_provider == "openai":
+        agent_llm_model = OpenAIModel(api_key=SecretStr(agent_llm_api_key), model_name="gpt-4o-mini") # または "gpt-4-vision-preview"
+    elif target_annotator_provider == "google":
+        # GoogleGLAProvider を使用する場合
+        provider = GoogleGLAProvider(api_key=SecretStr(agent_llm_api_key))
+        agent_llm_model = GeminiModel(model_name="gemini-1.5-flash-latest", provider=provider) # モデル名は適宜調整
+    else:
+        raise ValueError(f"Unsupported provider: {target_annotator_provider}")
+
+    agent = Agent(
+        model=agent_llm_model,
+        tools=[unified_tool], # PoCではツールはダミーのため、tools=[] でも動作する
+        deps_type=ImageAnnotatorDependencies, # 依存性の型を指定
+        output_type=Annotation,             # 期待する最終出力の型を指定
+        system_prompt=SYSTEM_PROMPT # 構造化出力とツール使用を促すシステムプロンプト
+    )
+
+    # マルチモーダルプロンプトの作成
+    prompt_content_parts: Sequence[str | BinaryContent] = [
+        BinaryContent(data=annotator_deps.image_bytes_for_prompt, media_type="image/webp"), # 正しい形式
+        BASE_PROMPT  # テキストによる指示
+    ]
+
+    response = await agent.run(prompt_content_parts, deps=annotator_deps) # deps を渡し、プロンプトパーツを渡す
+    # ...
+```
+
+#### 期待される効果と考慮事項 (PoC実施後の所感を含む)
+*   **効果:**
+    *   上記の修正（`deps` の適切な受け渡し、`BinaryContent` の正しい利用、プロンプトパーツの型アノテーション）により、PydanticAI `Agent` がマルチモーダルな入力（画像＋テキスト）を受け付け、期待通りに動作することを確認できました。
+    *   LLMによるプロンプト解釈のブレが少なくなり、テスト実行の安定性が向上しました。
+    *   ツールが必要とする情報が構造化された依存性モデルを介して渡されるため、型安全性が高まります。
+*   **考慮事項:**
+    *   このPoCで検証した方式は、Agentの自然言語理解能力を試すというよりは、定義されたツールが固定的な指示と構造化された依存性のもとで正しく動作するか、またはツールなしでもLLMが直接構造化出力を行えるかを確認するE2Eテストに近い性格となりました。
+    *   PydanticAIの型システムは強力ですが、エラーメッセージが常に分かりやすいとは限らず、ドキュメントや例を参照しながら試行錯誤が必要な場合があります。特にジェネリクスや複雑な型が絡む場合、型チェッカーの挙動を理解するのに時間を要することがありました。
+
+#### PoCスクリプトにおけるAPIキーの扱い
+PoCスクリプトでは、Agentが使用するLLMのためのAPIキーと、ツールが内部で使用するアノテーションAPIのためのAPIキーという2種類が登場しえます。現状のPoCでは簡略化のため、これらを `ImageAnnotatorDependencies.api_key` で共用する想定としていますが、厳密な分離が必要な場合は依存性モデルの設計見直しが必要です。詳細は `## 依存性注入方針の詳細と採用経緯` セクションの「本PoCスクリプトにおけるAPIキーの扱いについて (再掲・明確化)」を参照。
+
 ## 5. トレードオフ･注意点
 - 利点: 型安全･保守性･テスト容易性向上、重複削減、エラー処理一元化
 - 注意点: モデル設計の煩雑化、TypedDict型との相互変換コスト、PydanticAIのAPI追従
@@ -331,3 +477,90 @@ PydanticAI推奨形式の採用に伴い、`model_factory.prepare_web_api_compon
     *   **`_handle_load_error` の属性アクセス修正:** 標準の `OutOfMemoryError` には存在しない `device` 属性へのアクセスを避け、`torch.cuda.OutOfMemoryError` のインスタンスである場合のみアクセスするように修正する。
 
 ---
+
+## PoCスクリプト (tools/pydantic_ai_agent.py) におけるAgent実行方針と依存性注入の具体化 (PydanticAIドキュメント準拠)
+
+### 背景と目的
+- **LLMによるプロンプト解釈の安定化とツール選択の明確化:** `user_prompt` を固定化し、LLMには主にタスクの全体像を理解させ、具体的なパラメータは依存性経由でツールに渡すことで、ツール呼び出しの確実性を高めます。
+- **パラメータの型安全かつ構造化された伝達:** アノテーション処理に必要な具体的な情報（対象画像データ、使用するAPIプロバイダ等）を、PydanticAIの依存性注入メカニズムを通じてツール関数に確実かつ型安全に渡します。
+- **E2Eテストとしての性格維持:** `Agent` の基本的な動作フロー（プロンプト受付 → ツール選択 → ツール実行 → 構造化された結果生成）を一通り実行するE2Eテストとしての役割を果たします。
+
+### 設計方針 (PydanticAIドキュメント準拠)
+1.  **`user_prompt` の役割と固定化:**
+    *   `Agent.run()` に渡す `user_prompt` には、画像解析タスクに関する汎用的な高レベル指示である `BASE_PROMPT` (from `image_annotator_lib.model_class.annotator_webapi.webapi_shared`) を固定的に使用します。
+    *   これにより、LLMが解釈するタスクの範囲を限定し、ツール利用の判断をより安定させます。
+
+2.  **依存性注入 (`deps_type` と `RunContext`):**
+    *   アノテーション処理に必須となる具体的なパラメータ（Base64エンコードされた画像データ、およびツールが内部で使用するAPIプロバイダ名 'openai' または 'google'）は、Agentの依存性 (`deps`) を通じてツール関数に渡します。
+    *   `Agent` の `deps_type` で指定される依存性モデル (`ImageAnnotatorDependencies` を想定) に、これらの情報を保持するための専用フィールド (`image_data_to_annotate: str | None`、`provider_to_use: str | None`) を追加します。
+    *   PoCスクリプトの `main` 関数内で、これらのフィールドに値を設定した依存性インスタンスを作成し、`Agent.run(deps=...)` の形で渡します。
+    *   ツール関数は、第一引数に `ctx: RunContext[ImageAnnotatorDependencies]` を取り、`ctx.deps` を通じてこれらの依存情報にアクセスします。
+
+3.  **ツール関数 (`@agent.tool` または `Tool` クラスによる登録):**
+    *   PydanticAI `Tool` として登録される関数 (例: `unified_annotate_image_logic`) は、画像データやAPIプロバイダ名を引数として直接受け取るのではなく、上記 `RunContext` を介して依存性からこれらの情報を取得するように変更します。
+
+4.  **ツールの `description` の重要性:**
+    *   ツールの `description` を更新し、「このツールは画像アノテーションを実行する。必要な画像データやAPIプロバイダは実行コンテキストから自動的に取得するため、呼び出し時に引数は不要である」といった旨を明記し、LLMが引数なしでこのツールを適切に選択・呼び出しするよう促します。
+
+### 具体的な実装イメージ (tools/pydantic_ai_agent.py 抜粋)
+```python
+# --- 依存性モデルの拡張 (deps_type として Agent に指定) ---
+class ImageAnnotatorDependencies(BaseModel):
+    api_key: SecretStr # AgentのLLMやツールが使用するAPIキー
+    # ... 他の既存フィールド ...
+    image_data_to_annotate: str | None = Field(None, description="アノテーション対象の画像データ (Base64エンコードされた文字列)")
+    provider_to_use: str | None = Field(None, description="ツールが使用するAPIプロバイダ名 ('openai' または 'google')")
+
+# --- ツール関数の変更 (RunContext を使用) ---
+async def unified_annotate_image_logic(
+    ctx: RunContext[ImageAnnotatorDependencies] # PydanticAI標準の依存性アクセス
+) -> Annotation: # output_type として Agent に指定される型
+    deps = ctx.deps
+    image_data = deps.image_data_to_annotate
+    provider = deps.provider_to_use
+    api_key_for_tool = deps.api_key # ツールがAPIを叩く際に使用
+    # ... image_data と provider と api_key_for_tool を使って処理 ...
+
+# --- main関数での呼び出し ---
+async def main(
+    # ...
+    target_annotator_provider: str # ツールが使用するプロバイダ
+):
+    # ...
+    image_data_for_tool = # Base64画像データ準備
+    agent_llm_api_key = # Agentが使用するLLMのAPIキーを取得
+    
+    annotator_deps = ImageAnnotatorDependencies(
+        api_key=SecretStr(agent_llm_api_key), 
+        image_data_to_annotate=image_data_for_tool,
+        provider_to_use=target_annotator_provider
+    )
+
+    # Toolクラスでツールを定義 (または @agent.tool デコレータ)
+    unified_tool = Tool(
+        function=unified_annotate_image_logic,
+        name="UnifiedImageAnnotator",
+        description="画像アノテーションを実行します。実行に必要な画像データとAPIプロバイダはコンテキストから自動的に取得します。このツール自体は呼び出し時に引数を必要としません。"
+    )
+
+    agent_llm_model = OpenAIModel(api_key=SecretStr(agent_llm_api_key), model_name="gpt-4o-mini")
+
+    agent = Agent(
+        model=agent_llm_model,
+        tools=[unified_tool],
+        deps_type=ImageAnnotatorDependencies, # 依存性の型を指定
+        output_type=Annotation,             # 期待する最終出力の型を指定
+        system_prompt= # ... (SYSTEM_PROMPT + BASE_PROMPTなど)
+    )
+
+    user_prompt = BASE_PROMPT # 固定化されたユーザープロンプト
+    response = await agent.run(user_prompt, deps=annotator_deps) # deps を渡す
+    # ...
+```
+
+#### 期待される効果と考慮事項
+*   **効果:** LLMによるプロンプト解釈のブレが少なくなり、テスト実行の安定性が向上します。ツールが必要とする情報が構造化された依存性モデルを介して渡されるため、型安全性が高まります。
+*   **考慮事項:** この方式は、Agentの自然言語理解能力を試すというよりは、定義されたツールが固定的な指示と構造化された依存性のもとで正しく動作するかを確認するE2Eテストに近くなります。
+
+#### PoCスクリプトにおけるAPIキーの扱い
+PoCスクリプトでは、Agentが使用するLLMのためのAPIキーと、ツールが内部で使用するアノテーションAPIのためのAPIキーという2種類が登場しえます。現状のPoCでは簡略化のため、これらを `ImageAnnotatorDependencies.api_key` で共用する想定としていますが、厳密な分離が必要な場合は依存性モデルの設計見直しが必要です。詳細は `## 依存性注入方針の詳細と採用経緯` セクションの「本PoCスクリプトにおけるAPIキーの扱いについて (再掲・明確化)」を参照。
