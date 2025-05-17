@@ -181,12 +181,23 @@ graph TD
 
 以下はプロジェクト開発中主要技術決定記録。詳細背景･理由は `.cursor/rules/lessons-learned.mdc` や関連コミットログ参照。
 
-- **PydanticAI の段階的導入 (2025-08-DD 時点、進行中):**
-    - 大規模言語モデル(LLM)との連携部分における型安全性向上、開発効率化、保守性向上を目的とし、`pydantic-ai` ライブラリの導入を決定。
-    - まずは既存のWeb APIアノテーター群 (`annotator_webapi/`) を対象に、LLMからのレスポンスをPydanticモデルで定義･パースする部分から段階的に適用を開始。
-    - 初期段階では、`PydanticAI` の全機能を利用するのではなく、主にレスポンスの構造化とバリデーションにPydanticモデルを活用。
-    - 関連するユニットテストも、この変更に合わせて適宜修正･拡充を実施中。
-    - 今後、`PydanticAI` のより高度な機能（Agent、Toolなど）の活用も視野に入れ、検討を進める予定。
+- **PydanticAI の導入とPoCによる検証 (2025-08-DD 時点、PoC成功、段階的統合計画):**
+    - **目的:** 大規模言語モデル(LLM)との連携部分における型安全性向上、開発効率化、保守性向上。特にマルチモーダル入力（画像とテキスト）の扱いや、構造化されたLLM応答のバリデーションを強化する。
+    - **PoC実施と成果 (`tools/pydantic_ai_agent.py`):**
+        - OpenAIおよびGoogle Geminiの画像解析APIを対象に、PydanticAIの `Agent`, `LLMModel` (`OpenAIModel`, `GeminiModel`), `Provider`, およびマルチモーダル入力 (`BinaryContent`) を使用したPoCを実施し、E2Eでの動作に成功。
+        - **主な技術的ポイントと解決策:**
+            - `Agent` の `deps_type` と `agent.run(deps=...)` による型安全な依存性注入の実現。
+            - `BinaryContent(data=image_bytes, media_type="image/webp")` 形式での画像データの正しいエンコードとプロンプトへの組み込み。
+            - `Sequence[str | BinaryContent]` 型アノテーションによるマルチモーダルプロンプトの型定義の明確化。
+            - システムプロンプトとユーザープロンプト（画像指示を含む `BASE_PROMPT`）を組み合わせた `Agent` の実行。
+            - 発生した各種型エラー（インポートパス、引数の型不整合など）の原因究明と修正。
+        - PoCを通じて、PydanticAIが提供する型安全性と構造化のメリットを実証できた。
+    - **今後の統合方針:**
+        - PoCの知見に基づき、既存のWeb APIアノテーター群 (`model_class/annotator_webapi/`) をPydanticAIの `Tool` として再設計・統合を進める。
+        - `ImageAnnotatorDependencies` を活用し、ツールが必要とする設定情報（APIキー、モデルID等）をAgent経由で安全に供給する。
+        - LLMからの応答は、`AnnotationSchema` のようなPydanticモデルで定義された `output_type` を通じてパース・検証し、後続処理での型安全性を保証する。
+        - `Agent` を活用することで、プロンプトエンジニアリングの柔軟性を高め、将来的に複数のツールを組み合わせた複雑なワークフローの実現も視野に入れる。
+    - **関連ドキュメント:** 設計判断や詳細な経緯については `tasks/rfc/pydanticai_integration_plan.md` を参照。
 
 - **ログ出力多重化問題修正 (2025-04-19):**
     - `core/utils.py` logger 初期化処理複数回実行問題修正。`init_logger` 関数分離、`__init__.py` で一度のみ呼出変更。

@@ -329,3 +329,67 @@ graph TD
 - テスト･型チェック･自動ドキュメント生成にも流用しやすい。
 
 ---
+
+### 3.4. PydanticAI連携アーキテクチャ (PoCベース)
+
+PydanticAIの導入により、特にWeb APIを利用した画像アノテーション処理において、より高度なプロンプト管理、型安全なデータフロー、そして構造化されたLLM応答の取り扱いが可能になる。PoCスクリプト (`tools/pydantic_ai_agent.py`) で検証されたアーキテクチャの概要は以下の通り。
+
+```mermaid
+graph TD
+    subgraph User Application / Script
+        App(Application Logic)
+    end
+
+    subgraph PydanticAI Core
+        Agent[PydanticAI Agent]
+        LLMModel(PydanticAI LLM Model e.g., GeminiModel, OpenAIModel)
+        ToolDef(Tool Definition e.g., ImageAnnotationTool)
+    end
+
+    subgraph Image Annotator Library
+        AnnotatorDeps[ImageAnnotatorDependencies]
+        ImageProcessing(Image Preprocessing)
+        AnnotationSchema(Pydantic Output Schema e.g., Annotation)
+        UnifiedToolLogic(Unified Annotation Logic for Tool)
+        LegacyWebApiAnnotators(Existing WebApiAnnotators - Referenced or Adapted)
+    end
+
+    App -- User Prompt / Images --> Agent
+    App -- Dependencies --> Agent
+    Agent -- System Prompt --> LLMModel
+    Agent -- Formatted Prompt (Text + Image) --> LLMModel
+    LLMModel -- LLM API Call --> ExternalLLM[External LLM API (OpenAI, Google)]
+    ExternalLLM -- Raw Response --> LLMModel
+    LLMModel -- Structured/Validated Response --> Agent
+    Agent -- Selects & Calls --> ToolDef
+    ToolDef -- Uses --> UnifiedToolLogic
+    UnifiedToolLogic -- Uses --> AnnotatorDeps
+    UnifiedToolLogic -- Uses --> ImageProcessing
+    UnifiedToolLogic -- Returns instance of --> AnnotationSchema
+    Agent -- Final Output (AnnotationSchema) --> App
+
+    %% Connections for how existing annotators might be used
+    %% UnifiedToolLogic -.-> LegacyWebApiAnnotators
+```
+
+**主要な登場要素:**
+
+-   **PydanticAI Agent**:
+    -   中核となるオーケストレーター。
+    -   システムプロンプト、ユーザープロンプト（画像データとテキスト指示を含むマルチモーダル入力）、依存性（`ImageAnnotatorDependencies`）を受け取る。
+    -   内部でPydanticAIの `LLMModel`（`GeminiModel` や `OpenAIModel`）を使用してLLMと通信。
+    -   定義された `Tool`（例: `ImageAnnotationTool`）を適切なタイミングで呼び出し、構造化された結果を返す。
+-   **ImageAnnotationTool (PydanticAI Tool)**:
+    -   Web API経由での画像アノテーション処理をカプセル化したPydanticAIのツール。
+    -   `run` メソッド内で、`ImageAnnotatorDependencies` からAPIキーやプロバイダ情報を取得し、画像の前処理、LLMへのリクエスト送信、結果のパース（`AnnotationSchema` 形式）を行う。
+    -   PoCではこのツール自体がLLMを直接呼び出すのではなく、AgentがLLMとの主要な対話を行い、ツールは特定のタスクを実行する形も考えられる (ツールの責務による)。PoCではAgentが直接LLMに問い合わせ、その結果を構造化して返した。
+-   **ImageAnnotatorDependencies**:
+    -   APIキー、プロバイダ名、モデルIDなど、アノテーション処理に必要な設定やリソースをまとめたPydanticモデル。
+    -   `Agent` の `deps_type` として指定され、`agent.run(deps=...)` でインスタンスが渡されることで、`Tool` 内で利用可能になる。
+-   **AnnotationSchema**:
+    -   アノテーション結果の構造を定義したPydanticモデル。LLMからの応答はこのスキーマに従って検証・パースされ、型安全性が保証される。
+-   **プロンプト**:
+    -   システムプロンプト: Agentの基本的な振る舞いや応答形式を指示。
+    -   ユーザープロンプト: `BinaryContent` (画像データ) とテキスト指示 (例: `BASE_PROMPT`) を組み合わせたマルチモーダル形式。`Sequence[str | BinaryContent]` として型付けされる。
+
+このアーキテクチャにより、LLMとの連携部分がより堅牢になり、将来的な機能拡張やメンテナンス性の向上が期待される。

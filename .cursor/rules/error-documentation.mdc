@@ -155,7 +155,6 @@ pytest-bdd を用いた BDD テスト実行時に、以下のような複数の�
 -   Integration Test Errors: **未対応**。テストセットアップの確認が必要。
 -   `fixture 'test_env' not found`: **未対応**。インテグレーションテストの構成見直しが必要。
 -   その他:
-    -   `api_model_discovery_steps.py` の `AttributeError` を修正 (`datatable` のインデックス修正)。
     -   デバッグログを追加。
 
 ### 影響
@@ -296,3 +295,59 @@ pytest-bdd を用いた BDD テスト実行時に、以下のような複数の�
 - **影響:**
     - 大文字･小文字の違いによるアサーション失敗が解消され、テストの安定性が向上した。
     - より堅牢なエラーメッセージ検証が可能になった。
+
+## PydanticAI 統合時の型エラーと解決策
+
+### 症状
+
+PydanticAI の `Agent` や関連コンポーネント ( `BinaryContent`, `Tool` など) を利用する際に、以下のような型エラーが頻発した。
+
+- `Argument ... has incompatible type "..."; expected "..."`
+- `Cannot assign to attribute "..." for class "..."`
+- `Module "..." has no attribute "..."` (インポートエラー)
+- `Parameter "..." has no default value` (依存性注入関連)
+
+### 原因と分析
+
+主な原因は以下の通り。
+
+1.  **PydanticAI の API 理解不足:**
+    *   `Agent.run()` メソッドの `deps` パラメータの扱いや、`deps_type` で指定した型との整合性。
+    *   マルチモーダル入力 (`BinaryContent` など) の正しいコンストラクタパラメータ (`media_type` vs `mime_type`)。
+    *   プロンプトパーツのリスト (`Sequence[str | BinaryContent]`) の型アノテーションの必要性。
+    *   `Tool` の依存性注入における型の明示的な指定。
+2.  **ライブラリバージョンの差異・ドキュメントの陳腐化:**
+    *   一部のインポートパス (`pydantic_ai.io` など) が、ドキュメントの古いバージョンや開発中のブランチを参照していた可能性。最新の安定バージョンや公式ドキュメントとの突合が必要だった。
+3.  **型ヒントの不足・不正確さ:**
+    *   PydanticAI は型ヒントに強く依存するため、渡すデータ構造の型アノテーションが不正確または不足していると、型チェッカー (Mypy, Pyright) が正しい型を推論できずエラーとなる。
+
+### 解決策と教訓
+
+1.  **公式ドキュメントの徹底参照:** PydanticAI の公式ドキュメント ([https://ai.pydantic.dev/](https://ai.pydantic.dev/)) を常に参照し、特に `Agent`, `Tool`, `Model`, `Provider`, マルチモーダル入力に関するAPI仕様を正確に理解する。
+2.  **型アノテーションの徹底:**
+    *   `Agent` の `deps_type` で指定した型は、`agent.run(deps=...)` で渡すインスタンスの型と一致させる。
+    *   `agent.run()` に渡すプロンプトが複雑な場合 (例: `BinaryContent` と `str` の混在リスト)、`Sequence[str | BinaryContent]` のように明示的に型アノテーションを行う。
+    *   `Tool` をインスタンス化する際、`Tool(..., deps_type=MyDependencies)` のように依存性の型を明示する。
+3.  **`BinaryContent` の正しい利用:** 画像などのバイナリデータは `BinaryContent(data=..., media_type="image/jpeg")` のように `media_type` を指定してラップする。
+4.  **段階的な検証:** 小さなPoC (Proof of Concept) スクリプトで基本的な動作を確認しながら、徐々に機能を拡張していく。
+5.  **リンターと型チェッカーの積極活用:** Mypy や Pyright の出すエラーメッセージを注意深く読み解き、型の不整合を早期に発見・修正する。
+6.  **インポートパスの確認:** ライブラリのバージョンアップに伴いインポートパスが変更されることがあるため、エラー発生時は公式ドキュメントやリリースノートで最新の情報を確認する。
+
+### PoCスクリプトにおける最終的な `agent.run()` 呼び出し例
+
+```python
+# (前略: annotator_deps, BASE_PROMPT, image_bytes の準備)
+
+from pydantic_ai.messages import BinaryContent # 正しいインポートパス
+from typing import Sequence
+
+prompt_content_parts: Sequence[str | BinaryContent] = [
+    BinaryContent(data=image_bytes, media_type="image/webp"),
+    BASE_PROMPT
+]
+
+# Agentの初期化時に deps_type=ImageAnnotatorDependencies と指定されている想定
+response = await agent.run(prompt_content_parts, deps=annotator_deps)
+```
+
+この経験から、新しいライブラリ、特に型システムに強く依存するものを導入する際は、APIドキュメントの精読と、型アノテーションの正確性が極めて重要であるという教訓が得られた。
