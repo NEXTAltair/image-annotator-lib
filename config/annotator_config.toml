@@ -572,3 +572,7 @@ max_output_tokens = 1800
 ["GPT-4.1 Mini"]
 class = "OpenAIApiAnnotator"
 max_output_tokens = 1800
+
+["Codex Mini"]
+class = "OpenAIApiAnnotator"
+max_output_tokens = 1800

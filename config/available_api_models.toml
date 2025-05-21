@@ -15,7 +15,7 @@ display_name = "Google: Gemini 2.5 Flash Preview"
 created = "2025-04-17T18:31:07Z"
 modality = "text+image->text"
 input_modalities = [ "image", "text", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemini-2.5-flash-preview:thinking"]
 provider = "Google"
@@ -24,7 +24,7 @@ display_name = "Google: Gemini 2.5 Flash Preview (thinking)"
 created = "2025-04-17T18:31:07Z"
 modality = "text+image->text"
 input_modalities = [ "image", "text", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/o4-mini-high"]
 provider = "OpenAI"
@@ -33,7 +33,7 @@ display_name = "OpenAI: o4 Mini High"
 created = "2025-04-16T17:23:32Z"
 modality = "text+image->text"
 input_modalities = [ "image", "text", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/o3"]
 provider = "OpenAI"
@@ -42,7 +42,7 @@ display_name = "OpenAI: o3"
 created = "2025-04-16T17:10:57Z"
 modality = "text+image->text"
 input_modalities = [ "image", "text", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/o4-mini"]
 provider = "OpenAI"
@@ -51,7 +51,7 @@ display_name = "OpenAI: o4 Mini"
 created = "2025-04-16T16:29:02Z"
 modality = "text+image->text"
 input_modalities = [ "image", "text",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/gpt-4.1"]
 provider = "OpenAI"
@@ -59,8 +59,8 @@ model_name_short = "GPT-4.1"
 display_name = "OpenAI: GPT-4.1"
 created = "2025-04-14T17:23:05Z"
 modality = "text+image->text"
-input_modalities = [ "image", "text",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+input_modalities = [ "image", "text", "file",]
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/gpt-4.1-mini"]
 provider = "OpenAI"
@@ -68,8 +68,8 @@ model_name_short = "GPT-4.1 Mini"
 display_name = "OpenAI: GPT-4.1 Mini"
 created = "2025-04-14T17:23:01Z"
 modality = "text+image->text"
-input_modalities = [ "image", "text",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+input_modalities = [ "image", "text", "file",]
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/gpt-4.1-nano"]
 provider = "OpenAI"
@@ -77,8 +77,8 @@ model_name_short = "GPT-4.1 Nano"
 display_name = "OpenAI: GPT-4.1 Nano"
 created = "2025-04-14T17:22:49Z"
 modality = "text+image->text"
-input_modalities = [ "image", "text",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+input_modalities = [ "image", "text", "file",]
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."moonshotai/kimi-vl-a3b-thinking:free"]
 provider = "Moonshot AI"
@@ -87,7 +87,7 @@ display_name = "Moonshot AI: Kimi VL A3B Thinking (free)"
 created = "2025-04-10T17:07:21Z"
 modality = "text+image->text"
 input_modalities = [ "image", "text",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."meta-llama/llama-4-maverick:free"]
 provider = "Meta"
@@ -96,7 +96,7 @@ display_name = "Meta: Llama 4 Maverick (free)"
 created = "2025-04-05T19:37:02Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."meta-llama/llama-4-maverick"]
 provider = "Meta"
@@ -105,7 +105,7 @@ display_name = "Meta: Llama 4 Maverick"
 created = "2025-04-05T19:37:02Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."meta-llama/llama-4-scout:free"]
 provider = "Meta"
@@ -114,7 +114,7 @@ display_name = "Meta: Llama 4 Scout (free)"
 created = "2025-04-05T19:31:59Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."meta-llama/llama-4-scout"]
 provider = "Meta"
@@ -123,7 +123,7 @@ display_name = "Meta: Llama 4 Scout"
 created = "2025-04-05T19:31:59Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."allenai/molmo-7b-d:free"]
 provider = "AllenAI"
@@ -133,6 +133,7 @@ created = "2025-03-26T21:07:27Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
 last_seen = "2025-05-10T04:39:06+00:00Z"
+deprecated_on = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."bytedance-research/ui-tars-72b:free"]
 provider = "Bytedance"
@@ -141,7 +142,7 @@ display_name = "Bytedance: UI-TARS 72B  (free)"
 created = "2025-03-26T20:14:25Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."qwen/qwen2.5-vl-3b-instruct:free"]
 provider = "Qwen"
@@ -150,7 +151,7 @@ display_name = "Qwen: Qwen2.5 VL 3B Instruct (free)"
 created = "2025-03-26T18:42:53Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemini-2.5-pro-exp-03-25:free"]
 provider = "Google"
@@ -169,7 +170,7 @@ display_name = "Qwen: Qwen2.5 VL 32B Instruct (free)"
 created = "2025-03-24T18:10:38Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."qwen/qwen2.5-vl-32b-instruct"]
 provider = "Qwen"
@@ -178,7 +179,7 @@ display_name = "Qwen: Qwen2.5 VL 32B Instruct"
 created = "2025-03-24T18:10:38Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/o1-pro"]
 provider = "OpenAI"
@@ -187,7 +188,7 @@ display_name = "OpenAI: o1-pro"
 created = "2025-03-19T22:26:51Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."mistralai/mistral-small-3.1-24b-instruct:free"]
 provider = "Mistral"
@@ -196,7 +197,7 @@ display_name = "Mistral: Mistral Small 3.1 24B (free)"
 created = "2025-03-17T19:15:37Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."mistralai/mistral-small-3.1-24b-instruct"]
 provider = "Mistral"
@@ -205,7 +206,7 @@ display_name = "Mistral: Mistral Small 3.1 24B"
 created = "2025-03-17T19:15:37Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemma-3-1b-it:free"]
 provider = "Google"
@@ -214,7 +215,7 @@ display_name = "Google: Gemma 3 1B (free)"
 created = "2025-03-14T14:45:56Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemma-3-4b-it:free"]
 provider = "Google"
@@ -223,7 +224,7 @@ display_name = "Google: Gemma 3 4B (free)"
 created = "2025-03-13T22:38:30Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemma-3-4b-it"]
 provider = "Google"
@@ -232,7 +233,7 @@ display_name = "Google: Gemma 3 4B"
 created = "2025-03-13T22:38:30Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemma-3-12b-it:free"]
 provider = "Google"
@@ -241,7 +242,7 @@ display_name = "Google: Gemma 3 12B (free)"
 created = "2025-03-13T21:50:25Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemma-3-12b-it"]
 provider = "Google"
@@ -250,7 +251,7 @@ display_name = "Google: Gemma 3 12B"
 created = "2025-03-13T21:50:25Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/gpt-4o-mini-search-preview"]
 provider = "OpenAI"
@@ -279,7 +280,7 @@ display_name = "Google: Gemma 3 27B (free)"
 created = "2025-03-12T05:12:39Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemma-3-27b-it"]
 provider = "Google"
@@ -288,7 +289,7 @@ display_name = "Google: Gemma 3 27B"
 created = "2025-03-12T05:12:39Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."microsoft/phi-4-multimodal-instruct"]
 provider = "Microsoft"
@@ -297,7 +298,7 @@ display_name = "Microsoft: Phi 4 Multimodal Instruct"
 created = "2025-03-08T01:11:24Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/gpt-4.5-preview"]
 provider = "OpenAI"
@@ -306,7 +307,7 @@ display_name = "OpenAI: GPT-4.5 (Preview)"
 created = "2025-02-27T20:23:30Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemini-2.0-flash-lite-001"]
 provider = "Google"
@@ -315,7 +316,7 @@ display_name = "Google: Gemini 2.0 Flash Lite"
 created = "2025-02-25T17:56:52Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3.7-sonnet"]
 provider = "Anthropic"
@@ -324,7 +325,7 @@ display_name = "Anthropic: Claude 3.7 Sonnet"
 created = "2025-02-24T18:35:10Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3.7-sonnet:thinking"]
 provider = "Anthropic"
@@ -333,7 +334,7 @@ display_name = "Anthropic: Claude 3.7 Sonnet (thinking)"
 created = "2025-02-24T18:35:10Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3.7-sonnet:beta"]
 provider = "Anthropic"
@@ -342,7 +343,7 @@ display_name = "Anthropic: Claude 3.7 Sonnet (self-moderated)"
 created = "2025-02-24T18:35:10Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemini-2.0-flash-001"]
 provider = "Google"
@@ -351,7 +352,7 @@ display_name = "Google: Gemini 2.0 Flash"
 created = "2025-02-05T15:30:13Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."qwen/qwen-vl-plus"]
 provider = "Qwen"
@@ -360,7 +361,7 @@ display_name = "Qwen: Qwen VL Plus"
 created = "2025-02-05T04:54:15Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."qwen/qwen-vl-max"]
 provider = "Qwen"
@@ -369,7 +370,7 @@ display_name = "Qwen: Qwen VL Max"
 created = "2025-02-01T18:25:04Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."qwen/qwen2.5-vl-72b-instruct:free"]
 provider = "Qwen"
@@ -378,7 +379,7 @@ display_name = "Qwen: Qwen2.5 VL 72B Instruct (free)"
 created = "2025-02-01T11:45:11Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."qwen/qwen2.5-vl-72b-instruct"]
 provider = "Qwen"
@@ -387,7 +388,7 @@ display_name = "Qwen: Qwen2.5 VL 72B Instruct"
 created = "2025-02-01T11:45:11Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemini-2.0-flash-thinking-exp:free"]
 provider = "Google"
@@ -406,7 +407,7 @@ display_name = "MiniMax: MiniMax-01"
 created = "2025-01-15T04:31:02Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemini-2.0-flash-thinking-exp-1219:free"]
 provider = "Google"
@@ -425,7 +426,7 @@ display_name = "OpenAI: o1"
 created = "2024-12-17T18:26:39Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."x-ai/grok-2-vision-1212"]
 provider = "xAI"
@@ -434,7 +435,7 @@ display_name = "xAI: Grok 2 Vision 1212"
 created = "2024-12-15T04:35:38Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemini-2.0-flash-exp:free"]
 provider = "Google"
@@ -443,7 +444,7 @@ display_name = "Google: Gemini 2.0 Flash Experimental (free)"
 created = "2024-12-11T17:18:43Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."amazon/nova-lite-v1"]
 provider = "Amazon"
@@ -452,7 +453,7 @@ display_name = "Amazon: Nova Lite 1.0"
 created = "2024-12-05T22:22:43Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."amazon/nova-pro-v1"]
 provider = "Amazon"
@@ -461,7 +462,7 @@ display_name = "Amazon: Nova Pro 1.0"
 created = "2024-12-05T22:05:03Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/learnlm-1.5-pro-experimental:free"]
 provider = "Google"
@@ -471,6 +472,7 @@ created = "2024-11-21T19:15:51Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
 last_seen = "2025-05-10T04:39:06+00:00Z"
+deprecated_on = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/gpt-4o-2024-11-20"]
 provider = "OpenAI"
@@ -479,7 +481,7 @@ display_name = "OpenAI: GPT-4o (2024-11-20)"
 created = "2024-11-20T18:33:14Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."mistralai/pixtral-large-2411"]
 provider = "Mistral"
@@ -488,7 +490,7 @@ display_name = "Mistral: Pixtral Large 2411"
 created = "2024-11-19T00:49:48Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."x-ai/grok-vision-beta"]
 provider = "xAI"
@@ -497,7 +499,7 @@ display_name = "xAI: Grok Vision Beta"
 created = "2024-11-19T00:37:04Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3.5-haiku:beta"]
 provider = "Anthropic"
@@ -506,7 +508,7 @@ display_name = "Anthropic: Claude 3.5 Haiku (self-moderated)"
 created = "2024-11-04T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3.5-haiku"]
 provider = "Anthropic"
@@ -515,7 +517,7 @@ display_name = "Anthropic: Claude 3.5 Haiku"
 created = "2024-11-04T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3.5-haiku-20241022:beta"]
 provider = "Anthropic"
@@ -524,7 +526,7 @@ display_name = "Anthropic: Claude 3.5 Haiku (2024-10-22) (self-moderated)"
 created = "2024-11-04T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3.5-haiku-20241022"]
 provider = "Anthropic"
@@ -533,7 +535,7 @@ display_name = "Anthropic: Claude 3.5 Haiku (2024-10-22)"
 created = "2024-11-04T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3.5-sonnet:beta"]
 provider = "Anthropic"
@@ -542,7 +544,7 @@ display_name = "Anthropic: Claude 3.5 Sonnet (self-moderated)"
 created = "2024-10-22T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3.5-sonnet"]
 provider = "Anthropic"
@@ -551,7 +553,7 @@ display_name = "Anthropic: Claude 3.5 Sonnet"
 created = "2024-10-22T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemini-flash-1.5-8b"]
 provider = "Google"
@@ -560,7 +562,7 @@ display_name = "Google: Gemini 1.5 Flash 8B"
 created = "2024-10-03T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."meta-llama/llama-3.2-11b-vision-instruct:free"]
 provider = "Meta"
@@ -569,7 +571,7 @@ display_name = "Meta: Llama 3.2 11B Vision Instruct (free)"
 created = "2024-09-25T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."meta-llama/llama-3.2-11b-vision-instruct"]
 provider = "Meta"
@@ -578,7 +580,7 @@ display_name = "Meta: Llama 3.2 11B Vision Instruct"
 created = "2024-09-25T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."meta-llama/llama-3.2-90b-vision-instruct"]
 provider = "Meta"
@@ -587,7 +589,7 @@ display_name = "Meta: Llama 3.2 90B Vision Instruct"
 created = "2024-09-25T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."qwen/qwen-2.5-vl-72b-instruct"]
 provider = "Qwen"
@@ -606,7 +608,7 @@ display_name = "Mistral: Pixtral 12B"
 created = "2024-09-10T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."qwen/qwen-2.5-vl-7b-instruct:free"]
 provider = "Qwen"
@@ -615,7 +617,7 @@ display_name = "Qwen: Qwen2.5-VL 7B Instruct (free)"
 created = "2024-08-28T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."qwen/qwen-2.5-vl-7b-instruct"]
 provider = "Qwen"
@@ -624,7 +626,7 @@ display_name = "Qwen: Qwen2.5-VL 7B Instruct"
 created = "2024-08-28T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemini-flash-1.5-8b-exp"]
 provider = "Google"
@@ -634,6 +636,7 @@ created = "2024-08-28T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
 last_seen = "2025-05-10T04:39:06+00:00Z"
+deprecated_on = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/chatgpt-4o-latest"]
 provider = "OpenAI"
@@ -642,7 +645,7 @@ display_name = "OpenAI: ChatGPT-4o"
 created = "2024-08-14T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/gpt-4o-2024-08-06"]
 provider = "OpenAI"
@@ -651,7 +654,7 @@ display_name = "OpenAI: GPT-4o (2024-08-06)"
 created = "2024-08-06T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/gpt-4o-mini-2024-07-18"]
 provider = "OpenAI"
@@ -660,7 +663,7 @@ display_name = "OpenAI: GPT-4o-mini (2024-07-18)"
 created = "2024-07-18T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/gpt-4o-mini"]
 provider = "OpenAI"
@@ -669,7 +672,7 @@ display_name = "OpenAI: GPT-4o-mini"
 created = "2024-07-18T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3.5-sonnet-20240620:beta"]
 provider = "Anthropic"
@@ -678,7 +681,7 @@ display_name = "Anthropic: Claude 3.5 Sonnet (2024-06-20) (self-moderated)"
 created = "2024-06-20T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3.5-sonnet-20240620"]
 provider = "Anthropic"
@@ -687,7 +690,7 @@ display_name = "Anthropic: Claude 3.5 Sonnet (2024-06-20)"
 created = "2024-06-20T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemini-flash-1.5"]
 provider = "Google"
@@ -696,7 +699,7 @@ display_name = "Google: Gemini 1.5 Flash "
 created = "2024-05-14T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/gpt-4o-2024-05-13"]
 provider = "OpenAI"
@@ -705,7 +708,7 @@ display_name = "OpenAI: GPT-4o (2024-05-13)"
 created = "2024-05-13T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/gpt-4o"]
 provider = "OpenAI"
@@ -714,7 +717,7 @@ display_name = "OpenAI: GPT-4o"
 created = "2024-05-13T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/gpt-4o:extended"]
 provider = "OpenAI"
@@ -723,7 +726,7 @@ display_name = "OpenAI: GPT-4o (extended)"
 created = "2024-05-13T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemini-pro-1.5"]
 provider = "Google"
@@ -732,7 +735,7 @@ display_name = "Google: Gemini 1.5 Pro"
 created = "2024-04-09T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."openai/gpt-4-turbo"]
 provider = "OpenAI"
@@ -741,7 +744,7 @@ display_name = "OpenAI: GPT-4 Turbo"
 created = "2024-04-09T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3-haiku:beta"]
 provider = "Anthropic"
@@ -750,7 +753,7 @@ display_name = "Anthropic: Claude 3 Haiku (self-moderated)"
 created = "2024-03-13T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3-haiku"]
 provider = "Anthropic"
@@ -759,7 +762,7 @@ display_name = "Anthropic: Claude 3 Haiku"
 created = "2024-03-13T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3-sonnet:beta"]
 provider = "Anthropic"
@@ -768,7 +771,7 @@ display_name = "Anthropic: Claude 3 Sonnet (self-moderated)"
 created = "2024-03-05T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3-sonnet"]
 provider = "Anthropic"
@@ -777,7 +780,7 @@ display_name = "Anthropic: Claude 3 Sonnet"
 created = "2024-03-05T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3-opus:beta"]
 provider = "Anthropic"
@@ -786,7 +789,7 @@ display_name = "Anthropic: Claude 3 Opus (self-moderated)"
 created = "2024-03-05T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."anthropic/claude-3-opus"]
 provider = "Anthropic"
@@ -795,7 +798,7 @@ display_name = "Anthropic: Claude 3 Opus"
 created = "2024-03-05T00:00:00Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemini-pro-vision"]
 provider = "Google"
@@ -814,7 +817,7 @@ display_name = "Mistral: Mistral Medium 3"
 created = "2025-05-07T14:15:41Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemini-2.5-pro-preview"]
 provider = "Google"
@@ -823,7 +826,7 @@ display_name = "Google: Gemini 2.5 Pro Preview"
 created = "2025-05-07T00:41:53Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."arcee-ai/spotlight"]
 provider = "Arcee AI"
@@ -832,7 +835,7 @@ display_name = "Arcee AI: Spotlight"
 created = "2025-05-05T21:45:52Z"
 modality = "text+image->text"
 input_modalities = [ "image", "text",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."opengvlab/internvl3-14b:free"]
 provider = "OpenGVLab"
@@ -841,7 +844,7 @@ display_name = "OpenGVLab: InternVL3 14B (free)"
 created = "2025-04-30T13:55:55Z"
 modality = "text+image->text"
 input_modalities = [ "image", "text",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."opengvlab/internvl3-2b:free"]
 provider = "OpenGVLab"
@@ -850,7 +853,7 @@ display_name = "OpenGVLab: InternVL3 2B (free)"
 created = "2025-04-30T13:30:07Z"
 modality = "text+image->text"
 input_modalities = [ "image", "text",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."meta-llama/llama-guard-4-12b"]
 provider = "Meta"
@@ -859,7 +862,7 @@ display_name = "Meta: Llama Guard 4 12B"
 created = "2025-04-30T01:06:33Z"
 modality = "text+image->text"
 input_modalities = [ "image", "text",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."google/gemini-2.5-pro-exp-03-25"]
 provider = "Google"
@@ -868,7 +871,7 @@ display_name = "Google: Gemini 2.5 Pro Experimental"
 created = "2025-03-25T17:01:39Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image", "file",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."perplexity/sonar-reasoning-pro"]
 provider = "Perplexity"
@@ -877,7 +880,7 @@ display_name = "Perplexity: Sonar Reasoning Pro"
 created = "2025-03-07T02:08:28Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."perplexity/sonar-pro"]
 provider = "Perplexity"
@@ -886,7 +889,7 @@ display_name = "Perplexity: Sonar Pro"
 created = "2025-03-07T01:53:43Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
 
 [available_vision_models."perplexity/sonar"]
 provider = "Perplexity"
@@ -895,4 +898,13 @@ display_name = "Perplexity: Sonar"
 created = "2025-01-27T21:36:48Z"
 modality = "text+image->text"
 input_modalities = [ "text", "image",]
-last_seen = "2025-05-10T04:39:06+00:00Z"
+last_seen = "2025-05-18T00:54:05+00:00Z"
+
+[available_vision_models."openai/codex-mini"]
+provider = "OpenAI"
+model_name_short = "Codex Mini"
+display_name = "OpenAI: Codex Mini"
+created = "2025-05-16T15:36:01Z"
+modality = "text+image->text"
+input_modalities = [ "image", "text",]
+last_seen = "2025-05-18T00:54:05+00:00Z"
