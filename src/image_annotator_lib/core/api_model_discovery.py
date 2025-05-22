@@ -3,7 +3,6 @@
 import datetime
 import json
 from datetime import datetime as dt
-from datetime import timezone 
 from typing import Any
 
 import requests
@@ -27,7 +26,7 @@ _REQUEST_TIMEOUT = 10
 
 def _fetch_and_update_vision_models() -> list[str]:
     """API からモデルを取得し、フィルタリング、整形、TOML 更新を行い、モデル ID リストを返す。"""
-    now = dt.now(timezone.utc)
+    now = dt.now(datetime.UTC)
     current_time_iso = now.isoformat(timespec="seconds") + "Z"
 
     # === API 呼び出し ===
@@ -181,24 +180,39 @@ def discover_available_vision_models(force_refresh: bool = False) -> dict[str, l
 
 
 def _filter_vision_models(raw_models: list[Any]) -> list[dict[str, Any]]:
-    """モデルリストから Vision (画像入力) 対応モデルのみをフィルタリングする。"""
-    vision_models = []
+    """モデルリストから Vision (画像入力) 対応、構造化出力対応、ツール利用対応のモデルのみをフィルタリングする。"""
+    compatible_models = []
     for model_data in raw_models:
         if not isinstance(model_data, dict):
             continue  # 辞書でないデータはスキップ
 
+        # --- Vision 対応かチェック ---
         architecture = model_data.get("architecture", {})
         if not isinstance(architecture, dict):
-            continue  # architecture が辞書でない場合はスキップ
-
+            continue
         input_modalities = architecture.get("input_modalities", [])
-        if not isinstance(input_modalities, list):
-            continue  # input_modalities がリストでない場合はスキップ
+        if not isinstance(input_modalities, list) or "image" not in input_modalities:
+            continue  # Vision 非対応モデルはスキップ
+        # --- ここまで Vision 対応チェック ---
 
-        if "image" in input_modalities:
-            vision_models.append(model_data)
+        # --- 構造化出力とツール利用の対応チェック ---
+        supported_parameters = model_data.get("supported_parameters")
+        is_structured_output_supported = False
+        is_tool_use_supported = False
 
-    return vision_models
+        if supported_parameters and isinstance(supported_parameters, list):
+            if 'structured_outputs' in supported_parameters:
+                is_structured_output_supported = True
+            if 'tools' in supported_parameters:
+                is_tool_use_supported = True
+
+        if not (is_structured_output_supported and is_tool_use_supported):
+            continue # 構造化出力とツール利用の両方に対応していないモデルはスキップ
+        # --- ここまで構造化出力とツール利用の対応チェック ---
+
+        compatible_models.append(model_data)
+
+    return compatible_models
 
 
 def _format_model_data_for_toml(api_model_data: dict[str, Any]) -> dict[str, Any] | None:

@@ -235,15 +235,15 @@ async def main_annotator_logic(
                 model_name=api_model_id,
                 provider=AnthropicProvider()
             )
-        elif provider_name.lower() == "openrouter":
-            llm_provider = OpenRouterProvider(
-                api_key=get_openrouter_api_key(),
-                base_url="https://openrouter.ai/api/v1"
-            )
-            llm_client = OpenAIModel(
-                model_name=api_model_id,
-                provider=llm_provider
-            )
+        # elif provider_name.lower() == "openrouter":
+        #     llm_provider = OpenRouterProvider(
+        #         api_key=get_openrouter_api_key(),
+        #         base_url="https://openrouter.ai/api/v1"
+        #     )
+        #     llm_client = OpenAIModel(
+        #         model_name=api_model_id,
+        #         provider=llm_provider
+        #     )
         else:
             print(f"エラー: 未対応のLLMプロバイダです: {provider_name}")
             return
