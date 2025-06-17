@@ -1,7 +1,7 @@
 import hashlib
 import sys
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -295,7 +295,7 @@ def convert_unix_to_iso8601(timestamp: int | float | None, model_id_for_log: str
 
     if isinstance(timestamp, int | float):
         try:
-            dt_object = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            dt_object = datetime.fromtimestamp(timestamp, tz=UTC)
             # ISO 8601 形式 (秒まで) + Z (UTCを示す) に変換
             return dt_object.isoformat(timespec="seconds").replace("+00:00", "Z")
         except (ValueError, OSError) as e:

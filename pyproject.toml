@@ -7,7 +7,7 @@ name = "image-annotator-lib"
 version = "0.1.2"
 description = "Integrated library for image tagging and scoring."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 license = "MIT"
 authors = [{ name = "NEXTAltair" }]
 keywords = [ # Merged keywords
@@ -20,7 +20,7 @@ keywords = [ # Merged keywords
 
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",                     # Updated based on source tomls
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",                         # Keep general, specific handled by deps
     "Topic :: Scientific/Engineering :: Image Processing",
@@ -77,8 +77,9 @@ dev = [
     "types-requests>=2.32.0",
     "types-Pillow",
     "types-toml",
-    "psutil",
-    "pytest-mock" # テストモック用
+    "psutil", # テストモック用
+    "pytest-mock",
+    "ty>=0.0.1a6",
 ]
 
 [project.urls]
@@ -88,7 +89,7 @@ Repository = "https://github.com/user/image-annotator-lib.git" # 仮
 [tool.ruff]
 fix = true
 line-length = 108
-target-version = "py312"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = [
@@ -119,7 +120,7 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.13"
 ignore_missing_imports = true
 
 

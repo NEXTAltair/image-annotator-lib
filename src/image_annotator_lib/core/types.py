@@ -1,12 +1,64 @@
 """
-現時点では pydantic と pydantic_ai 用のクラスのみ
-# TODO: 他のTypedDictも後で追加予定
+型定義モジュール - pydantic、pydantic_ai、および基底クラス用の型定義
 """
+from pathlib import Path
 from typing import Any, Protocol, TypedDict
 
+import onnxruntime as ort
 from pydantic import BaseModel, Field, SecretStr, ValidationInfo, field_validator
-from pydantic_ai import Agent
+from transformers.models.auto.processing_auto import AutoProcessor
+from transformers.models.clip import CLIPModel, CLIPProcessor
+from transformers.pipelines.base import Pipeline as TransformersPipelineObject
 
+# --- 基底クラス用の型定義 (base.py から移動) ---
+
+class TransformersComponents(TypedDict):
+    model: Any
+    processor: AutoProcessor
+
+class TransformersPipelineComponents(TypedDict):
+    pipeline: TransformersPipelineObject
+
+class ONNXComponents(TypedDict):
+    session: ort.InferenceSession
+    csv_path: Path
+
+class TensorFlowComponents(TypedDict):
+    model_dir: Path | None
+    model: Any
+
+class CLIPComponents(TypedDict):
+    model: Any
+    processor: CLIPProcessor
+    clip_model: CLIPModel
+
+class AnnotationResult(TypedDict, total=False):
+    """単一画像の標準化されたアノテーション結果。
+
+    `BaseAnnotator.predict` メソッドの戻り値リストの要素型です。
+
+    Attributes:
+        phash: 画像の知覚ハッシュ (str)。計算失敗時は None。
+        tags: アノテーション結果の主要な文字列リスト (list[str])。
+               タガーの場合はタグ、スコアラーの場合はスコアタグ、
+               キャプショナーの場合はキャプションが入ります。
+        formatted_output: 整形済み出力 (Any)。`_format_predictions` の戻り値。
+                          デバッグや詳細分析に使用できます。
+        error: 処理中に発生したエラーメッセージ (str)。エラーがない場合は None。
+    """
+
+    phash: str | None
+    tags: list[str]
+    formatted_output: Any
+    error: str | None
+
+class TagConfidence(TypedDict):
+    """タグとその信頼度、情報源を保持する型定義。"""
+
+    confidence: float
+    source: str
+
+# --- Web API 関連の型定義 ---
 
 # APIクライアント共通インターフェース
 class ApiClient(Protocol):
@@ -17,6 +69,16 @@ class WebApiComponents(TypedDict):
     client: ApiClient  # 各プロバイダーのAPIクライアント
     api_model_id: str  # APIコールに使用する加工済みモデルID
     provider_name: str  # プロバイダー名を追加
+
+# LoaderComponents型定義 (Union型)
+LoaderComponents = (
+    TransformersComponents |
+    TransformersPipelineComponents |
+    ONNXComponents |
+    TensorFlowComponents |
+    CLIPComponents |
+    WebApiComponents
+)
 
 class WebApiInput(BaseModel):
     image_b64: str | None = None   # base64文字列(Anthropic/OpenAI等)

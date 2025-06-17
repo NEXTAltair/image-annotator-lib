@@ -60,7 +60,7 @@ class GoogleApiAnnotator(WebApiBaseAnnotator):
                 self._wait_for_rate_limit()
 
                 # WebApiInput を作成 (image_bytes を使用)
-                web_api_input_for_image = self._create_web_api_input(image_data=image_data) 
+                web_api_input_for_image = self._create_web_api_input(image_data=image_data)
 
                 # API呼び出し用のパラメータを準備
                 # これらは GoogleClientAdapter.call_api 内で解釈される

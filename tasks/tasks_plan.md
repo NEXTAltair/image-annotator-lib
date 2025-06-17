@@ -7,6 +7,114 @@
 ## 2. 詳細タスクリスト･進行状況 (Detailed Task List and Progress)
 
 ### 2.1. アクティブなタスク / 残存構築作業 (Active Tasks / Remaining Work)
+- [ ] **`src/image_annotator_lib/core/base.py` の分割リファクタリング (詳細手順更新版)**
+    - [ ] **目的:** 可読性向上、保守性向上、関心事の分離 (RFC: `tasks/rfc/base_py_split_plan.md` 参照)。
+    - [ ] **手順:**
+        1.  **準備:**
+            - [ ] 新しいGitブランチを作成 (例: `refactor/split-base-py`)。
+            - [x] 設計ドキュメント `tasks/rfc/base_py_split_plan.md` を最終確認。
+            - [ ] **`src/image_annotator_lib/core/base.py` の既存機能に対するユニットテストを作成・拡充し、カバレッジを向上させる (リファクタリング前の動作保証)。**
+                - [ ] **テストファイル構成案:**
+                    - [ ] `tests/unit/core/` ディレクトリを作成 (存在しない場合)。
+                    - [ ] `tests/unit/core/test_base_annotator.py` を作成。
+                    - [ ] 各フレームワーク基底クラスに対応するテストファイルを作成 (例: `tests/unit/core/test_transformers_base.py`, `tests/unit/core/test_onnx_base.py` など)。
+                - [ ] **(A) `BaseAnnotator` クラス (`tests/unit/core/test_base_annotator.py`):**
+                    - [ ] **初期化 (`__init__`):**
+                        - [ ] 必須引数・オプション引数が正しく設定されること。
+                        - [ ] `config` 未指定時のデフォルト動作。
+                        - [ ] `components` 未指定時のデフォルト動作。
+                    - [ ] **抽象メソッドの呼び出し:**
+                        - [ ] `_load_model()`, `_run_inference()`, `_format_predictions()`, `_get_model_info()` が直接呼び出された場合に `NotImplementedError` を送出すること。
+                    - [ ] **具象メソッド:**
+                        - [ ] **`get_model_name()`:** 正しいモデル名を返すこと。
+                        - [ ] **`_validate_input()` (静的メソッド):**
+                            - [ ] サポートされる全入力パターン (str, list[str], PIL.Image, list[PIL.Image]) のテスト。
+                            - [ ] サポートされない型入力時の `TypeError`。
+                            - [ ] 空リスト入力時の動作。
+                        - [ ] **`predict()`:**
+                            - [ ] `_validate_input` が呼び出されること (モックで確認)。
+                            - [ ] `_load_model` が呼び出されること (モックで確認、`self.components` が `None` の場合)。
+                            - [ ] `_run_inference` が呼び出されること (モックで確認)。
+                            - [ ] `_format_predictions` が呼び出されること (モックで確認)。
+                            - [ ] `_run_inference` 例外時の適切な処理。
+                            - [ ] `_format_predictions` の戻り値の検証 (モック)。
+                            - [ ] 空の画像リスト入力時の動作。
+                    - [ ] **プロパティ:** 各プロパティが正しい値を返すこと。
+                - [ ] **(B) 各フレームワーク基底クラス (例: `TransformersBaseAnnotator` in `tests/unit/core/test_transformers_base.py`):**
+                    - [ ] **初期化 (`__init__`):**
+                        - [ ] 親クラス `__init__` 呼び出し確認。
+                        - [ ] フレームワーク固有引数の設定確認。
+                    - [ ] **`_load_model()` (および `__enter__` / `__exit__` でのcomponents管理):**
+                        - [ ] モデルロード処理呼び出し確認 (関連ヘルパーやライブラリ呼び出しをモック)。
+                        - [ ] ロード成功時に `self.components` が適切な型・内容で設定されること。
+                        - [ ] モデルロード失敗時 (ファイル欠損、不正なファイル) のエラー送出。
+                    - [ ] **`_run_inference()`:**
+                        - [ ] `self.components` が `None` の場合の適切な処理 (エラー or `_load_model` 呼び出し)。
+                        - [ ] フレームワーク固有推論関数呼び出し確認 (モック)。
+                        - [ ] 入力データの前処理確認。
+                        - [ ] 推論結果の型・構造確認。
+                    - [ ] **`_format_predictions()`:**
+                        - [ ] `self.components` が `None` の場合のエラー送出。
+                        - [ ] `RawOutput` から期待される `FormattedOutput` への変換確認。
+                        - [ ] エラーを含む推論結果の適切な処理。
+                    - [ ] **`_get_model_info()`:**
+                        - [ ] `self.components` が `None` の場合のエラー送出。
+                        - [ ] フレームワーク固有モデル情報の正しい返却確認。
+                - [ ] **(C) `PipelineBaseAnnotator` (特殊ケース):**
+                    - [ ] `transformers.pipeline` セットアップ・利用テスト。
+                    - [ ] `task` 引数処理テスト。
+                - [ ] **(D) `WebApiBaseAnnotator` (特殊ケース):**
+                    - [ ] `api_client` 初期化・利用テスト。
+                    - [ ] `_run_inference` でのAPI呼び出しテスト (モック)。
+                    - [ ] APIレスポンス処理テスト。
+        2.  **`core/types.py` の更新:**
+            - [ ] `base.py` から以下の型定義を `core/types.py` に移動または新規作成:
+                - `AnnotationResult`
+                - `TagConfidence`
+                - `TransformersComponents`
+                - `TransformersPipelineComponents`
+                - `ONNXComponents`
+                - `TensorFlowComponents`
+                - `CLIPComponents`
+                - `LoaderComponents` (上記Components型のUnion)
+            - [ ] `ModelComponents` 型の定義を `base.py` から削除 (廃止)。
+        3.  **新しい `base` ディレクトリと基底クラスファイルの作成:**
+            - [ ] `src/image_annotator_lib/base/` ディレクトリを新規作成。
+            - [ ] `src/image_annotator_lib/base/__init__.py` を作成し、RFC通りに各基底クラスを re-export。
+            - [ ] `src/image_annotator_lib/base/annotator.py` を新規作成:
+                - `BaseAnnotator` クラス定義を移動。
+                - `self.components` の型ヒントを `LoaderComponents | None` (from `core.types`) に修正。
+                - 必要なインポートを追加。
+            - [ ] 以下各フレームワーク基底クラスを `src/image_annotator_lib/base/` 配下の新ファイルに移動・修正:
+                - `transformers.py` -> `TransformersBaseAnnotator` (components: `TransformersComponents | None`)
+                - `tensorflow.py` -> `TensorflowBaseAnnotator` (components: `TensorFlowComponents | None`)
+                - `onnx.py` -> `ONNXBaseAnnotator` (components: `ONNXComponents | None`)
+                - `clip.py` -> `ClipBaseAnnotator` (components: `CLIPComponents | None`)
+                - `pipeline.py` -> `PipelineBaseAnnotator` (components: `TransformersPipelineComponents | None`)
+                - `webapi.py` -> `WebApiBaseAnnotator` (components: `WebApiComponents | None`)
+                - 各ファイルで必要なインポートを解決。
+        4.  **`core/model_factory.py` の修正:**
+            - [ ] `ModelLoad` クラスメソッドの戻り値型ヒントを `core/types.py` の型に確認・修正。
+            - [ ] `restore_model_to_cuda`, `cache_to_main_memory` の `components` 引数型を検討。
+        5.  **インポートパスの修正:**
+            - [ ] `src/image_annotator_lib/model_class/` 配下の具象クラスのインポート文を修正。
+            - [ ] `src/image_annotator_lib/api.py` のインポート文を修正。
+            - [ ] `src/image_annotator_lib/__init__.py` のインポート文を修正。
+            - [ ] その他、コードベース全体で古い `core.base` を参照している箇所を修正。
+        6.  **旧 `core/base.py` のクリーンアップ:**
+            - [ ] `src/image_annotator_lib/core/base.py` を削除または内容を空に。
+        7.  **Linterチェックと型チェック:**
+            - [ ] `ruff format .` を実行。
+            - [ ] `ruff check . --fix` を実行。
+            - [ ] `mypy src/` を実行し、型エラーを修正 (RFCのLinter対応方針参照)。
+        8.  **テストの実行と修正:**
+            - [ ] `pytest` を実行。
+            - [ ] テストコード内の古いパス参照を修正 (必要な場合)。
+            - [ ] **リファクタリング前に作成・拡充したユニットテストを含め、全てのテストがパスすることを確認 (互換性担保)。**
+        9.  **ドキュメント更新:**
+            - [ ] `docs/architecture.md`, `docs/technical.md` を更新。
+            - [ ] `tasks/rfc/base_py_split_plan.md` のステータスを更新。
+            - [ ] この `tasks/tasks_plan.md` のタスクステータスを更新。
 - [ ] **ユニットテストの全パス:** BDDステップ定義再実装の前提として、既存の全ユニットテストをパスさせる。
 - [ ] **BDD ステップ定義の再実装 (Featureファイルは残存)**
   - 既存のFeatureファイルに基づき、品質の高いステップ定義を一から再実装する。

@@ -2,7 +2,7 @@
   "mcpServers": {
     "perplexity-mcp": {
       "env": {
-        "PERPLEXITY_API_KEY": "pplx-", 
+        "PERPLEXITY_API_KEY": "pplx-",
         "PERPLEXITY_MODEL": "sonar"
       },
       "command": "uvx",

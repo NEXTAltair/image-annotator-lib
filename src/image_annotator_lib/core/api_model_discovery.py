@@ -3,7 +3,6 @@
 import datetime
 import json
 from datetime import datetime as dt
-from datetime import timezone 
 from typing import Any
 
 import requests
@@ -27,7 +26,7 @@ _REQUEST_TIMEOUT = 10
 
 def _fetch_and_update_vision_models() -> list[str]:
     """API からモデルを取得し、フィルタリング、整形、TOML 更新を行い、モデル ID リストを返す。"""
-    now = dt.now(timezone.utc)
+    now = dt.now(datetime.UTC)
     current_time_iso = now.isoformat(timespec="seconds") + "Z"
 
     # === API 呼び出し ===

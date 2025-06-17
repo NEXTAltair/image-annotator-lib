@@ -472,7 +472,7 @@ def _initialize_api_client(provider: str, model_config: dict[str, Any], model_na
         return AnthropicAdapter(raw_anthropic_client)
 
     actual_model_id = model_config.get("api_model_id", model_config.get("model_path"))
-    if actual_model_id and ":" in actual_model_id or provider_lower == "openrouter":
+    if (actual_model_id and ":" in actual_model_id) or provider_lower == "openrouter":
         provider_name_for_key = "OpenRouter"
         if not api_key_str:
             api_key_str = os.getenv("OPENROUTER_API_KEY")
@@ -533,8 +533,8 @@ def prepare_web_api_components(model_name: str) -> WebApiComponents:
     try:
         # provider_name, final_model_config_for_init, model_name を渡す
         initialized_client = _initialize_api_client(
-            provider=provider_name, 
-            model_config=final_model_config_for_init, 
+            provider=provider_name,
+            model_config=final_model_config_for_init,
             model_name_for_logging=model_name
         )
     except ApiAuthenticationError as e: # より具体的なエラーハンドリング

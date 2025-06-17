@@ -407,7 +407,7 @@ class BaseAnnotator(ABC):
                     phash = chunk_phash_list[j] if j < len(chunk_phash_list) else None
                     # ここで、もしeがdictやKnownError型でerror属性を持つ場合はそちらを優先
                     if hasattr(e, "error"):
-                        error_message = getattr(e, "error")
+                        error_message = e.error
                     elif isinstance(e, dict) and "error" in e:
                         error_message = e["error"]
                     result = self._generate_result(
@@ -549,7 +549,7 @@ class TransformersBaseAnnotator(BaseAnnotator):
                     # batch_decode を持つ場合 (一般的な AutoProcessor)
                     # ここで actual_processor にキャストするのは、mypyに属性の存在を知らせるため。
                     # 実際には processor_obj の具体的な型によって挙動が変わる。
-                    actual_processor = cast(AutoProcessor, processor_obj) 
+                    actual_processor = cast(AutoProcessor, processor_obj)
                     decoded_texts: list[str] | str = actual_processor.batch_decode(token_ids, skip_special_tokens=True)
                     if isinstance(decoded_texts, str):
                         all_formatted.append(decoded_texts)
@@ -568,7 +568,7 @@ class TransformersBaseAnnotator(BaseAnnotator):
             logger.exception(f"予測結果のフォーマット中にエラー発生: {e}")
             raise ValueError(f"予測結果のフォーマット失敗: {e}") from e
 
-    def _generate_tags(self, formatted_output: str) -> list[str]:
+    def _generate_tags(self, formatted_output: str | list[str]) -> list[str]:
         """キャプション文字列を単一要素のリストに変換します。
 
         formatted_outputは文字列型であるため、単純にそれを含む
@@ -578,6 +578,9 @@ class TransformersBaseAnnotator(BaseAnnotator):
         try:
             if isinstance(formatted_output, str):
                 return [formatted_output]
+            else:
+                logger.warning(f"_generate_tags: 期待される文字列型ではありません: {type(formatted_output)}")
+                return []
         except Exception as e:
             logger.exception(f"タグ生成中にエラー発生: {e}")
             return []
