@@ -75,11 +75,54 @@ temp/
 *.bak
 *.swp
 
-# Custom
+# Model files (large files should not be tracked)
 models/
 !models/utilsによってダウンロードされたモデルの保存先.txt
+!models/README.md
+*.onnx
+*.pt
+*.pth
+*.bin 
+*.safetensors
+
+# Configuration files with sensitive data
+config/*.toml
+!config/*.toml.example
+!config/*.toml.default
+!config/annotator_config.toml  # Keep main config template
+
+# API keys and secrets
+*.key
+*.token
+api_keys.json
+secrets.json
+
+# AI IDE related
 .roo/mcp.json
 .cursor/mcp.json
+.cursor/composer/
+.cursor/chat/
+
+# Memory and development context
+.dev_context/
+memory-bank/
+
+# Cache directories
+.cache/
+transformers_cache/
+.huggingface/
+
+# Additional Python patterns
+*.py[cod]
+*$py.class
+.pytest_reports/
+.ruff_cache/
+.mypy_cache/
+
+# System and lock files
+*.pid
+*.lock
+uv.lock
 
 # 参考用リポジトリ (必要に応じて)
 stable-diffusion-webui-wd14-tagger/

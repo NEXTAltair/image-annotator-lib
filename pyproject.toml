@@ -7,7 +7,7 @@ name = "image-annotator-lib"
 version = "0.1.2"
 description = "Integrated library for image tagging and scoring."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "NEXTAltair" }]
 keywords = [ # Merged keywords
@@ -20,7 +20,7 @@ keywords = [ # Merged keywords
 
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.12",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",                         # Keep general, specific handled by deps
     "Topic :: Scientific/Engineering :: Image Processing",
@@ -33,7 +33,6 @@ dependencies = [
     "numpy>=1.26.0",
     "pandas>=2.0.0",
     "Pillow>=10.0.0",
-    "polars",
     "toml",
     "tensorflow>=2.19.0;platform_system!='Darwin'", # Use newer version from scorer
     "transformers>=4.27.4",
@@ -48,48 +47,41 @@ dependencies = [
     "google-genai",
     "openai",
     "anthropic",
-    "dotenv",
+    "python-dotenv",
     # Image Processing & Utils
     "opencv-python>=4.8.0",
     "requests>=2.31.0",
     "tqdm>=4.66.0",
-    "imagehash", # For pHash calculation in base.py
-    "pillow>=9.0.0",
+    "imagehash",
     "loguru",
     "torch>=2.6.0",
     "torchvision>=0.21.0",
-    "datetime>=5.5",
     "pydantic-ai[logfire]>=0.1.11",
 ]
-
-[project.optional-dependencies]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
-    "pytest-bdd>=8.0.0",
     "pytest-clarity>=1.0.1",
     "pytest-cov>=4.1.0",
     "pytest-xdist>=3.5.0",
-    "pytest-playwright",
     "mypy>=1.8.0",
     "ruff>=0.2.0",
     "types-requests>=2.32.0",
     "types-Pillow",
     "types-toml",
-    "psutil", # テストモック用
+    "psutil",
     "pytest-mock",
-    "ty>=0.0.1a6",
 ]
 
 [project.urls]
-Homepage = "https://github.com/user/image-annotator-lib"       # 仮
-Repository = "https://github.com/user/image-annotator-lib.git" # 仮
+Homepage = "https://github.com/NEXTAltair/image-annotator-lib"
+Repository = "https://github.com/NEXTAltair/image-annotator-lib.git"
 
 [tool.ruff]
 fix = true
 line-length = 108
-target-version = "py313"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = [
@@ -120,9 +112,8 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.12"
 ignore_missing_imports = true
-
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
@@ -133,27 +124,11 @@ addopts = ["--import-mode=importlib", "-v", "-s", "-ra", "--tb=short", "--showlo
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",
-    "gui: GUI tests",
     "slow: Tests that take more time",
-    "api_model_discovery: Tests related to API model discovery functionality",
-    "base: Tests for core base classes and functionalities",
+    "webapi: Tests related to Web API based annotators",
     "scorer: Tests specific to scorer models",
     "tagger: Tests specific to tagger models",
-    "webapi: Tests related to Web API based annotators",
-    "errors: Tests for custom exception handling",
-    "registry: Tests for the model registry",
-    "base_loader: Tests for the base model loader",
-    "model_factory: Tests for the model factory (ModelLoad)",
-    "transformers_loader: Tests for the Transformers loader",
-    "transformers_pipeline_loader: Tests for the Transformers Pipeline loader",
-    "onnx_loader: Tests for the ONNX loader",
-    "tensorflow_loader: Tests for the TensorFlow loader",
-    "clip_loader: Tests for the CLIP loader",
-    "memory_management: Tests for memory management features",
-    "cache_control: Tests for cache control mechanisms",
-    "cuda_management: Tests related to CUDA device management",
-    "error_handling: General tests for error handling across the library",
-    "utils: Tests for utility functions"
+    "model_factory: Tests for the model factory (ModelLoad)"
 ]
 
 [tool.coverage.run]
@@ -187,6 +162,3 @@ include = ["/src", "/tests"]
 
 [tool.hatch.build.targets.wheel.shared-data]
 "src/image_annotator_lib/py.typed" = "image_annotator_lib/py.typed"
-
-[tool.poetry.dependencies]
-imagehash = "^4.3.1"
