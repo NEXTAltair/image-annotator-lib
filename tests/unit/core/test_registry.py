@@ -4,7 +4,7 @@ import pytest
 
 # Assuming registry.py is in src.image_annotator_lib.core
 from image_annotator_lib.core import api_model_discovery, config, registry
-from image_annotator_lib.core.base import BaseAnnotator
+from image_annotator_lib.core.base.annotator import BaseAnnotator
 from image_annotator_lib.core.config import ModelConfigRegistry  # Import for mocking
 
 

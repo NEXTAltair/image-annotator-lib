@@ -7,7 +7,7 @@ from typing import Any, TypedDict
 
 from PIL import Image
 
-from .core.base import BaseAnnotator
+from .core.base.annotator import BaseAnnotator
 from .core.registry import get_cls_obj_registry
 from .core.types import AnnotationResult
 from .core.utils import calculate_phash, logger

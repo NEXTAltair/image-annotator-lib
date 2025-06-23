@@ -16,15 +16,15 @@ import pytest
 from PIL import Image
 
 # テスト対象のインポート
-from image_annotator_lib.core.base import (
+from image_annotator_lib.core.base.annotator import BaseAnnotator
+from image_annotator_lib.core.base.transformers import TransformersBaseAnnotator
+from image_annotator_lib.core.base.webapi import WebApiBaseAnnotator
+from image_annotator_lib.core.types import (
     AnnotationResult,
-    BaseAnnotator,
     ONNXComponents,
     TagConfidence,
     TensorFlowComponents,
-    TransformersBaseAnnotator,
     TransformersComponents,
-    WebApiBaseAnnotator,
 )
 from image_annotator_lib.exceptions.errors import (
     ConfigurationError,
