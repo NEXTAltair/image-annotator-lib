@@ -17,10 +17,21 @@ graph TD
             Utils[core/utils.py]
             Exceptions[exceptions/errors.py]
         end
-        subgraph Model Classes (model_class/)
-            Base[core/base.py: BaseAnnotator]
-            FrameworkBase(フレームワーク別基底クラス 例: ONNXBaseAnnotator)
-            ConcreteModels(具象モデルクラス 例: WDTagger, AestheticScorer)
+        subgraph Model Classes
+            Base[core/base/annotator.py: BaseAnnotator]
+            subgraph Framework Base Classes (core/base/)
+                ONNXBase[onnx.py: ONNXBaseAnnotator]
+                TransformersBase[transformers.py: TransformersBaseAnnotator]
+                WebAPIBase[webapi.py: WebApiBaseAnnotator]
+            end
+            subgraph Concrete Models (model_class/)
+                ConcreteModels(WDTagger, AestheticScorer など)
+                subgraph WebAPI Models (annotator_webapi/)
+                    GoogleAPI[google_api.py]
+                    OpenAIAPI[openai_api_*.py]
+                    AnthropicAPI[anthropic_api.py]
+                end
+            end
         end
     end
 
@@ -136,16 +147,27 @@ sequenceDiagram
 
 コード重複回避と責務明確化のため、以下の3層構造クラス階層を採用。
 
-1.  **`BaseAnnotator` (`core/base.py`):**
+1.  **`BaseAnnotator` (`core/base/annotator.py`):**
     *   全アノテーター(Tagger/Scorer)共通の処理とインターフェースを提供。
     *   **責務:** 共通属性初期化、**共通化`predict`メソッド**(チャンク処理、pHash計算、エラーハンドリング、標準結果生成)、サブクラス実装抽象ヘルパーメソッド定義、コンテキスト管理インターフェース定義。
-2.  **フレームワーク/タイプ別基底クラス (`core/base.py`, `model_class/annotator_webapi.py`):**
+2.  **フレームワーク/タイプ別基底クラス (`core/base/`):**
     *   `BaseAnnotator` を継承し、特定MLフレームワーク(ONNX, Transformers等)やタイプ(Web API等)共通処理を実装。
-    *   **例:** `ONNXBaseAnnotator`, `TransformersBaseAnnotator`, `TensorflowBaseAnnotator`, `ClipBaseAnnotator`, `PipelineBaseAnnotator`, `WebApiBaseAnnotator`。
+    *   **例:** 
+        - `core/base/onnx.py` - `ONNXBaseAnnotator`
+        - `core/base/transformers.py` - `TransformersBaseAnnotator`
+        - `core/base/tensorflow.py` - `TensorflowBaseAnnotator`
+        - `core/base/clip.py` - `ClipBaseAnnotator`
+        - `core/base/pipeline.py` - `PipelineBaseAnnotator`
+        - `core/base/webapi.py` - `WebApiBaseAnnotator`
     *   **責務:** フレームワーク固有モデルロード/解放ロジック、`BaseAnnotator` 抽象ヘルパーメソッドの一部実装。
-3.  **具象モデルクラス (`models/`, `model_class/annotator_webapi.py`):**
+3.  **具象モデルクラス (`model_class/`):**
     *   対応するフレームワーク/タイプ別基底クラスを継承し、個別モデル固有処理のみ実装。
-    *   **例:** `WDTagger`, `BLIPTagger`, `AestheticShadowV1`, `CafePredictor`, `GoogleApiAnnotator`, `OpenAIApiAnnotator`, `AnthropicApiAnnotator`, `OpenRouterApiAnnotator`。
+    *   **例:** `WDTagger`, `BLIPTagger`, `AestheticShadowV1`, `CafePredictor`
+    *   **WebAPI具象クラス** (`model_class/annotator_webapi/`):
+        - `google_api.py` - `GoogleApiAnnotator`
+        - `openai_api_chat.py`, `openai_api_response.py` - OpenAI実装
+        - `anthropic_api.py` - `AnthropicApiAnnotator`
+        - `webapi_shared.py` - 共通ユーティリティ
     *   **責務:** モデル固有初期化、ファイル読み込み、必要に応じたヘルパーメソッドのオーバーライド(特に `_generate_tags`、Web APIの場合は `_run_inference` も重要)。
 
 ### 3.3 主要コンポーネントの役割

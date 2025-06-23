@@ -25,10 +25,10 @@
 2.  **依存関係のインストール:**
     ```bash
     # 通常の利用
-    uv pip sync
+    uv sync
 
     # 開発用にソースからインストール
-    uv pip sync --dev
+    uv sync --dev
     ```
 
 ## Getting Started / 基本的な使い方
@@ -228,5 +228,27 @@ for phash, model_results in results.items():
 -   [**システムアーキテクチャ (System Architecture)**](./docs/architecture.md): ライブラリの構造、主要コンポーネント、ワークフロー、設計決定など。
 -   [**技術仕様書 (Technical Specifications)**](./docs/technical.md): 開発環境、技術スタック、依存関係、コーディング規約、モデル追加･テスト･ロギング手順など。
 
-(古いドキュメントへのリンクは削除されました。)
-テスト完了
+## 開発者向け情報
+
+### テスト実行
+```bash
+# 全テスト実行
+pytest
+
+# 特定カテゴリのテスト実行
+pytest -m unit        # ユニットテストのみ
+pytest -m integration # 統合テストのみ
+pytest -m webapi      # Web APIテストのみ
+pytest -m scorer      # スコアラーモデルテストのみ
+pytest -m tagger      # タガーモデルテストのみ
+```
+
+### コード品質チェック
+```bash
+# リンティングとフォーマット
+ruff check
+ruff format
+
+# 型チェック
+mypy src/
+```

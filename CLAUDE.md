@@ -58,8 +58,14 @@ python example/example_lib.py
 
 The library follows a clean 3-layer architecture for annotators:
 
-1. **BaseAnnotator** (`core/base.py`) - Common interface and shared functionality
-2. **Framework-specific base classes** - ONNX, Transformers, TensorFlow, WebAPI, etc.
+1. **BaseAnnotator** (`core/base/annotator.py`) - Common interface and shared functionality
+2. **Framework-specific base classes** - Located in `core/base/` directory:
+   - `core/base/webapi.py` - WebApiBaseAnnotator
+   - `core/base/onnx.py` - ONNXBaseAnnotator  
+   - `core/base/transformers.py` - TransformersBaseAnnotator
+   - `core/base/tensorflow.py` - TensorflowBaseAnnotator
+   - `core/base/clip.py` - ClipBaseAnnotator
+   - `core/base/pipeline.py` - PipelineBaseAnnotator
 3. **Concrete model classes** - Specific implementations (WDTagger, AestheticScorer, etc.)
 
 ### Key Components
@@ -75,7 +81,11 @@ The library follows a clean 3-layer architecture for annotators:
 
 **Model Categories:**
 - **Local ML Models**: ONNX, Transformers, TensorFlow, CLIP-based models
-- **Web API Models**: Google Gemini, OpenAI GPT, Anthropic Claude, OpenRouter
+- **Web API Models**: Located in `model_class/annotator_webapi/` directory:
+  - `anthropic_api.py` - AnthropicApiAnnotator
+  - `google_api.py` - GoogleApiAnnotator
+  - `openai_api_chat.py` & `openai_api_response.py` - OpenAI implementations
+  - `webapi_shared.py` - Shared WebAPI utilities
 - **Specialized Models**: DeepDanbooru taggers, aesthetic scorers, captioning models
 
 **Key Design Principles:**
@@ -108,10 +118,11 @@ The `ModelLoad` class implements sophisticated memory management:
 ### Web API Integration
 
 Web API annotators follow a consistent pattern:
-- Base class `WebApiBaseAnnotator` provides common API handling
-- Provider-specific classes handle authentication and API specifics
+- Base class `WebApiBaseAnnotator` (`core/base/webapi.py`) provides common API handling
+- Provider-specific classes in `model_class/annotator_webapi/` handle authentication and API specifics
 - Pydantic models (`AnnotationSchema` in `core/types.py`) ensure type safety
 - Robust error handling for rate limits, authentication, and response parsing
+- **API Model Discovery** (`core/api_model_discovery.py`) - Automatic discovery of available external API models
 
 ### Test Architecture
 
@@ -182,6 +193,8 @@ estimated_size_gb = 1.5
 - `webapi_annotate.py` - Test Web API annotators
 - `check_api_model_discovery.py` - Validate API model availability
 - `check_openrouter_models.py` - OpenRouter model discovery
+- `check_googleapi_payload.py` - Test Google API payload structure
+- `check_openrouter_payload.py` - Test OpenRouter API payload structure
 
 **Model Storage:**
 - `models/` directory contains downloaded model files
