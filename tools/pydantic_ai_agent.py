@@ -20,7 +20,7 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.google_gla import GoogleGLAProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
-# from pydantic_ai.providers.openrouter import OpenRouterProvider
+from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 #
 #  from image_annotator_lib.model_class.annotator_webapi.webapi_shared import BASE_PROMPT, SYSTEM_PROMPT
@@ -235,15 +235,14 @@ async def main_annotator_logic(
                 model_name=api_model_id,
                 provider=AnthropicProvider()
             )
-        # elif provider_name.lower() == "openrouter":
-        #     llm_provider = OpenRouterProvider(
-        #         api_key=get_openrouter_api_key(),
-        #         base_url="https://openrouter.ai/api/v1"
-        #     )
-        #     llm_client = OpenAIModel(
-        #         model_name=api_model_id,
-        #         provider=llm_provider
-        #     )
+        elif provider_name.lower() == "openrouter":
+            llm_provider = OpenRouterProvider(
+                api_key=get_openrouter_api_key()
+            )
+            llm_client = OpenAIModel(
+                model_name=api_model_id,
+                provider=llm_provider
+            )
         else:
             print(f"エラー: 未対応のLLMプロバイダです: {provider_name}")
             return
@@ -342,7 +341,7 @@ if __name__ == "__main__":
     # default_api_model_id = "gemini-2.0-flash" # Vision対応のGeminiモデル
 
     default_provider_name = "OpenRouter"
-    default_api_model_id = "meta-llama/llama-4-maverick:free"
+    default_api_model_id = "qwen/qwen2.5-vl-3b-instruct:free"
 
     # default_provider_name = "Anthropic"
     # default_api_model_id = "claude-3-5-sonnet-20240620"
