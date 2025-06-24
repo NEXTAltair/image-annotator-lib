@@ -153,18 +153,25 @@
 ### 既知問題点
 - (特になし)
 
-## 現在の状況 (2025-05-13)
+## 現在の状況 (2025-06-23)
 
-- PydanticAI 関連ドキュメント ([tasks/rfc/pydanticai_integration_plan.md](mdc:tasks/rfc/pydanticai_integration_plan.md)) の読解と、それに基づく型定義･API利用方法の理解を進めている。
-- 既存BDDテストスイートの安定化作業を実施。
-    - Web API 関連のテストにおけるタイムアウト処理のシミュレーション方法を改善。
-    - APIからのエラーレスポンスに対するテストステップのアサーションを修正し、より堅牢な検証ロジックを導入。
-    - Linter (Mypy/Ruff) による型エラーやコーディングスタイル違反を修正し、コード品質を向上。
-- 特に `google-genai` SDK利用時のタイムアウト処理、エラーハンドリングについて調査･実装し、テストカバレッジを改善した。
-- `tasks/rfc/pydanticai_integration_plan.md` の更新を実施し、`types.py` の作成経緯やBDDテスト修正の記録を反映した。
+### PydanticAI 0.3.2 アップデート完了
+- **重要な進展**: PydanticAI を 0.1.11 から 0.3.2 へアップデート完了
+- **OpenRouter統合の技術的問題解決**: 以前発生していた `TypeError: 'NoneType' object cannot be interpreted as an integer` エラーが完全に解決
+- **基本接続確認済み**: OpenRouterProviderクラスが正常に動作し、APIエンドポイントへの接続が確立されることを確認
+
+### 統合状況の評価
+- **✅ 解決済み**: PydanticAI TypeErrorの完全解決、OpenRouterProviderの認識、API接続の確立
+- **⚠️ 制限事項**: 一部freeモデルの利用可能性、ツール使用サポートの有無、画像入力サポートの差異
+- **📈 評価**: PydanticAI統合における基本的な技術的障壁は解決済み、次フェーズへの準備完了
+
+### 技術仕様更新
+- pyproject.tomlでPydanticAI依存関係を`pydantic-ai[anthropic,google,logfire,openai]>=0.3.2`に更新
+- OpenRouterProviderの初期化パラメータがAPI仕様変更により`base_url`パラメータ不要となったことを確認
+- 公式ドキュメントに基づく正しい使用パターンを検証済み
 
 ## 次のステップ
 
-- 引き続き `pydanticai_integration_plan.md` に基づき、Pydanticモデルの導入とリファクタリング作業を進める。(現在はPydanticAI本体の対応が主)
-- 未解決のテスト失敗があれば、原因調査と修正を行う。
-- 関連ドキュメント(`error-documentation.mdc`, `lessons-learned.mdc`, `technical.md` 等)に必要な情報を追記･更新する。
+- **PydanticAI統合計画の次フェーズ実装**: Phase 1のPydanticAIAgentAnnotator基盤クラス作成に着手
+- **既存WebAPIアノテーターとの統合**: OpenAI, Google, Anthropic, OpenRouterの段階的置き換え計画の実行
+- **関連ドキュメント更新**: `pydanticai_integration_plan.md`、`technical.md`、`lessons-learned.mdc`への進捗反映

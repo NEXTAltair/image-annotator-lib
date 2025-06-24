@@ -1,8 +1,12 @@
+"""
+OpenRouterのAPIを使用して、各種機能対応モデルの情報を取得するスクリプト。
+現状 Visionタスク 構造化出力 と Agent用の Tool 対応モデルをチェックしている。
+"""
+import json
 import os
 import traceback
 
 import requests
-import json
 from dotenv import load_dotenv
 
 # .env ファイルから API キーをロード
@@ -33,6 +37,12 @@ else:
             model_list = models_data["data"]
 
             for model in model_list:
+                # # Anthropic Google OpenAI のモデルは除外
+                model_id = model.get("id")
+                excluded_keywords = ["anthropic", "google", "openai"]
+                if model_id and any(keyword in model_id for keyword in excluded_keywords):
+                    continue
+
                 # --- Vision 対応かチェック ---
                 architecture = model.get("architecture")
                 is_vision_model = False
@@ -44,10 +54,26 @@ else:
                         and "image" in input_modalities
                     ):
                         is_vision_model = True
-
                 # Vision 対応モデルでなければスキップ
                 if not is_vision_model:
                     continue
+
+                # 構造化出力のチェック
+                supported_parameters = model.get("supported_parameters")
+                is_structured_output = False
+                is_tool_model = False
+                if supported_parameters and isinstance(supported_parameters, list):
+                    if 'structured_outputs' in supported_parameters:
+                        is_structured_output = True
+                     # Tool対応モデルチェック PydanticAI Agent で使用可能なモデルかチェック
+                    if 'tools' in supported_parameters:
+                        is_tool_model = True
+                if not is_structured_output:
+                    continue
+
+                if not is_tool_model:
+                    continue
+
                 # --- チェックここまで ---
 
                 vision_models_found = True
@@ -60,17 +86,13 @@ else:
 
                 # 特に重要な architecture フィールド
                 if architecture and isinstance(architecture, dict):
-                    print(f"  アーキテクチャ:")
+                    print("  アーキテクチャ:")
                     print(f"    入力形式 (input_modalities): {architecture.get('input_modalities', 'N/A')}")
                     print(
                         f"    出力形式 (output_modalities): {architecture.get('output_modalities', 'N/A')}"
                     )
-                #     print(
-                #         f"    トークナイザ (tokenizer): {architecture.get('tokenizer', 'N/A')}"
-                #     )  # 不要な情報のためコメントアウト
-                # else:
-                #     print("  アーキテクチャ情報: なし")
-
+                    print("使用可能な機能パラメータ:")
+                    print(f"    パラメータ (supported_parameters): {model.get('supported_parameters', 'N/A')}")
                 # 全データ表示
                 print(f"  全データ (raw): {model}")
 
@@ -84,11 +106,6 @@ else:
     except requests.exceptions.RequestException as e:
         # 接続エラー、タイムアウトなど
         print(f"APIへの接続中にエラーが発生しました: {e}")
-        # print(traceback.format_exc()) # デバッグ時以外は不要かも
-    except requests.exceptions.HTTPError as e:
-        # APIからのエラー応答 (4xx, 5xx)
-        print(f"OpenRouter APIエラー (ステータスコード: {e.response.status_code}): {e.response.text}")
-        # print(traceback.format_exc()) # デバッグ時以外は不要かも
     except Exception as e:
         print(f"モデル一覧の取得中に予期せぬエラーが発生しました: {e}")
         print(traceback.format_exc())

@@ -3,7 +3,7 @@
 ## 1. 目的
 
 *   `annotator_config.toml` で静的に定義されているAPIベースのアノテーター (Google, OpenAI, Anthropic, OpenRouter) が使用するモデル名を、各APIプロバイダーへの問い合わせによって動的に取得するように変更する。
-*   特に画像を入力とするVisionタスクが実行可能なモデルに限定して取得する。
+*   特に画像を入力とするVisionタスクが実行可能であり、かつ構造化出力 (`structured_outputs`) およびツール利用 (`tools`) に対応したモデルに限定して取得する。
 *   このモデル取得機能を外部から利用可能な関数として提供する。
 
 ## 2. 背景 / 現状の課題
@@ -19,13 +19,18 @@
 - 各API公式(Anthropic, Google, OpenAI等)のモデルリストAPIでは、そのモデルがVisionタスク(画像入力)に対応しているかどうかを直接判別できない。
 - OpenRouter APIは、全モデルに対して`architecture.input_modalities`フィールドを返し、ここに`"image"`が含まれているかでVision対応モデルを機械的に抽出できる。
 - このため、本ライブラリではVisionタスク対応モデルの自動発見･管理はOpenRouter API経由の情報に依存する設計とした。
+
+#### OpenRouter API利用におけるフィルタリング条件強化の経緯 (構造化出力・ツール利用)
+- PydanticAI を使用した Agent 機能の実装にあたり、基盤となる大規模言語モデル (LLM) が「構造化出力」と「ツール利用 (Functions/Tools)」に対応していることが必須条件となった。
+- OpenRouter API のモデル情報には `supported_parameters` フィールドがあり、ここに `'structured_outputs'` や `'tools'` が含まれているかで、これらの機能への対応可否を判別できる。
+- そのため、従来の Vision タスク対応に加え、これらの条件も満たすモデルのみを動的に取得するようにフィルタリング条件を強化した。
 ---
 
 ## 3. 方針
 
-1.  **API仕様調査:** 各プロバイダー (Google Generative AI API, OpenAI API, Anthropic API, OpenRouter API) の公式ドキュメントやSDKを調査し、利用可能なモデル一覧を取得するAPIエンドポイント/メソッドとその仕様(認証方法、レスポンス形式など)を確認する。特に、Visionタスクが実行可能なモデルをどのように識別･フィルタリングできるか重点的に調査する。
+1.  **API仕様調査:** 各プロバイダー (Google Generative AI API, OpenAI API, Anthropic API, OpenRouter API) の公式ドキュメントやSDKを調査し、利用可能なモデル一覧を取得するAPIエンドポイント/メソッドとその仕様(認証方法、レスポンス形式など)を確認する。特に、Visionタスクが実行可能であり、かつ構造化出力とツール利用に対応しているモデルをどのように識別･フィルタリングできるか重点的に調査する。
 2.  **実装場所:** モデル一覧取得ロジックを `src/image_annotator_lib/core/api_model_discovery.py` 内に実装する。(新規作成)
-3.  **処理実装:** 上記ファイル内に、OpenRouter API を呼び出してモデル一覧を取得し、Vision モデルをフィルタリングする関数を実装する。適切なエラーハンドリング(ネットワークエラー、API エラー、レスポンス形式変更など)も行う。**エラーハンドリングには `src/image_annotator_lib/exceptions/errors.py` で定義された適切な例外クラス (`WebApiError` のサブクラスなど) を使用すること。**
+3.  **処理実装:** 上記ファイル内に、OpenRouter API を呼び出してモデル一覧を取得し、Vision 対応、構造化出力対応、ツール利用対応のモデルをフィルタリングする関数を実装する。適切なエラーハンドリング(ネットワークエラー、API エラー、レスポンス形式変更など)も行う。**エラーハンドリングには `src/image_annotator_lib/exceptions/errors.py` で定義された適切な例外クラス (`WebApiError` のサブクラスなど) を使用すること。**
 4.  **外部公開関数の実装:** 引数を取らず、モデル取得を試みる公開関数 `discover_available_vision_models() -> dict[str, list[str] | str]` を実装する。戻り値は辞書で、キーは成功時は `"models"` (値はモデルIDのリスト)、失敗時は `"error"` (値はエラーメッセージ文字列) とする。この関数を `src/image_annotator_lib/__init__.py` 等で公開する。
 5.  **キャッシュ/更新戦略 & TOML 保存:**
     *   **関数呼び出し時:** `discover_available_vision_models` 呼び出し時、`force_refresh=False` の場合は、まず `available_api_models.toml` ファイルを `load_available_api_models` で読み込む。ファイルが存在し内容があれば、その情報を基に結果を返す。
@@ -69,8 +74,8 @@
 
 *   **フェーズ 1: 調査と設計**
     *   [X] 各APIプロバイダーのモデル一覧取得APIの仕様調査 (エンドポイント、認証、レスポンス、Visionモデルの識別方法) (OpenRouter 完了)
-    *   [X] Visionモデルの具体的なフィルタリング基準の決定 (API情報 or キーワード)。
-        *   **全てのプロバイダー共通:** OpenRouter API からモデルリストを取得後、`architecture.input_modalities` リストに `"image"` が含まれているモデルを抽出する。
+    *   [X] Visionモデル及び構造化出力・ツール対応モデルの具体的なフィルタリング基準の決定 (API情報 or キーワード)。
+        *   **全てのプロバイダー共通:** OpenRouter API からモデルリストを取得後、`architecture.input_modalities` リストに `"image"` が含まれ、かつ `supported_parameters` リストに `'structured_outputs'` と `'tools'` が含まれているモデルを抽出する。
     *   [X] `discover_available_vision_models` 関数の詳細設計 (エラーハンドリング詳細、戻り値の型確定)。
     *   [X] `available_api_models.toml` の扱い方針最終決定 (動的取得･更新用の新規ファイルとしてプロジェクトルート下の `config` ディレクトリに作成･管理する)。
 *   **フェーズ 2: 実装**
@@ -79,7 +84,7 @@
     *   [X] `config.py` の `ModelConfigRegistry.load` に、`SYSTEM_CONFIG_PATH` が存在しない場合にテンプレートから自動コピーする機能を追加 (`importlib.resources` を一時的に使用)。
     *   [X] `api_model_discovery.py` 内に関数 (`discover_available_vision_models`) の基本ロジック実装。
     *   [X] OpenRouter API 呼び出し処理の実装。
-    *   [X] Visionモデルのフィルタリングロジックの実装。
+    *   [X] Visionモデル、構造化出力、ツール利用対応モデルのフィルタリングロジックの実装。
     *   [X] `model['name']` と `model['id']` を用いた分割処理の実装。
     *   [X] タイムスタンプ (created, last_seen, deprecated_on) の処理 (ISO 8601 変換) 実装。
     *   [X] `config.py` に `load_available_api_models` 関数の実装 (新しいパスを使用、ファイルなければ空を返す)。

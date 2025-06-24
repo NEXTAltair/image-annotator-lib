@@ -56,7 +56,8 @@ dependencies = [
     "loguru",
     "torch>=2.6.0",
     "torchvision>=0.21.0",
-    "pydantic-ai[logfire]>=0.1.11",
+    "datetime>=5.5",
+    "pydantic-ai[anthropic,google,logfire,openai]>=0.3.2",
 ]
 
 [dependency-groups]
