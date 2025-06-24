@@ -19,7 +19,6 @@ from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.google_gla import GoogleGLAProvider
 from pydantic_ai.providers.openai import OpenAIProvider
-
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 
 #
@@ -178,6 +177,7 @@ def get_openrouter_api_key() -> str:
         return "APIキーが見つかりませんでした。"
     return api_key
 
+
 # 1. 依存性定義 (エージェントが必要とする設定など)
 class ImageAnnotatorDependencies(BaseModel):
     api_key: SecretStr
@@ -185,11 +185,13 @@ class ImageAnnotatorDependencies(BaseModel):
     base_url: str | None = None
     timeout: int = 60
 
+
 # 2. レスポンス定義 (エージェントが最終的に期待する出力型)
 class Annotation(BaseModel):
     tags: list[str] = Field(default_factory=list, description="画像から抽出されたタグのリスト")
     captions: list[str] = Field(default_factory=list, description="画像を説明するキャプションのリスト")
     score: float = Field(description="画像の評価値")
+
 
 # 画像前処理ヘルパー関数 (バイト列を返すように統一)
 def _preprocess_image_to_bytes(image: Image.Image) -> bytes:
@@ -202,6 +204,7 @@ def _preprocess_image_to_bytes(image: Image.Image) -> bytes:
         buffered = BytesIO()
         image.save(buffered, format="WEBP")
     return buffered.getvalue()
+
 
 # 3. PydanticAI Agentの準備と実行 (メイン処理)
 async def main_annotator_logic(
@@ -221,28 +224,14 @@ async def main_annotator_logic(
 
     try:
         if provider_name.lower() == "openai":
-            llm_client = OpenAIModel(
-                model_name=api_model_id,
-                provider=OpenAIProvider()
-            )
+            llm_client = OpenAIModel(model_name=api_model_id, provider=OpenAIProvider())
         elif provider_name.lower() == "google":
-            llm_client = GeminiModel(
-                model_name=api_model_id,
-                provider=GoogleGLAProvider()
-            )
+            llm_client = GeminiModel(model_name=api_model_id, provider=GoogleGLAProvider())
         elif provider_name.lower() == "anthropic":
-            llm_client = AnthropicModel(
-                model_name=api_model_id,
-                provider=AnthropicProvider()
-            )
+            llm_client = AnthropicModel(model_name=api_model_id, provider=AnthropicProvider())
         elif provider_name.lower() == "openrouter":
-            llm_provider = OpenRouterProvider(
-                api_key=get_openrouter_api_key()
-            )
-            llm_client = OpenAIModel(
-                model_name=api_model_id,
-                provider=llm_provider
-            )
+            llm_provider = OpenRouterProvider(api_key=get_openrouter_api_key())
+            llm_client = OpenAIModel(model_name=api_model_id, provider=llm_provider)
         else:
             print(f"エラー: 未対応のLLMプロバイダです: {provider_name}")
             return
@@ -250,9 +239,9 @@ async def main_annotator_logic(
     except Exception as e:
         print(f"LLMクライアント ({provider_name}) の初期化に失敗: {e}")
         import traceback
+
         traceback.print_exc()
         return
-
 
     agent_params = {
         "model": llm_client,
@@ -265,13 +254,16 @@ async def main_annotator_logic(
         print(f"Agentの初期化に失敗しました: {e}")
         print("使用されたパラメータ:")
         for key, value in agent_params.items():
-            if key == "model" and hasattr(value, 'model_name'):
-                print(f"  {key}: {type(value).__name__} (model_name: {getattr(value, 'model_name', 'N/A')})")
-            elif key == "model" and hasattr(value, 'name'): # GeminiModelの場合など
-                 print(f"  {key}: {type(value).__name__} (name: {getattr(value, 'name', 'N/A')})")
+            if key == "model" and hasattr(value, "model_name"):
+                print(
+                    f"  {key}: {type(value).__name__} (model_name: {getattr(value, 'model_name', 'N/A')})"
+                )
+            elif key == "model" and hasattr(value, "name"):  # GeminiModelの場合など
+                print(f"  {key}: {type(value).__name__} (name: {getattr(value, 'name', 'N/A')})")
             else:
                 print(f"  {key}: {value}")
         import traceback
+
         traceback.print_exc()
         return
 
@@ -285,11 +277,10 @@ async def main_annotator_logic(
     try:
         # agent.run に単純な文字列プロンプトを渡す
         response_container = await agent.run(
-            user_prompt=[simple_text_prompt,
-            BinaryContent(data=first_image_bytes, media_type="image/webp")]
+            user_prompt=[simple_text_prompt, BinaryContent(data=first_image_bytes, media_type="image/webp")]
         )
         print("\n--- エージェントの最終出力 (Annotation型を期待) ---")
-        if response_container and hasattr(response_container, 'output'):
+        if response_container and hasattr(response_container, "output"):
             final_output = response_container.output
             if isinstance(final_output, Annotation):
                 print(f"  タグ: {final_output.tags}")
@@ -306,29 +297,34 @@ async def main_annotator_logic(
         print(f"TypeError が発生しました: {e}")
         print("--- TypeError発生時の関連変数 ---")
         print("  プロンプト内容:")
-        if 'simple_text_prompt' in locals():
+        if "simple_text_prompt" in locals():
             print(f"    simple_text_prompt: {simple_text_prompt}")
         else:
             print("  プロンプト内容 (simple_text_prompt): <利用不可または未定義>")
 
-        if 'llm_client' in locals() and hasattr(llm_client, 'model_settings'):
-            client_settings = llm_client.model_settings if hasattr(llm_client, 'model_settings') else "N/A"
+        if "llm_client" in locals() and hasattr(llm_client, "model_settings"):
+            client_settings = llm_client.model_settings if hasattr(llm_client, "model_settings") else "N/A"
             print(f"  LLMクライアントのモデル設定: {client_settings}")
-        elif 'llm_client' in locals() and hasattr(llm_client, '_model_settings'):
-            client_settings = llm_client._model_settings if hasattr(llm_client, '_model_settings') else "N/A"
+        elif "llm_client" in locals() and hasattr(llm_client, "_model_settings"):
+            client_settings = (
+                llm_client._model_settings if hasattr(llm_client, "_model_settings") else "N/A"
+            )
             print(f"  LLMクライアントのモデル設定 (プライベート): {client_settings}")
         else:
             print("  LLMクライアントのモデル設定: <取得不可>")
 
         print("----------------------------------")
         import traceback
+
         traceback.print_exc()
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         import traceback
+
         traceback.print_exc()
 
     print("--------------------------------------")
+
 
 if __name__ == "__main__":
     image_path = "tests/resources/img/1_img/file01.webp"
@@ -346,9 +342,10 @@ if __name__ == "__main__":
     # default_provider_name = "Anthropic"
     # default_api_model_id = "claude-3-5-sonnet-20240620"
 
-
-    asyncio.run(main_annotator_logic(
-        images_to_annotate=[img_to_process],
-        provider_name=default_provider_name,
-        api_model_id=default_api_model_id
-    ))
+    asyncio.run(
+        main_annotator_logic(
+            images_to_annotate=[img_to_process],
+            provider_name=default_provider_name,
+            api_model_id=default_api_model_id,
+        )
+    )
