@@ -25,13 +25,9 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
         processed_images_str: list[str] = cast(list[str], processed_images)
 
         if self.client is None or self.api_model_id is None:
-            raise WebApiError(
-                "API クライアントまたはモデル ID が初期化されていません"
-            )
+            raise WebApiError("API クライアントまたはモデル ID が初期化されていません")
         if not isinstance(self.client, OpenAI):
-            raise ConfigurationError(
-                f"予期しないクライアントタイプ: {type(self.client)}"
-            )
+            raise ConfigurationError(f"予期しないクライアントタイプ: {type(self.client)}")
 
         logger.debug(f"OpenRouter API 呼び出しに使用するモデルID: {self.api_model_id}")
 
@@ -57,7 +53,9 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
                 timeout_val = config_registry.get(self.model_name, "timeout", default=120)
                 timeout = float(timeout_val) if timeout_val is not None else 60.0
 
-                json_schema_supported = config_registry.get(self.model_name, "json_schema_supported", default=False)
+                json_schema_supported = config_registry.get(
+                    self.model_name, "json_schema_supported", default=False
+                )
 
                 if json_schema_supported:
                     response = self._call_openrouter_with_json_schema(
@@ -74,7 +72,9 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
                 try:
                     # OpenRouterはOpenAI互換なのでchoices[0].message.contentをパース
                     if hasattr(response, "choices") and response.choices:
-                        content_text = response.choices[0].message.content if response.choices[0].message else None
+                        content_text = (
+                            response.choices[0].message.content if response.choices[0].message else None
+                        )
                         if content_text:
                             # コードブロック除去
                             if content_text.startswith("```json") and "```" in content_text:
@@ -83,6 +83,7 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
                                 if json_start > 0 and json_end > json_start:
                                     content_text = content_text[json_start:json_end].strip()
                             import json
+
                             parsed_dict = json.loads(content_text)
                             # captions が文字列の場合、リストに変換
                             if isinstance(parsed_dict.get("captions"), str):
@@ -113,7 +114,12 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
             results.append({"response": None, "error": str(api_e)})
 
     def _call_openrouter_with_json_schema(
-        self, base64_image: str, temperature: float, max_tokens: int, timeout: float, extra_headers: dict[str, str]
+        self,
+        base64_image: str,
+        temperature: float,
+        max_tokens: int,
+        timeout: float,
+        extra_headers: dict[str, str],
     ):
         response_format = {
             "type": "json_schema",
@@ -124,7 +130,12 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
         )
 
     def _call_openrouter_without_json_schema(
-        self, base64_image: str, temperature: float, max_tokens: int, timeout: float, extra_headers: dict[str, str]
+        self,
+        base64_image: str,
+        temperature: float,
+        max_tokens: int,
+        timeout: float,
+        extra_headers: dict[str, str],
     ):
         return self._call_openrouter_api(
             base64_image, temperature, max_tokens, timeout, NOT_GIVEN, extra_headers

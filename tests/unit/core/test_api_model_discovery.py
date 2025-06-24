@@ -1,9 +1,9 @@
 """api_model_discovery モジュールのユニットテスト。"""
 
+import json
 from typing import Any
 
 import pytest
-import json
 
 # テスト対象のモジュールからヘルパー関数をインポート
 # 注意: プライベート関数 (_始まり) のテストは通常推奨されないが、

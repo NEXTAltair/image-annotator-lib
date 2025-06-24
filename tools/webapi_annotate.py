@@ -2,9 +2,6 @@ from PIL import Image
 
 from image_annotator_lib.model_class.annotator_webapi import (
     AnthropicApiAnnotator,
-    GoogleApiAnnotator,
-    OpenAIApiAnnotator,
-    OpenRouterApiAnnotator,
 )
 
 # 画像を読み込み

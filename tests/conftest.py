@@ -2,6 +2,7 @@
 
 このモジュールでは、複数のテストファイルで使用される共通のfixtureを定義します。
 """
+
 from collections.abc import Callable
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pytest
 from PIL import Image
 
 resources_dir = Path("tests") / "resources"
+
 
 @pytest.fixture(scope="session")
 def load_image_files() -> Callable[[int], list[Image.Image]]:

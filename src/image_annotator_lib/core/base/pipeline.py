@@ -44,7 +44,9 @@ class PipelineBaseAnnotator(BaseAnnotator):
             self.components = loaded_components
 
         # 型の問題を回避するため、一時的にcast使用
-        restored_components = ModelLoad.restore_model_to_cuda(self.model_name, self.device, cast(dict[str, Any], self.components))
+        restored_components = ModelLoad.restore_model_to_cuda(
+            self.model_name, self.device, cast(dict[str, Any], self.components)
+        )
         self.components = cast(TransformersPipelineComponents, restored_components)
         return self
 
@@ -53,7 +55,9 @@ class PipelineBaseAnnotator(BaseAnnotator):
     ) -> None:
         """Pipeline モデルをキャッシュします。"""
         logger.debug(f"Exiting context for Pipeline model '{self.model_name}' (exception: {exc_type})")
-        cached_components = ModelLoad.cache_to_main_memory(self.model_name, cast(dict[str, Any], self.components))
+        cached_components = ModelLoad.cache_to_main_memory(
+            self.model_name, cast(dict[str, Any], self.components)
+        )
         self.components = cast(TransformersPipelineComponents, cached_components)
 
     def _preprocess_images(self, images: list[Image.Image]) -> list[Image.Image]:

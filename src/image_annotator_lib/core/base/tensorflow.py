@@ -85,7 +85,9 @@ class TensorflowBaseAnnotator(BaseAnnotator):
         if self.components:
             try:
                 components_to_release = self.components
-                released_components = ModelLoad.release_model_components(self.model_name, cast(dict[str, Any], components_to_release))
+                released_components = ModelLoad.release_model_components(
+                    self.model_name, cast(dict[str, Any], components_to_release)
+                )
                 self.components = cast(TensorFlowComponents, released_components)
                 logger.debug("TensorFlow Keras セッションクリアを試行 (必要な場合)。")
                 if tf:

@@ -92,7 +92,9 @@ class BaseAnnotator(ABC):
         """
         raise NotImplementedError("サブクラスは _generate_tags を実装する必要があります。")
 
-    def predict(self, images: list[Image.Image], phash_list: list[str] | None = None) -> list[AnnotationResult]:
+    def predict(
+        self, images: list[Image.Image], phash_list: list[str] | None = None
+    ) -> list[AnnotationResult]:
         """画像リストに対してアノテーションを実行します。
 
         Args:
@@ -132,7 +134,11 @@ class BaseAnnotator(ABC):
             for i, (image, formatted_output) in enumerate(zip(images, formatted_outputs, strict=True)):
                 try:
                     # 知覚ハッシュの計算
-                    phash = phash_list[i] if phash_list and i < len(phash_list) else self._calculate_phash(image)
+                    phash = (
+                        phash_list[i]
+                        if phash_list and i < len(phash_list)
+                        else self._calculate_phash(image)
+                    )
 
                     # タグ生成
                     tags = self._generate_tags(formatted_output)

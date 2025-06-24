@@ -26,7 +26,9 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator):
         """Anthropic API を使用して推論を実行する"""
         if not all(isinstance(item, str) for item in processed_images):
             logger.error("AnthropicApiAnnotator received non-string input for _run_inference")
-            return [{"response": None, "error": "Invalid input type for Anthropic API"}] * len(processed_images)
+            return [{"response": None, "error": "Invalid input type for Anthropic API"}] * len(
+                processed_images
+            )
 
         processed_images_str: list[str] = cast(list[str], processed_images)
 
@@ -83,7 +85,7 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator):
                     system=system_prompt,
                     messages=messages,  # type: ignore[arg-type]
                     tools=tools,  # type: ignore[arg-type]
-                    temperature=anthropic_temperature, # type: ignore[arg-type]
+                    temperature=anthropic_temperature,  # type: ignore[arg-type]
                 )
                 annotation = None
                 if response.content and type(response.content[0]).__name__ == "ToolUseBlock":
@@ -98,6 +100,7 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator):
                 if "404" in error_str or "not_found_error" in error_str:
                     # モデル名を抽出(なければそのまま)
                     import re
+
                     m = re.search(r"model: ([\w\.\-\:]+)", error_str)
                     model_name = m.group(1) if m else "不明"
                     custom_error = ModelNotFoundError(model_name)

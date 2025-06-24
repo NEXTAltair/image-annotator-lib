@@ -50,36 +50,39 @@ class OpenAIAdapter(ApiClient):
         self._system_prompt = system_prompt if system_prompt is not None else webapi_shared.SYSTEM_PROMPT
         self._base_prompt = base_prompt if base_prompt is not None else webapi_shared.BASE_PROMPT
 
-    def call_api(self, model_id: str, web_api_input: WebApiInput, params: dict[str, Any]) -> AnnotationSchema:
+    def call_api(
+        self, model_id: str, web_api_input: WebApiInput, params: dict[str, Any]
+    ) -> AnnotationSchema:
         logger.debug(f"OpenAIAdapter.call_api called with model_id: {model_id}, params: {params}")
 
         user_prompt_from_params = params.get("prompt")
 
-        messages: list[dict[str,Any]] = []
+        messages: list[dict[str, Any]] = []
         if self._system_prompt:
             messages.append({"role": "system", "content": self._system_prompt})
 
         final_user_text_prompt = user_prompt_from_params
 
         if web_api_input.image_b64:
-            content_parts: list[dict[str,Any]] = []
+            content_parts: list[dict[str, Any]] = []
             if final_user_text_prompt:
                 content_parts.append({"type": "text", "text": final_user_text_prompt})
 
-            content_parts.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{web_api_input.image_b64}"},
-            })
+            content_parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{web_api_input.image_b64}"},
+                }
+            )
             if content_parts:
                 messages.append({"role": "user", "content": content_parts})
 
         elif final_user_text_prompt:
             messages.append({"role": "user", "content": final_user_text_prompt})
 
-
         if not messages or not any(msg.get("role") == "user" for msg in messages):
             if not web_api_input.image_b64 and not final_user_text_prompt:
-                 raise ValueError("User message requires either an image or a text prompt.")
+                raise ValueError("User message requires either an image or a text prompt.")
             raise ValueError("User message is missing from the request.")
 
         try:
@@ -87,11 +90,17 @@ class OpenAIAdapter(ApiClient):
             tools_list: list[ChatCompletionToolParam] | None = None
             tool_choice_option: ChatCompletionNamedToolChoiceParam | None = None
 
-            if response_format_param and isinstance(response_format_param, dict) and response_format_param.get("type") == "json_object":
-                if hasattr(AnnotationSchema, 'model_json_schema'):
+            if (
+                response_format_param
+                and isinstance(response_format_param, dict)
+                and response_format_param.get("type") == "json_object"
+            ):
+                if hasattr(AnnotationSchema, "model_json_schema"):
                     function_schema_dict = AnnotationSchema.model_json_schema()
                     if "name" not in function_schema_dict or "parameters" not in function_schema_dict:
-                        logger.warning("AnnotationSchema.model_json_schema() does not return a valid FunctionDefinition structure.")
+                        logger.warning(
+                            "AnnotationSchema.model_json_schema() does not return a valid FunctionDefinition structure."
+                        )
                     else:
                         _fn_name = function_schema_dict.get("title", AnnotationSchema.__name__)
                         _fn_description = function_schema_dict.get("description")
@@ -103,7 +112,12 @@ class OpenAIAdapter(ApiClient):
                         if _fn_description:
                             _function_definition_payload["description"] = _fn_description
 
-                        tools_list = [{"type": "function", "function": cast(FunctionDefinition, _function_definition_payload)}]
+                        tools_list = [
+                            {
+                                "type": "function",
+                                "function": cast(FunctionDefinition, _function_definition_payload),
+                            }
+                        ]
                         tool_choice_option = {"type": "function", "function": {"name": _fn_name}}
 
             completion_params: dict[str, Any] = {
@@ -132,11 +146,14 @@ class OpenAIAdapter(ApiClient):
             logger.error(f"OpenAIAdapter API呼び出しエラー: {e}")
             raise
 
+
 class AnthropicAdapter(ApiClient):
     def __init__(self, client: Anthropic):
         self._client = client
 
-    def call_api(self, model_id: str, web_api_input: WebApiInput, params: dict[str, Any]) -> AnnotationSchema:
+    def call_api(
+        self, model_id: str, web_api_input: WebApiInput, params: dict[str, Any]
+    ) -> AnnotationSchema:
         logger.debug(f"AnthropicAdapter.call_api called with model_id: {model_id}, params: {params}")
         messages = []
         system_prompt = params.get("system_prompt", webapi_shared.SYSTEM_PROMPT)
@@ -145,7 +162,16 @@ class AnthropicAdapter(ApiClient):
 
         if web_api_input.image_b64:
             user_content: list[dict[str, Any]] = []
-            user_content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": web_api_input.image_b64}})
+            user_content.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": web_api_input.image_b64,
+                    },
+                }
+            )
             user_content.append({"type": "text", "text": prompt})
             messages.append({"role": "user", "content": user_content})
         elif prompt:
@@ -157,11 +183,15 @@ class AnthropicAdapter(ApiClient):
             tools_list: list[ToolParam] | None = None
             tool_choice_option: ToolChoiceParam | None = None
 
-            if hasattr(AnnotationSchema, 'model_json_schema'):
+            if hasattr(AnnotationSchema, "model_json_schema"):
                 tool_name = "extract_image_annotations"
-                tools_list = [{"name": tool_name,
-                               "description": "Extracts tags, captions, and score from an image based on the provided schema.",
-                               "input_schema": AnnotationSchema.model_json_schema()}]
+                tools_list = [
+                    {
+                        "name": tool_name,
+                        "description": "Extracts tags, captions, and score from an image based on the provided schema.",
+                        "input_schema": AnnotationSchema.model_json_schema(),
+                    }
+                ]
                 tool_choice_option = {"type": "tool", "name": tool_name}
 
             message_create_params: dict[str, Any] = {
@@ -185,18 +215,25 @@ class AnthropicAdapter(ApiClient):
                             return block.input
                         elif isinstance(block.input, dict):
                             return AnnotationSchema.model_validate(block.input)
-            raise ValueError("Anthropic APIからのレスポンス形式が不正、またはtool_useブロックが見つかりません。")
+            raise ValueError(
+                "Anthropic APIからのレスポンス形式が不正、またはtool_useブロックが見つかりません。"
+            )
         except Exception as e:
             logger.error(f"AnthropicAdapter API呼び出しエラー: {e}")
             raise
 
+
 class GoogleClientAdapter(ApiClient):
-    def __init__(self, client: genai.Client, system_prompt: str | None = None, base_prompt: str | None = None):
+    def __init__(
+        self, client: genai.Client, system_prompt: str | None = None, base_prompt: str | None = None
+    ):
         self._client = client
         self._system_prompt = system_prompt if system_prompt is not None else webapi_shared.SYSTEM_PROMPT
         self._base_prompt = base_prompt if base_prompt is not None else webapi_shared.BASE_PROMPT
 
-    def call_api(self, model_id: str, web_api_input: WebApiInput, params: dict[str, Any]) -> AnnotationSchema:
+    def call_api(
+        self, model_id: str, web_api_input: WebApiInput, params: dict[str, Any]
+    ) -> AnnotationSchema:
         # === デバッグ情報追加 ===
         logger.debug(f"GoogleClientAdapter: self._client type: {type(self._client)}")
         logger.debug(f"GoogleClientAdapter: self._client dir: {dir(self._client)}")
@@ -214,6 +251,7 @@ class GoogleClientAdapter(ApiClient):
             image_bytes_for_call = web_api_input.image_bytes
         elif web_api_input.image_b64:
             import base64
+
             try:
                 image_bytes_for_call = base64.b64decode(web_api_input.image_b64)
             except Exception as e:
@@ -239,7 +277,7 @@ class GoogleClientAdapter(ApiClient):
         top_k = params.get("top_k", 32)
         max_output_tokens = params.get("max_output_tokens", 1800)
 
-        gen_config_params: dict[str,Any] = {
+        gen_config_params: dict[str, Any] = {
             "temperature": temperature,
             "max_output_tokens": max_output_tokens,
             "top_p": top_p,
@@ -253,9 +291,9 @@ class GoogleClientAdapter(ApiClient):
         try:
             # client.models.generate_content を使用
             response = self._client.models.generate_content(
-                model=model_id, # モデル名を文字列で渡す
+                model=model_id,  # モデル名を文字列で渡す
                 contents=contents,
-                config=generation_config, # "generation_config" を "config" に修正
+                config=generation_config,  # "generation_config" を "config" に修正
                 # request_options=types.RequestOptions(timeout=...) # タイムアウト設定の方法を確認
             )
 
@@ -270,7 +308,7 @@ class GoogleClientAdapter(ApiClient):
                         f"Google API response (from response.text) could not be parsed into AnnotationSchema: {e_text}. Content: {response.text[:200]}"
                     ) from e_text
 
-            if hasattr(response, 'candidates') and response.candidates:
+            if hasattr(response, "candidates") and response.candidates:
                 candidate = response.candidates[0]
                 if candidate.content and candidate.content.parts:
                     part_text = candidate.content.parts[0].text
@@ -278,22 +316,24 @@ class GoogleClientAdapter(ApiClient):
                         try:
                             return AnnotationSchema.model_validate_json(part_text)
                         except (json.JSONDecodeError, ValidationError) as e_part_text:
-                             raise ValueError(
+                            raise ValueError(
                                 f"Google API response (from candidate part.text) could not be parsed into AnnotationSchema: {e_part_text}. Content: {part_text[:200]}"
                             ) from e_part_text
 
             error_detail = f"Response type: {type(response)}, Content: {str(response)[:200]}"
-            if hasattr(response, 'prompt_feedback'):
+            if hasattr(response, "prompt_feedback"):
                 pass
 
             raise ValueError(f"Google APIからのレスポンス形式が不正、または内容が空です。{error_detail}")
 
-        except Exception as e: # より具体的なエラー型をSDKから見つけられれば置き換える (例: genai.APIError)
+        except Exception as e:  # より具体的なエラー型をSDKから見つけられれば置き換える (例: genai.APIError)
             # 現状、types モジュールに GoogleAPIError のような具体的なエラー型は見当たらない。
             # google.api_core.exceptions も google-genai SDK で使われるかは不明。
             logger.error(f"GoogleClientAdapter API呼び出し中に予期せぬエラー: {e}")
             # WebApiError に元の例外を渡す (original_exception パラメータは削除し、from e でチェイン)
-            raise WebApiError(f"Unexpected error during Google API call: {e}", provider_name="Google") from e
+            raise WebApiError(
+                f"Unexpected error during Google API call: {e}", provider_name="Google"
+            ) from e
 
 
 # --- TypedDict Definitions ---
@@ -425,7 +465,9 @@ def _process_model_id(model_id_on_provider: str, provider_name: str) -> str:
     return processed_id
 
 
-def _initialize_api_client(provider: str, model_config: dict[str, Any], model_name_for_logging: str) -> ApiClient:
+def _initialize_api_client(
+    provider: str, model_config: dict[str, Any], model_name_for_logging: str
+) -> ApiClient:
     logger.debug(f"Initializing API client for provider: {provider}, model: {model_name_for_logging}")
     api_key_str: str | None = None
     api_key_from_config = model_config.get("api_key")
@@ -444,7 +486,9 @@ def _initialize_api_client(provider: str, model_config: dict[str, Any], model_na
         if not api_key_str:
             api_key_str = os.getenv("OPENAI_API_KEY")
         if not api_key_str:
-             raise ApiAuthenticationError(provider_name="OpenAI", message=f"API key for model '{model_name_for_logging}' not found.")
+            raise ApiAuthenticationError(
+                provider_name="OpenAI", message=f"API key for model '{model_name_for_logging}' not found."
+            )
         raw_openai_client = OpenAI(api_key=api_key_str)
         return OpenAIAdapter(raw_openai_client, system_prompt=system_prompt, base_prompt=base_prompt)
 
@@ -452,21 +496,36 @@ def _initialize_api_client(provider: str, model_config: dict[str, Any], model_na
         if not api_key_str:
             api_key_str = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if not api_key_str:
-             raise ApiAuthenticationError(provider_name="Google", message=f"API key for model '{model_name_for_logging}' not found (checked config and GOOGLE_API_KEY/GEMINI_API_KEY).")
+            raise ApiAuthenticationError(
+                provider_name="Google",
+                message=f"API key for model '{model_name_for_logging}' not found (checked config and GOOGLE_API_KEY/GEMINI_API_KEY).",
+            )
 
         try:
             initialized_google_client = genai.Client(api_key=api_key_str)
-            logger.info(f"Google GenAI Client initialized successfully for model '{model_name_for_logging}'.")
-            return GoogleClientAdapter(client=initialized_google_client, system_prompt=system_prompt, base_prompt=base_prompt)
+            logger.info(
+                f"Google GenAI Client initialized successfully for model '{model_name_for_logging}'."
+            )
+            return GoogleClientAdapter(
+                client=initialized_google_client, system_prompt=system_prompt, base_prompt=base_prompt
+            )
         except Exception as e:
-            logger.error(f"Failed to initialize Google GenAI Client for model '{model_name_for_logging}': {e}")
-            raise ApiAuthenticationError(provider_name="Google", message=f"Failed to initialize Google GenAI Client for '{model_name_for_logging}': {e}") from e
+            logger.error(
+                f"Failed to initialize Google GenAI Client for model '{model_name_for_logging}': {e}"
+            )
+            raise ApiAuthenticationError(
+                provider_name="Google",
+                message=f"Failed to initialize Google GenAI Client for '{model_name_for_logging}': {e}",
+            ) from e
 
     elif provider_lower == "anthropic":
         if not api_key_str:
             api_key_str = os.getenv("ANTHROPIC_API_KEY")
         if not api_key_str:
-            raise ApiAuthenticationError(provider_name="Anthropic", message=f"API key for model '{model_name_for_logging}' not found.")
+            raise ApiAuthenticationError(
+                provider_name="Anthropic",
+                message=f"API key for model '{model_name_for_logging}' not found.",
+            )
 
         raw_anthropic_client = Anthropic(api_key=api_key_str)
         return AnthropicAdapter(raw_anthropic_client)
@@ -477,7 +536,10 @@ def _initialize_api_client(provider: str, model_config: dict[str, Any], model_na
         if not api_key_str:
             api_key_str = os.getenv("OPENROUTER_API_KEY")
         if not api_key_str:
-            raise ApiAuthenticationError(provider_name=provider_name_for_key, message=f"API key for model '{model_name_for_logging}' not found for OpenRouter.")
+            raise ApiAuthenticationError(
+                provider_name=provider_name_for_key,
+                message=f"API key for model '{model_name_for_logging}' not found for OpenRouter.",
+            )
 
         openrouter_base_url = model_config.get("openrouter_base_url", "https://openrouter.ai/api/v1")
         openrouter_site_url = model_config.get("openrouter_site_url", "http://localhost:3000")
@@ -489,17 +551,18 @@ def _initialize_api_client(provider: str, model_config: dict[str, Any], model_na
             default_headers={
                 "HTTP-Referer": openrouter_site_url,
                 "X-Title": openrouter_app_name,
-            }
+            },
         )
         return OpenAIAdapter(raw_or_client, system_prompt=system_prompt, base_prompt=base_prompt)
 
     else:
-        raise ConfigurationError(f"Unsupported Web API provider: {provider} for model '{model_name_for_logging}'")
+        raise ConfigurationError(
+            f"Unsupported Web API provider: {provider} for model '{model_name_for_logging}'"
+        )
 
 
 def prepare_web_api_components(model_name: str) -> WebApiComponents:
-    """指定されたモデル名に基づいてWeb APIコンポーネントを準備する。
-    """
+    """指定されたモデル名に基づいてWeb APIコンポーネントを準備する。"""
     logger.debug(f"Web API コンポーネント準備開始: model_name='{model_name}'")
 
     available_models_data = config.load_available_api_models()
@@ -515,7 +578,9 @@ def prepare_web_api_components(model_name: str) -> WebApiComponents:
         raise ConfigurationError(
             f"モデル名 '{model_name}' に対応するエントリが available_api_models.toml に見つかりません。"
         )
-    model_id_on_provider, model_config_from_toml = model_entry # model_data を model_config_from_toml にリネーム
+    model_id_on_provider, model_config_from_toml = (
+        model_entry  # model_data を model_config_from_toml にリネーム
+    )
     provider_name = model_config_from_toml.get("provider")
     if not provider_name:
         raise ConfigurationError(f"モデル '{model_name}' のエントリに 'provider' が含まれていません。")
@@ -527,7 +592,9 @@ def prepare_web_api_components(model_name: str) -> WebApiComponents:
     # _initialize_api_client に渡す model_config を準備
     # TOMLからの設定と、加工済みのAPIモデルIDをマージ
     final_model_config_for_init = model_config_from_toml.copy()
-    final_model_config_for_init["api_model_id"] = processed_api_model_id # api_model_id を加工済みのものに上書き
+    final_model_config_for_init["api_model_id"] = (
+        processed_api_model_id  # api_model_id を加工済みのものに上書き
+    )
     # final_model_config_for_init["provider"] は既に model_config_from_toml に含まれているはず
 
     try:
@@ -535,19 +602,18 @@ def prepare_web_api_components(model_name: str) -> WebApiComponents:
         initialized_client = _initialize_api_client(
             provider=provider_name,
             model_config=final_model_config_for_init,
-            model_name_for_logging=model_name
+            model_name_for_logging=model_name,
         )
-    except ApiAuthenticationError as e: # より具体的なエラーハンドリング
+    except ApiAuthenticationError as e:  # より具体的なエラーハンドリング
         raise ApiAuthenticationError(
-            provider_name=e.provider_name or provider_name, # e.provider_name があればそれを使う
-            message=f"{e.message} (モデル: {model_name})"
+            provider_name=e.provider_name or provider_name,  # e.provider_name があればそれを使う
+            message=f"{e.message} (モデル: {model_name})",
         ) from e
     except ConfigurationError as e:
         raise ConfigurationError(f"APIクライアント初期化設定エラー ({model_name}): {e}") from e
-    except Exception as e: # 予期せぬエラー
+    except Exception as e:  # 予期せぬエラー
         logger.error(f"APIクライアント初期化中に予期せぬエラー ({model_name}): {e}", exc_info=True)
         raise ConfigurationError(f"APIクライアント初期化中に予期せぬエラー ({model_name}): {e}") from e
-
 
     logger.info(
         f"Web API コンポーネント準備完了: provider='{provider_name}', api_model_id='{processed_api_model_id}'"
@@ -1070,7 +1136,7 @@ class ModelLoad:
             logger.error(f"メモリ不足エラー: モデル '{model_name}' ロード中。詳細: {error_msg}")
             if isinstance(error, torch.cuda.OutOfMemoryError) and torch.cuda.is_available():
                 try:
-                    device_name = str(error.device) if hasattr(error, "device") else "cuda" # type: ignore[attr-defined]
+                    device_name = str(error.device) if hasattr(error, "device") else "cuda"  # type: ignore[attr-defined]
                     logger.error(f"CUDA メモリサマリー ({device_name}):")
                     logger.error(torch.cuda.memory_summary(device=device_name, abbreviated=True))
                 except Exception as mem_e:
@@ -1468,14 +1534,16 @@ class ModelLoad:
             if model_dir is None:
                 raise FileNotFoundError(f"TensorFlow モデルディレクトリ解決失敗: {model_path}")
 
-            model_instance: tf.Module | keras.Model | None = None # tf.keras.Model を keras.Model に変更
+            model_instance: tf.Module | keras.Model | None = None  # tf.keras.Model を keras.Model に変更
             if model_format == "h5":
                 h5_files = list(model_dir.glob("*.h5"))
                 if not h5_files:
                     raise FileNotFoundError(f"H5ファイルが見つかりません: {model_dir}")
                 target_path = h5_files[0]
                 logger.info(f"H5モデルロード中: {target_path}")
-                model_instance = keras.models.load_model(target_path, compile=False) # tf.keras.models を keras.models に変更
+                model_instance = keras.models.load_model(
+                    target_path, compile=False
+                )  # tf.keras.models を keras.models に変更
             elif model_format == "saved_model":
                 target_path = model_dir
                 logger.info(f"SavedModelロード中: {target_path}")
@@ -1557,10 +1625,10 @@ class ModelLoad:
             logger.debug(f"CLIPプロセッサロード中: {base_model}")
             clip_processor = CLIPProcessor.from_pretrained(base_model)
             logger.debug(f"CLIPモデルロード中: {base_model} on {self.device}")
-            clip_model = cast(CLIPModel, CLIPModel.from_pretrained(base_model).to(self.device).eval()) # type: ignore[no-untyped-call]
+            clip_model = cast(CLIPModel, CLIPModel.from_pretrained(base_model).to(self.device).eval())  # type: ignore[no-untyped-call]
             input_size = clip_model.config.projection_dim
             logger.debug(f"CLIPモデル {base_model} 特徴量次元: {input_size}")
-            return clip_processor, clip_model, input_size # type: ignore[return-value]
+            return clip_processor, clip_model, input_size  # type: ignore[return-value]
 
         def _create_and_load_classifier_head(
             self,
@@ -1887,7 +1955,9 @@ class ModelLoad:
 
     @staticmethod
     def restore_model_to_cuda(
-        model_name: str, components: dict[str, Any], device: str # 引数の順序を components, device に変更
+        model_name: str,
+        components: dict[str, Any],
+        device: str,  # 引数の順序を components, device に変更
     ) -> dict[str, Any] | None:
         """Restores a model (likely from CPU cache) to the specified CUDA device. Public interface.
         / モデル (おそらく CPU キャッシュから) を指定された CUDA デバイスに復元する。公開インターフェース。

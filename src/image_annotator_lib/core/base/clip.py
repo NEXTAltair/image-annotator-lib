@@ -65,7 +65,9 @@ class ClipBaseAnnotator(BaseAnnotator):
         logger.debug(f"Exiting context for CLIP Scorer model '{self.model_name}' (exception: {exc_type})")
         try:
             if self.components:
-                cached_components = ModelLoad.cache_to_main_memory(self.model_name, cast(dict[str, Any], self.components))
+                cached_components = ModelLoad.cache_to_main_memory(
+                    self.model_name, cast(dict[str, Any], self.components)
+                )
                 self.components = cast(CLIPComponents, cached_components)
             else:
                 ModelLoad.release_model(self.model_name)
@@ -74,7 +76,11 @@ class ClipBaseAnnotator(BaseAnnotator):
 
     def _preprocess_images(self, images: list[Image.Image]) -> dict[str, torch.Tensor]:
         """画像を CLIP プロセッサで前処理します。"""
-        if not self.components or "processor" not in self.components or self.components["processor"] is None:
+        if (
+            not self.components
+            or "processor" not in self.components
+            or self.components["processor"] is None
+        ):
             raise RuntimeError("CLIP プロセッサがロードされていません。")
         processor = self.components["processor"]
         try:
@@ -86,7 +92,11 @@ class ClipBaseAnnotator(BaseAnnotator):
 
     def _run_inference(self, processed: dict[str, torch.Tensor]) -> torch.Tensor:
         """CLIP モデルで画像特徴量を抽出し、分類器ヘッドでスコアを計算します。"""
-        if not self.components or "clip_model" not in self.components or self.components["clip_model"] is None:
+        if (
+            not self.components
+            or "clip_model" not in self.components
+            or self.components["clip_model"] is None
+        ):
             raise RuntimeError("CLIP ベースモデルがロードされていません。")
         if "model" not in self.components or self.components["model"] is None:
             raise RuntimeError("分類器ヘッド (model) がロードされていません。")

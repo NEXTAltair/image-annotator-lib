@@ -51,7 +51,9 @@ class ONNXBaseAnnotator(BaseAnnotator):
         """ONNX モデルのリソースを解放します。"""
         logger.debug(f"Exiting context for ONNX model '{self.model_name}' (exception: {exc_type})")
         if self.components:
-            released_components = ModelLoad.release_model_components(self.model_name, cast(dict[str, Any], self.components))
+            released_components = ModelLoad.release_model_components(
+                self.model_name, cast(dict[str, Any], self.components)
+            )
             self.components = cast(ONNXComponents, released_components)
         if exc_type:
             logger.error(f"ONNX モデル '{self.model_name}' のコンテキスト内で例外発生: {exc_val}")

@@ -2,6 +2,7 @@
 OpenRouterのAPIを使用して、各種機能対応モデルの情報を取得するスクリプト。
 現状 Visionタスク 構造化出力 と Agent用の Tool 対応モデルをチェックしている。
 """
+
 import json
 import os
 import traceback
@@ -63,10 +64,10 @@ else:
                 is_structured_output = False
                 is_tool_model = False
                 if supported_parameters and isinstance(supported_parameters, list):
-                    if 'structured_outputs' in supported_parameters:
+                    if "structured_outputs" in supported_parameters:
                         is_structured_output = True
-                     # Tool対応モデルチェック PydanticAI Agent で使用可能なモデルかチェック
-                    if 'tools' in supported_parameters:
+                    # Tool対応モデルチェック PydanticAI Agent で使用可能なモデルかチェック
+                    if "tools" in supported_parameters:
                         is_tool_model = True
                 if not is_structured_output:
                     continue
@@ -92,7 +93,9 @@ else:
                         f"    出力形式 (output_modalities): {architecture.get('output_modalities', 'N/A')}"
                     )
                     print("使用可能な機能パラメータ:")
-                    print(f"    パラメータ (supported_parameters): {model.get('supported_parameters', 'N/A')}")
+                    print(
+                        f"    パラメータ (supported_parameters): {model.get('supported_parameters', 'N/A')}"
+                    )
                 # 全データ表示
                 print(f"  全データ (raw): {model}")
 

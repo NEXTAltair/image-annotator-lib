@@ -34,6 +34,7 @@ def _load_config_from_file(config_path: Path) -> dict[str, dict[str, Any]]:
         logger.exception(f"設定ファイル {config_path} の読み込み中に予期せぬエラーが発生しました: {e}")
         raise  # 予期せぬエラーは再送出
 
+
 class ModelConfigRegistry:
     """設定ファイル全体を管理し、設定値へのアクセスを提供します。"""
 

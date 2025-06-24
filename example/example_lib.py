@@ -37,7 +37,7 @@ target_models = [
     # "o1-pro",
     # "Mistral Small 3.1 24B (free)",
     # "Mistral Small 3.1 24B",
-    #"Gemma 3 1B (free)",
+    # "Gemma 3 1B (free)",
     # "Gemma 3 4B (free)",
     # "Gemma 3 4B",
     # "Gemma 3 12B (free)",

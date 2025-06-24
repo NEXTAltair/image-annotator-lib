@@ -1,6 +1,5 @@
 from unittest.mock import MagicMock
 
-import openai
 import pytest
 
 from image_annotator_lib.core.types import AnnotationSchema, WebApiInput
@@ -10,12 +9,14 @@ from image_annotator_lib.model_class.annotator_webapi.webapi_shared import BASE_
 
 MODEL_NAME = "test_openai_model"
 
+
 @pytest.fixture
 def mock_openai_adapter():
     """OpenAIAdapter のモックを返すフィクスチャ"""
     adapter = MagicMock()
     adapter.call_api = MagicMock()
     return adapter
+
 
 @pytest.fixture
 def annotator(mock_openai_adapter):
@@ -24,6 +25,7 @@ def annotator(mock_openai_adapter):
     annotator_instance.client = mock_openai_adapter
     annotator_instance.api_model_id = "gpt-4o-test"
     return annotator_instance
+
 
 def test_init(annotator):
     """初期化が正しく行われるかテスト"""
@@ -47,14 +49,16 @@ def test_run_inference_success(annotator, mock_openai_adapter):
     mock_openai_adapter.call_api.assert_called_once_with(
         model_id="gpt-4o-test",
         web_api_input=WebApiInput(image_b64="base64_image_data_1"),
-        params=pytest.approx({
-            "prompt": BASE_PROMPT,
-            "system_prompt": SYSTEM_PROMPT,
-            "temperature": 0.7,
-            "max_output_tokens": 2000,
-            "use_responses_parse": True
-        }),
-        output_schema=AnnotationSchema
+        params=pytest.approx(
+            {
+                "prompt": BASE_PROMPT,
+                "system_prompt": SYSTEM_PROMPT,
+                "temperature": 0.7,
+                "max_output_tokens": 2000,
+                "use_responses_parse": True,
+            }
+        ),
+        output_schema=AnnotationSchema,
     )
 
 
@@ -69,6 +73,7 @@ def test_run_inference_api_error(annotator, mock_openai_adapter):
     assert result[0]["response"] is None
     assert "OpenAI Adapter Error: API エラー: Adapter API Error Message" in result[0]["error"]
     mock_openai_adapter.call_api.assert_called_once()
+
 
 def test_run_inference_refusal(annotator, mock_openai_adapter):
     """API が拒否 (refusal) するケースをテスト"""
@@ -94,6 +99,7 @@ def test_run_inference_unexpected_response_type(annotator, mock_openai_adapter):
     assert result[0]["response"] is None
     assert "OpenAI Adapter Error: API エラー: Adapter returned unexpected type" in result[0]["error"]
     mock_openai_adapter.call_api.assert_called_once()
+
 
 def test_run_inference_empty_or_no_output(annotator, mock_openai_adapter):
     """Adapter が有効なレスポンスを返さなかった場合"""

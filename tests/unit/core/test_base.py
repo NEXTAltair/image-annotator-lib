@@ -160,8 +160,8 @@ class ConcreteAnnotator(BaseAnnotator):
 class TestBaseAnnotator:
     """BaseAnnotator 抽象基底クラスのテスト。"""
 
-    @patch('image_annotator_lib.core.base.config_registry')
-    @patch('image_annotator_lib.core.base.utils')
+    @patch("image_annotator_lib.core.base.config_registry")
+    @patch("image_annotator_lib.core.base.utils")
     def test_init_success(self, mock_utils, mock_config_registry):
         """正常な初期化のテスト。"""
         # モックの設定
@@ -181,16 +181,18 @@ class TestBaseAnnotator:
         assert annotator.model_path == "/test/path"
         assert annotator.components is None
 
-    @patch('image_annotator_lib.core.base.config_registry')
+    @patch("image_annotator_lib.core.base.config_registry")
     def test_init_no_config_error(self, mock_config_registry):
         """設定が見つからない場合のエラーテスト。"""
         mock_config_registry.get_all_config.return_value = {}
 
-        with pytest.raises(ConfigurationError, match="モデル 'test_model' の設定が config_registry に見つかりません"):
+        with pytest.raises(
+            ConfigurationError, match="モデル 'test_model' の設定が config_registry に見つかりません"
+        ):
             ConcreteAnnotator("test_model")
 
-    @patch('image_annotator_lib.core.base.config_registry')
-    @patch('image_annotator_lib.core.base.utils')
+    @patch("image_annotator_lib.core.base.config_registry")
+    @patch("image_annotator_lib.core.base.utils")
     def test_init_invalid_device_config(self, mock_utils, mock_config_registry):
         """無効なデバイス設定のテスト。"""
         mock_config_registry.get_all_config.return_value = {"test_model": {}}
@@ -206,8 +208,8 @@ class TestBaseAnnotator:
         # デフォルト値が使用されることを確認
         mock_utils.determine_effective_device.assert_called_with("cuda", "test_model")
 
-    @patch('image_annotator_lib.core.base.config_registry')
-    @patch('image_annotator_lib.core.base.utils')
+    @patch("image_annotator_lib.core.base.config_registry")
+    @patch("image_annotator_lib.core.base.utils")
     def test_init_invalid_chunk_size_config(self, mock_utils, mock_config_registry):
         """無効なチャンクサイズ設定のテスト。"""
         mock_config_registry.get_all_config.return_value = {"test_model": {}}
@@ -225,9 +227,10 @@ class TestBaseAnnotator:
 
     def test_generate_result(self):
         """_generate_result メソッドのテスト。"""
-        with patch('image_annotator_lib.core.base.config_registry') as mock_config_registry, \
-             patch('image_annotator_lib.core.base.utils') as mock_utils:
-
+        with (
+            patch("image_annotator_lib.core.base.config_registry") as mock_config_registry,
+            patch("image_annotator_lib.core.base.utils") as mock_utils,
+        ):
             mock_config_registry.get_all_config.return_value = {"test_model": {}}
             mock_config_registry.get.side_effect = lambda model, key, default=None: {
                 ("test_model", "device"): "cuda",
@@ -240,10 +243,7 @@ class TestBaseAnnotator:
 
             # 文字列タグのテスト
             result = annotator._generate_result(
-                phash="test_hash",
-                tags="single_tag",
-                formatted_output={"test": "output"},
-                error=None
+                phash="test_hash", tags="single_tag", formatted_output={"test": "output"}, error=None
             )
 
             expected = {
@@ -259,7 +259,7 @@ class TestBaseAnnotator:
                 phash="test_hash",
                 tags=["tag1", "tag2"],
                 formatted_output={"test": "output"},
-                error="test_error"
+                error="test_error",
             )
 
             expected = {
@@ -270,9 +270,9 @@ class TestBaseAnnotator:
             }
             assert result == expected
 
-    @patch('image_annotator_lib.core.base.config_registry')
-    @patch('image_annotator_lib.core.base.utils')
-    @patch('image_annotator_lib.core.base.torch.no_grad')
+    @patch("image_annotator_lib.core.base.config_registry")
+    @patch("image_annotator_lib.core.base.utils")
+    @patch("image_annotator_lib.core.base.torch.no_grad")
     def test_predict_success(self, mock_no_grad, mock_utils, mock_config_registry):
         """predict メソッドの正常動作テスト。"""
         # モックの設定
@@ -296,14 +296,14 @@ class TestBaseAnnotator:
 
         assert len(results) == 3
         for i, result in enumerate(results):
-            assert result["phash"] == f"hash{i+1}"
+            assert result["phash"] == f"hash{i + 1}"
             assert result["tags"] == ["test_tag"]
             assert result["formatted_output"] == {"formatted": True}
             assert result["error"] is None
 
-    @patch('image_annotator_lib.core.base.config_registry')
-    @patch('image_annotator_lib.core.base.utils')
-    @patch('image_annotator_lib.core.base.torch.no_grad')
+    @patch("image_annotator_lib.core.base.config_registry")
+    @patch("image_annotator_lib.core.base.utils")
+    @patch("image_annotator_lib.core.base.torch.no_grad")
     def test_predict_with_memory_error(self, mock_no_grad, mock_utils, mock_config_registry):
         """predict メソッドでメモリエラーが発生した場合のテスト。"""
         # モックの設定
@@ -334,9 +334,9 @@ class TestBaseAnnotator:
             assert result["formatted_output"] is None
             assert result["error"] == "メモリ不足エラー"
 
-    @patch('image_annotator_lib.core.base.config_registry')
-    @patch('image_annotator_lib.core.base.utils')
-    @patch('image_annotator_lib.core.base.torch.no_grad')
+    @patch("image_annotator_lib.core.base.config_registry")
+    @patch("image_annotator_lib.core.base.utils")
+    @patch("image_annotator_lib.core.base.torch.no_grad")
     def test_predict_with_tag_generation_error(self, mock_no_grad, mock_utils, mock_config_registry):
         """predict メソッドでタグ生成エラーが発生した場合のテスト。"""
         # モックの設定
@@ -371,8 +371,8 @@ class TestBaseAnnotator:
 class TestTransformersBaseAnnotator:
     """TransformersBaseAnnotator のテスト。"""
 
-    @patch('image_annotator_lib.core.base.config_registry')
-    @patch('image_annotator_lib.core.base.utils')
+    @patch("image_annotator_lib.core.base.config_registry")
+    @patch("image_annotator_lib.core.base.utils")
     def test_init(self, mock_utils, mock_config_registry):
         """初期化のテスト。"""
         mock_config_registry.get_all_config.return_value = {"test_model": {}}
@@ -393,9 +393,10 @@ class TestTransformersBaseAnnotator:
 
     def test_generate_tags_with_string(self):
         """_generate_tags メソッドで文字列入力のテスト。"""
-        with patch('image_annotator_lib.core.base.config_registry') as mock_config_registry, \
-             patch('image_annotator_lib.core.base.utils') as mock_utils:
-
+        with (
+            patch("image_annotator_lib.core.base.config_registry") as mock_config_registry,
+            patch("image_annotator_lib.core.base.utils") as mock_utils,
+        ):
             mock_config_registry.get_all_config.return_value = {"test_model": {}}
             mock_config_registry.get.side_effect = lambda model, key, default=None: {
                 ("test_model", "device"): "cuda",
@@ -424,8 +425,8 @@ class TestTransformersBaseAnnotator:
 class TestWebApiBaseAnnotator:
     """WebApiBaseAnnotator のテスト。"""
 
-    @patch('image_annotator_lib.core.base.config_registry')
-    @patch('image_annotator_lib.core.base.utils')
+    @patch("image_annotator_lib.core.base.config_registry")
+    @patch("image_annotator_lib.core.base.utils")
     def test_init(self, mock_utils, mock_config_registry):
         """初期化のテスト。"""
         mock_config_registry.get_all_config.return_value = {"test_model": {}}
@@ -452,8 +453,8 @@ class TestWebApiBaseAnnotator:
         assert annotator.min_request_interval == 0.5
         assert annotator.max_output_tokens == 2000
 
-    @patch('image_annotator_lib.core.base.config_registry')
-    @patch('image_annotator_lib.core.base.utils')
+    @patch("image_annotator_lib.core.base.config_registry")
+    @patch("image_annotator_lib.core.base.utils")
     def test_init_with_invalid_values(self, mock_utils, mock_config_registry):
         """無効な設定値での初期化テスト。"""
         mock_config_registry.get_all_config.return_value = {"test_model": {}}
@@ -480,9 +481,10 @@ class TestWebApiBaseAnnotator:
 
     def test_preprocess_images(self):
         """_preprocess_images メソッドのテスト。"""
-        with patch('image_annotator_lib.core.base.config_registry') as mock_config_registry, \
-             patch('image_annotator_lib.core.base.utils') as mock_utils:
-
+        with (
+            patch("image_annotator_lib.core.base.config_registry") as mock_config_registry,
+            patch("image_annotator_lib.core.base.utils") as mock_utils,
+        ):
             mock_config_registry.get_all_config.return_value = {"test_model": {}}
             mock_config_registry.get.side_effect = lambda model, key, default=None: {
                 ("test_model", "device"): "cuda",
@@ -497,7 +499,7 @@ class TestWebApiBaseAnnotator:
             mock_image = Mock(spec=Image.Image)
             mock_image.save = Mock()
 
-            with patch('base64.b64encode') as mock_b64encode:
+            with patch("base64.b64encode") as mock_b64encode:
                 mock_b64encode.return_value.decode.return_value = "encoded_image_data"
 
                 result = annotator._preprocess_images([mock_image])
@@ -507,10 +509,11 @@ class TestWebApiBaseAnnotator:
 
     def test_parse_common_json_response_with_dict(self):
         """_parse_common_json_response メソッドで辞書入力のテスト。"""
-        with patch('image_annotator_lib.core.base.config_registry') as mock_config_registry, \
-             patch('image_annotator_lib.core.base.utils') as mock_utils, \
-             patch('image_annotator_lib.core.base.AnnotationSchema') as mock_schema:
-
+        with (
+            patch("image_annotator_lib.core.base.config_registry") as mock_config_registry,
+            patch("image_annotator_lib.core.base.utils") as mock_utils,
+            patch("image_annotator_lib.core.base.AnnotationSchema") as mock_schema,
+        ):
             mock_config_registry.get_all_config.return_value = {"test_model": {}}
             mock_config_registry.get.side_effect = lambda model, key, default=None: {
                 ("test_model", "device"): "cuda",
@@ -534,9 +537,10 @@ class TestWebApiBaseAnnotator:
 
     def test_parse_common_json_response_with_json_string(self):
         """_parse_common_json_response メソッドでJSON文字列入力のテスト。"""
-        with patch('image_annotator_lib.core.base.config_registry') as mock_config_registry, \
-             patch('image_annotator_lib.core.base.utils') as mock_utils:
-
+        with (
+            patch("image_annotator_lib.core.base.config_registry") as mock_config_registry,
+            patch("image_annotator_lib.core.base.utils") as mock_utils,
+        ):
             mock_config_registry.get_all_config.return_value = {"test_model": {}}
             mock_config_registry.get.side_effect = lambda model, key, default=None: {
                 ("test_model", "device"): "cuda",
@@ -563,9 +567,10 @@ class TestWebApiBaseAnnotator:
 
     def test_parse_common_json_response_with_invalid_json(self):
         """_parse_common_json_response メソッドで無効なJSON入力のテスト。"""
-        with patch('image_annotator_lib.core.base.config_registry') as mock_config_registry, \
-             patch('image_annotator_lib.core.base.utils') as mock_utils:
-
+        with (
+            patch("image_annotator_lib.core.base.config_registry") as mock_config_registry,
+            patch("image_annotator_lib.core.base.utils") as mock_utils,
+        ):
             mock_config_registry.get_all_config.return_value = {"test_model": {}}
             mock_config_registry.get.side_effect = lambda model, key, default=None: {
                 ("test_model", "device"): "cuda",
@@ -585,9 +590,10 @@ class TestWebApiBaseAnnotator:
 
     def test_extract_tags_from_text_json_format(self):
         """_extract_tags_from_text メソッドでJSON形式のテスト。"""
-        with patch('image_annotator_lib.core.base.config_registry') as mock_config_registry, \
-             patch('image_annotator_lib.core.base.utils') as mock_utils:
-
+        with (
+            patch("image_annotator_lib.core.base.config_registry") as mock_config_registry,
+            patch("image_annotator_lib.core.base.utils") as mock_utils,
+        ):
             mock_config_registry.get_all_config.return_value = {"test_model": {}}
             mock_config_registry.get.side_effect = lambda model, key, default=None: {
                 ("test_model", "device"): "cuda",
@@ -615,9 +621,10 @@ class TestWebApiBaseAnnotator:
 
     def test_extract_tags_from_text_comma_separated(self):
         """_extract_tags_from_text メソッドでカンマ区切り形式のテスト。"""
-        with patch('image_annotator_lib.core.base.config_registry') as mock_config_registry, \
-             patch('image_annotator_lib.core.base.utils') as mock_utils:
-
+        with (
+            patch("image_annotator_lib.core.base.config_registry") as mock_config_registry,
+            patch("image_annotator_lib.core.base.utils") as mock_utils,
+        ):
             mock_config_registry.get_all_config.return_value = {"test_model": {}}
             mock_config_registry.get.side_effect = lambda model, key, default=None: {
                 ("test_model", "device"): "cuda",
@@ -640,9 +647,10 @@ class TestWebApiBaseAnnotator:
 
     def test_generate_tags_with_formatted_output(self):
         """_generate_tags メソッドのテスト。"""
-        with patch('image_annotator_lib.core.base.config_registry') as mock_config_registry, \
-             patch('image_annotator_lib.core.base.utils') as mock_utils:
-
+        with (
+            patch("image_annotator_lib.core.base.config_registry") as mock_config_registry,
+            patch("image_annotator_lib.core.base.utils") as mock_utils,
+        ):
             mock_config_registry.get_all_config.return_value = {"test_model": {}}
             mock_config_registry.get.side_effect = lambda model, key, default=None: {
                 ("test_model", "device"): "cuda",
@@ -654,26 +662,17 @@ class TestWebApiBaseAnnotator:
             annotator = WebApiBaseAnnotator("test_model")
 
             # 正常なフォーマット済み出力
-            formatted_output = {
-                "annotation": {"tags": ["tag1", "tag2"]},
-                "error": None
-            }
+            formatted_output = {"annotation": {"tags": ["tag1", "tag2"]}, "error": None}
             result = annotator._generate_tags(formatted_output)
             assert result == ["tag1", "tag2"]
 
             # エラーを含む出力
-            formatted_output = {
-                "annotation": None,
-                "error": "テストエラー"
-            }
+            formatted_output = {"annotation": None, "error": "テストエラー"}
             result = annotator._generate_tags(formatted_output)
             assert result == []
 
             # annotationがNoneの場合
-            formatted_output = {
-                "annotation": None,
-                "error": None
-            }
+            formatted_output = {"annotation": None, "error": None}
             result = annotator._generate_tags(formatted_output)
             assert result == []
 

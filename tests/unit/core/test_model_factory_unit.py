@@ -35,18 +35,22 @@ def clear_model_load_state():
 # total=20GB, available=15GB -> max_cache=10GB (ratio=0.5)
 # psutil._common.svmem は内部APIなので、psutil.virtual_memory() の戻り値をモックとして使用する
 # 実際の psutil.virtual_memory() の戻り値と同じ構造を持つオブジェクトを作成
-MOCK_VIRTUAL_MEMORY = type('svmem', (object,), {
-    'total': 20 * 1024**3,
-    'available': 15 * 1024**3,
-    'percent': 25.0,
-    'used': 5 * 1024**3,
-    'free': 15 * 1024**3,
-    'active': 0, # ダミーの値を追加 (psutil.virtual_memory() の戻り値に含まれる属性)
-    'inactive': 0, # ダミーの値を追加
-    'buffers': 0, # ダミーの値を追加
-    'cached': 0, # ダミーの値を追加
-    'shared': 0, # ダミーの値を追加
-})()
+MOCK_VIRTUAL_MEMORY = type(
+    "svmem",
+    (object,),
+    {
+        "total": 20 * 1024**3,
+        "available": 15 * 1024**3,
+        "percent": 25.0,
+        "used": 5 * 1024**3,
+        "free": 15 * 1024**3,
+        "active": 0,  # ダミーの値を追加 (psutil.virtual_memory() の戻り値に含まれる属性)
+        "inactive": 0,  # ダミーの値を追加
+        "buffers": 0,  # ダミーの値を追加
+        "cached": 0,  # ダミーの値を追加
+        "shared": 0,  # ダミーの値を追加
+    },
+)()
 
 
 @patch("image_annotator_lib.core.model_factory.psutil.virtual_memory", return_value=MOCK_VIRTUAL_MEMORY)

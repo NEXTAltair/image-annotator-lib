@@ -65,32 +65,36 @@ class GoogleApiAnnotator(WebApiBaseAnnotator):
                 # API呼び出し用のパラメータを準備
                 # これらは GoogleClientAdapter.call_api 内で解釈される
                 api_params: dict[str, Any] = {
-                    "prompt": BASE_PROMPT, # BaseAnnotator や WebApiBaseAnnotator の self.prompt を使うべきか検討
-                    "system_prompt": SYSTEM_PROMPT, # 同上
+                    "prompt": BASE_PROMPT,  # BaseAnnotator や WebApiBaseAnnotator の self.prompt を使うべきか検討
+                    "system_prompt": SYSTEM_PROMPT,  # 同上
                     "temperature": config_registry.get(self.model_name, "temperature", default=0.7),
                     "top_p": config_registry.get(self.model_name, "top_p", default=1.0),
                     "top_k": config_registry.get(self.model_name, "top_k", default=32),
-                    "max_output_tokens": config_registry.get(self.model_name, "max_output_tokens", default=1800),
+                    "max_output_tokens": config_registry.get(
+                        self.model_name, "max_output_tokens", default=1800
+                    ),
                     # AnnotationSchema は Adapter 側でレスポンススキーマとして使われることを期待
                 }
 
                 # self.client は GoogleClientAdapter インスタンスなので、その call_api を呼び出す
                 annotation_schema = self.client.call_api(
-                    model_id=self.api_model_id, # Adapter はこの model_id を使う
+                    model_id=self.api_model_id,  # Adapter はこの model_id を使う
                     web_api_input=web_api_input_for_image,
                     params=api_params,
-                    output_schema=AnnotationSchema
+                    output_schema=AnnotationSchema,
                 )
 
-            except WebApiError as e: # Adapter から送出される WebApiError を捕捉
-                error_message = f"Google API Adapter Error: {e.message}" # e.message を使用
+            except WebApiError as e:  # Adapter から送出される WebApiError を捕捉
+                error_message = f"Google API Adapter Error: {e.message}"  # e.message を使用
                 logger.error(error_message, exc_info=True)
-            except errors.APIError as e: # google-genai SDK 固有のエラー (Adapter内でラップされなかった場合)
+            except (
+                errors.APIError
+            ) as e:  # google-genai SDK 固有のエラー (Adapter内でラップされなかった場合)
                 error_message = f"Google GenAI SDK APIError: {e.code} {e.message}"
                 logger.error(error_message, exc_info=True)
-            except ValueError as e: # Adapter やここでのロジックに起因する ValueError
-                 error_message = f"Google Annotator ValueError: {e!s}"
-                 logger.error(error_message, exc_info=True)
+            except ValueError as e:  # Adapter やここでのロジックに起因する ValueError
+                error_message = f"Google Annotator ValueError: {e!s}"
+                logger.error(error_message, exc_info=True)
             except Exception as e:
                 error_message = f"Google Annotator Unexpected Error: {e!s}"
                 logger.error(error_message, exc_info=True)

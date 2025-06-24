@@ -158,17 +158,15 @@ def _handle_error(
     total_models: int,
 ) -> None:
     """エラーを処理し、結果辞書に記録する。"""
-    error_type_name = type(e).__name__ # 例外のクラス名を取得
-    error_message = f"{error_type_name}: {e!s} (モデル: {model_name})" # メッセージに含める
-    logger.error(
-        f"モデル '{model_name}' (画像 {idx + 1}/{total_models}) でエラーが発生しました: {e!s}"
-    )
+    error_type_name = type(e).__name__  # 例外のクラス名を取得
+    error_message = f"{error_type_name}: {e!s} (モデル: {model_name})"  # メッセージに含める
+    logger.error(f"モデル '{model_name}' (画像 {idx + 1}/{total_models}) でエラーが発生しました: {e!s}")
     if image_hash not in results_dict:
         results_dict[image_hash] = {}
     results_dict[image_hash][model_name] = {
         "error": error_message,
         "formatted_output": None,
-        "tags": None, # エラー時はNoneまたは空リストを返す
+        "tags": None,  # エラー時はNoneまたは空リストを返す
         # 必要に応じて他のフィールドもエラー時のデフォルト値を設定
     }
 

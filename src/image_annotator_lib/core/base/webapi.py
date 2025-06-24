@@ -76,17 +76,19 @@ class WebApiBaseAnnotator(BaseAnnotator):
 
         self.model_id_on_provider: str | None = None  # __enter__ で設定される
         self.api_model_id: str | None = None  # __enter__ で設定される (加工済みID)
-        self.provider_name: str | None = None # __enter__ で設定される
+        self.provider_name: str | None = None  # __enter__ で設定される
 
         self.max_output_tokens: int | None = config_registry.get(self.model_name, "max_output_tokens", 1800)
         if self.max_output_tokens is not None and not isinstance(self.max_output_tokens, int):
-            logger.warning(f"max_output_tokens に不正な値 {self.max_output_tokens} が設定されました。None を使用します。")
+            logger.warning(
+                f"max_output_tokens に不正な値 {self.max_output_tokens} が設定されました。None を使用します。"
+            )
             self.max_output_tokens = None
 
         # APIキーは __enter__ で prepare_web_api_components から取得されるため、ここでは不要
 
-        self.client: Any = None # __enter__ で ApiClient 型に設定される
-        self.components: WebApiComponents | None = None # WebApiComponents 型を明示
+        self.client: Any = None  # __enter__ で ApiClient 型に設定される
+        self.components: WebApiComponents | None = None  # WebApiComponents 型を明示
 
     def __enter__(self) -> Self:
         """Web API コンポーネントを準備します。
@@ -113,14 +115,14 @@ class WebApiBaseAnnotator(BaseAnnotator):
             self.components = None
             self.client = None
             self.api_model_id = None
-            self.provider_name = None # エラー時は None
+            self.provider_name = None  # エラー時は None
             raise  # エラーを再送出してコンテキストの失敗を通知
         except Exception as e:
             logger.exception(f"Web API コンポーネントの準備中に予期せぬエラーが発生: {e}")
             self.components = None
             self.client = None
             self.api_model_id = None
-            self.provider_name = None # エラー時は None
+            self.provider_name = None  # エラー時は None
             raise ConfigurationError(f"Web API コンポーネント準備中の予期せぬエラー: {e}") from e
 
         return self
@@ -428,11 +430,15 @@ class WebApiBaseAnnotator(BaseAnnotator):
 
             if isinstance(response_val, AnnotationSchema):
                 # AnnotationSchema型ならmodel_dump()でdictに変換
-                formatted_outputs.append(WebApiFormattedOutput(annotation=response_val.model_dump(), error=None))
+                formatted_outputs.append(
+                    WebApiFormattedOutput(annotation=response_val.model_dump(), error=None)
+                )
             else:
                 # response_valがNoneの場合や、予期せぬ型の場合
-                error_message = f"Invalid response type: {type(response_val)}" if response_val is not None else "Response is None"
-                formatted_outputs.append(
-                    WebApiFormattedOutput(annotation=None, error=error_message)
+                error_message = (
+                    f"Invalid response type: {type(response_val)}"
+                    if response_val is not None
+                    else "Response is None"
                 )
+                formatted_outputs.append(WebApiFormattedOutput(annotation=None, error=error_message))
         return formatted_outputs

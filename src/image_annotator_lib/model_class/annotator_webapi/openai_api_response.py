@@ -34,15 +34,11 @@ class OpenAIApiAnnotator(WebApiBaseAnnotator):
     def _run_inference(self, processed: list[str] | list[bytes]) -> list[RawOutput]:
         """OpenAI APIを使用して推論を実行し、構造化された応答を取得します。"""
         if not all(isinstance(item, str) for item in processed):
-            raise WebApiError(
-                "OpenAIApiAnnotator expects a list of base64 encoded image strings."
-            )
+            raise WebApiError("OpenAIApiAnnotator expects a list of base64 encoded image strings.")
         processed_str = cast(list[str], processed)
 
         if self.client is None or self.api_model_id is None:
-            raise WebApiError(
-                "API クライアントまたはモデル ID が初期化されていません"
-            )
+            raise WebApiError("API クライアントまたはモデル ID が初期化されていません")
         # isinstance(self.client, openai.OpenAI) のチェックは削除。
         # self.client は OpenAIAdapter インスタンスであることを期待。
 
@@ -59,11 +55,11 @@ class OpenAIApiAnnotator(WebApiBaseAnnotator):
                 web_api_input = WebApiInput(image_b64=image_data_base64)
 
                 api_params: dict[str, Any] = {
-                    "prompt": BASE_PROMPT, # Adapter側でinputの一部として利用される想定
-                    "system_prompt": SYSTEM_PROMPT, # 同上
+                    "prompt": BASE_PROMPT,  # Adapter側でinputの一部として利用される想定
+                    "system_prompt": SYSTEM_PROMPT,  # 同上
                     "temperature": cast(float, temperature),
                     "max_output_tokens": max_output_tokens,
-                    "use_responses_parse": True, # OpenAIAdapter に responses.parse を使うよう指示
+                    "use_responses_parse": True,  # OpenAIAdapter に responses.parse を使うよう指示
                 }
 
                 # self.client は OpenAIAdapter インスタンス
@@ -71,12 +67,12 @@ class OpenAIApiAnnotator(WebApiBaseAnnotator):
                     model_id=self.api_model_id,
                     web_api_input=web_api_input,
                     params=api_params,
-                    output_schema=AnnotationSchema # Adapter はこれを見てレスポンスをパースする
+                    output_schema=AnnotationSchema,  # Adapter はこれを見てレスポンスをパースする
                 )
                 # call_api が None を返し、エラー情報を別途提供する設計も考えられるが、
                 # ここでは成功時は AnnotationSchema を、失敗時は WebApiError を送出すると仮定。
 
-            except WebApiError as e: # Adapterから送出されるエラー
+            except WebApiError as e:  # Adapterから送出されるエラー
                 error_message = f"OpenAI Adapter Error: {e.message}"
                 logger.error(error_message, exc_info=True)
             # Adapter が openai.APIError や ValidationError を WebApiError にラップすることを期待。
@@ -84,12 +80,12 @@ class OpenAIApiAnnotator(WebApiBaseAnnotator):
             except APIConnectionError as e:
                 error_message = f"OpenAI API Connection Error: {e}"
                 logger.error(error_message, exc_info=True)
-            except openai.APIError as e: # APIError をキャッチ (RateLimitError などを含む)
-                 error_message = f"OpenAI API Error: {e}"
-                 logger.error(error_message, exc_info=True)
-            except ValidationError as ve: # Pydanticのバリデーションエラー
-                 error_message = f"OpenAI Response Validation Error: {ve}"
-                 logger.error(error_message, exc_info=True)
+            except openai.APIError as e:  # APIError をキャッチ (RateLimitError などを含む)
+                error_message = f"OpenAI API Error: {e}"
+                logger.error(error_message, exc_info=True)
+            except ValidationError as ve:  # Pydanticのバリデーションエラー
+                error_message = f"OpenAI Response Validation Error: {ve}"
+                logger.error(error_message, exc_info=True)
             except Exception as e:
                 error_message = f"OpenAI Annotator Unexpected Error: {e!s}"
                 logger.error(error_message, exc_info=True)

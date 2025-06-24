@@ -201,13 +201,13 @@ def _filter_vision_models(raw_models: list[Any]) -> list[dict[str, Any]]:
         is_tool_use_supported = False
 
         if supported_parameters and isinstance(supported_parameters, list):
-            if 'structured_outputs' in supported_parameters:
+            if "structured_outputs" in supported_parameters:
                 is_structured_output_supported = True
-            if 'tools' in supported_parameters:
+            if "tools" in supported_parameters:
                 is_tool_use_supported = True
 
         if not (is_structured_output_supported and is_tool_use_supported):
-            continue # 構造化出力とツール利用の両方に対応していないモデルはスキップ
+            continue  # 構造化出力とツール利用の両方に対応していないモデルはスキップ
         # --- ここまで構造化出力とツール利用の対応チェック ---
 
         compatible_models.append(model_data)
@@ -251,8 +251,8 @@ def _format_model_data_for_toml(api_model_data: dict[str, Any]) -> dict[str, Any
         parts = model_id.split(id_separator, 1)
         # プロバイダー名を整形 (例: openai -> OpenAI, google -> Google)
         raw_provider = parts[0].strip()
-        if raw_provider == "openai": #pragma: no cover
-            provider = "OpenAI"   # openai の場合のみ特別扱い
+        if raw_provider == "openai":  # pragma: no cover
+            provider = "OpenAI"  # openai の場合のみ特別扱い
         else:
             provider = raw_provider.capitalize() if raw_provider else "Unknown"
         model_name_short = parts[1].strip()

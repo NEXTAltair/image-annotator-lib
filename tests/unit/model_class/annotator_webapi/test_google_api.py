@@ -10,11 +10,13 @@ from image_annotator_lib.model_class.annotator_webapi.webapi_shared import BASE_
 MODEL_NAME = "test_google_model"
 DUMMY_IMAGE_BYTES = b"dummy_image_bytes_for_google_test"
 
+
 @pytest.fixture
 def mock_google_adapter():
     adapter = MagicMock()
     adapter.call_api = MagicMock()
     return adapter
+
 
 @pytest.fixture
 def annotator(mock_google_adapter):
@@ -22,6 +24,7 @@ def annotator(mock_google_adapter):
     ann.client = mock_google_adapter
     ann.api_model_id = "gemini-pro-vision-test"
     return ann
+
 
 def test_run_inference_success(annotator, mock_google_adapter):
     expected_annotation = AnnotationSchema(tags=["test_tag"], captions=["test_caption"], score=0.99)
@@ -45,7 +48,7 @@ def test_run_inference_success(annotator, mock_google_adapter):
         "temperature": 0.7,
         "top_p": 1.0,
         "top_k": 32,
-        "max_output_tokens": 1800
+        "max_output_tokens": 1800,
     }
     expected_output_schema = AnnotationSchema
 
@@ -69,8 +72,9 @@ def test_run_inference_success(annotator, mock_google_adapter):
         model_id=expected_model_id,
         web_api_input=expected_web_api_input,
         params=expected_params,
-        output_schema=expected_output_schema
+        output_schema=expected_output_schema,
     )
+
 
 def test_run_inference_api_error(annotator, mock_google_adapter):
     error_msg = "Google Unit Test API Error!"
@@ -83,6 +87,7 @@ def test_run_inference_api_error(annotator, mock_google_adapter):
     assert results[0].get("response") is None
     assert f"Google API Adapter Error: Google API エラー: {error_msg}" in results[0].get("error")
     mock_google_adapter.call_api.assert_called_once()
+
 
 # _format_predictions 関連のテストは一旦コメントアウト
 # def test_format_predictions_success() -> None:

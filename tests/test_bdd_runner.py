@@ -5,6 +5,7 @@
 `scenarios()` 関数を呼び出すことで、関連する .feature ファイルと
 ステップ定義を結びつけて BDD テストを実行します。
 """
+
 from pytest_bdd import scenarios
 
 # from tests.features.step_definitions.annotation_steps import *
@@ -20,5 +21,4 @@ from .features.step_definitions.webapi_annotate_steps import *  # noqa: F403
 # features ディレクトリ内のすべての .feature ファイルを対象にテストを実行
 # pytest-bdd が conftest.py と step_definitions ディレクトリ内のステップを
 # 自動的に発見することを期待する
-scenarios('features/webapi_annotate.feature')
-
+scenarios("features/webapi_annotate.feature")

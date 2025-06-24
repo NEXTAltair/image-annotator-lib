@@ -48,11 +48,14 @@ def init_logger():
     # 特定のモジュールのDEBUGログをフィルタするための関数
     def filter_module_logs(record):
         # 'registry' または 'config' モジュールからのDEBUGログをフィルタ
-        if record["name"].startswith("image_annotator_lib.core.registry") or record["name"].startswith("image_annotator_lib.core.config"):
+        if record["name"].startswith("image_annotator_lib.core.registry") or record["name"].startswith(
+            "image_annotator_lib.core.config"
+        ):
             # INFOレベル以上のログだけを許可する (DEBUGレベルは除外)
             return record["level"].no >= logger.level("INFO").no
         # その他のモジュールのログはすべて通す
         return True
+
     # ファイルシンク (DEFAULT_PATHS["log_file"] を使用) - フィルタを追加
     try:
         log_file_path = Path(DEFAULT_PATHS["log_file"])

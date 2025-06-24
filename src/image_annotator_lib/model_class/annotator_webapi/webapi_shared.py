@@ -133,5 +133,5 @@ JSON_SCHEMA = {
         "score": {"type": "number"},
     },
     "required": ["tags", "captions", "score"],
-    #"propertyOrdering": ["tags", "captions", "score"],
+    # "propertyOrdering": ["tags", "captions", "score"],
 }

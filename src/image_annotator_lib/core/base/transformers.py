@@ -92,14 +92,12 @@ class TransformersBaseAnnotator(BaseAnnotator):
         if not self.components or "processor" not in self.components:
             raise ConfigurationError("Transformersプロセッサがロードされていません。")
         processor = self.components["processor"]
-        if not callable(processor): # callable かどうかでチェック
-             raise ConfigurationError(f"プロセッサが呼び出し可能ではありません: {type(processor)}")
+        if not callable(processor):  # callable かどうかでチェック
+            raise ConfigurationError(f"プロセッサが呼び出し可能ではありません: {type(processor)}")
 
         for image in images:
             # プロセッサの出力を取得してデバイスに移動
-            processed_output = processor(images=image, return_tensors="pt").to(
-                self.device
-            )
+            processed_output = processor(images=image, return_tensors="pt").to(self.device)
             logger.debug(f"辞書のキー: {processed_output.keys()}")
             results.append(processed_output)
         return results
@@ -127,9 +125,9 @@ class TransformersBaseAnnotator(BaseAnnotator):
 
                 if hasattr(model, "generate"):
                     # generateメソッドにmax_lengthを追加
-                    if self.max_length is not None: # Noneチェック
+                    if self.max_length is not None:  # Noneチェック
                         # model_kwargs の型は Dict[str, Tensor] だが、generateは他の型の引数も取る
-                        model_kwargs_any: dict[str, Any] = model_kwargs # Anyにキャスト
+                        model_kwargs_any: dict[str, Any] = model_kwargs  # Anyにキャスト
                         model_kwargs_any["max_length"] = self.max_length
                         model_out = model.generate(**model_kwargs_any)
                     else:
@@ -143,7 +141,11 @@ class TransformersBaseAnnotator(BaseAnnotator):
 
     def _format_predictions(self, token_ids_list: list[torch.Tensor]) -> list[str]:
         """生出力バッチをフォーマットします (Transformers用、テキストデコード)。"""
-        if not self.components or "processor" not in self.components or self.components["processor"] is None:
+        if (
+            not self.components
+            or "processor" not in self.components
+            or self.components["processor"] is None
+        ):
             raise RuntimeError("Transformer プロセッサがロードされていません。")
 
         processor_obj = self.components["processor"]
@@ -161,7 +163,9 @@ class TransformersBaseAnnotator(BaseAnnotator):
                     else:
                         all_formatted.append("")
                 elif isinstance(processor_obj, CLIPProcessor):
-                    logger.warning("CLIPProcessorにはbatch_decodeがありません。デコード処理をスキップします。")
+                    logger.warning(
+                        "CLIPProcessorにはbatch_decodeがありません。デコード処理をスキップします。"
+                    )
                     all_formatted.append("")
                 else:
                     raise TypeError(f"Unsupported processor type: {type(processor_obj)}")
@@ -181,7 +185,9 @@ class TransformersBaseAnnotator(BaseAnnotator):
             if isinstance(formatted_output, str):
                 return [formatted_output]
             else:
-                logger.warning(f"_generate_tags: 期待される文字列型ではありません: {type(formatted_output)}")
+                logger.warning(
+                    f"_generate_tags: 期待される文字列型ではありません: {type(formatted_output)}"
+                )
                 return []
         except Exception as e:
             logger.exception(f"タグ生成中にエラー発生: {e}")
