@@ -11,6 +11,7 @@ from .core.base.annotator import BaseAnnotator
 from .core.registry import get_cls_obj_registry
 from .core.types import AnnotationResult
 from .core.utils import calculate_phash, logger
+from .core.provider_manager import ProviderManager
 
 _MODEL_INSTANCE_REGISTRY: dict[str, Any] = {}
 
@@ -52,7 +53,7 @@ class PHashAnnotationResults(dict[str, dict[str, ModelResultDict]]):
 def _create_annotator_instance(model_name: str) -> BaseAnnotator:
     """
     モデル名に対応するクラスを取得し、インスタンスを生成します。
-    Web API モデルもローカルモデルも、model_name（論理名）をそのまま渡して初期化します。
+    PydanticAI WebAPIモデルの場合はProvider-level管理を使用します。
 
     Args:
         model_name (str): モデルの名前 (Web APIの場合は model_name_short)。
@@ -69,11 +70,129 @@ def _create_annotator_instance(model_name: str) -> BaseAnnotator:
         raise KeyError(f"Model '{model_name}' not found in class registry.")
 
     Annotator_class = registry[model_name]
-    instance = Annotator_class(model_name=model_name)
-    logger.debug(
-        f"モデル '{model_name}' の新しいインスタンスを作成しました (クラス: {Annotator_class.__name__})"
-    )
-    return instance
+    
+    # PydanticAI WebAPIアノテーターの場合はProvider-level管理を使用
+    if _is_pydantic_ai_webapi_annotator(Annotator_class):
+        # Provider-levelラッパーを返す
+        return PydanticAIWebAPIWrapper(model_name, Annotator_class)
+    else:
+        # 従来通りのインスタンス作成
+        instance = Annotator_class(model_name=model_name)
+        logger.debug(
+            f"モデル '{model_name}' の新しいインスタンスを作成しました (クラス: {Annotator_class.__name__})"
+        )
+        return instance
+
+
+def _is_pydantic_ai_webapi_annotator(annotator_class) -> bool:
+    """PydanticAI WebAPIアノテーターかどうかを判定"""
+    # PydanticAIAnnotatorMixinを継承しているかで判定
+    from .core.pydantic_ai_factory import PydanticAIAnnotatorMixin
+    return issubclass(annotator_class, PydanticAIAnnotatorMixin)
+
+
+class PydanticAIWebAPIWrapper(BaseAnnotator):
+    """PydanticAI WebAPIアノテーター用のProvider-levelラッパー"""
+    
+    def __init__(self, model_name: str, annotator_class):
+        super().__init__(model_name)
+        self.annotator_class = annotator_class
+        self._api_model_id = None
+    
+    def __enter__(self):
+        # Configuration読み込みでapi_model_idを取得
+        from .core.config import config_registry
+        self._api_model_id = config_registry.get(self.model_name, "api_model_id", default=None)
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):  # noqa: ARG002
+        # Provider-levelで管理されるため何もしない
+        pass
+    
+    def predict(self, images: list[Image.Image], phash_list: list[str]) -> list[AnnotationResult]:
+        """Provider-level実行でのpredict実装"""
+        if not self._api_model_id:
+            raise ValueError(f"Model {self.model_name} has no api_model_id configured")
+        
+        # Provider Managerを通して実行
+        raw_outputs = ProviderManager.run_inference_with_model(
+            model_name=self.model_name,
+            images=images,
+            api_model_id=self._api_model_id
+        )
+        
+        # 結果をAnnotationResult形式に変換
+        results = []
+        for i, raw_output in enumerate(raw_outputs):
+            phash = phash_list[i] if i < len(phash_list) else None
+            
+            if raw_output.get("error"):
+                result = AnnotationResult(
+                    phash=phash,
+                    tags=[],
+                    formatted_output=None,
+                    error=raw_output["error"]
+                )
+            else:
+                annotation = raw_output.get("response")
+                if annotation:
+                    if hasattr(annotation, 'tags'):
+                        tags = annotation.tags
+                    elif isinstance(annotation, dict) and 'tags' in annotation:
+                        tags = annotation['tags']
+                    else:
+                        tags = []
+                    
+                    result = AnnotationResult(
+                        phash=phash,
+                        tags=tags,
+                        formatted_output=annotation,
+                        error=None
+                    )
+                else:
+                    result = AnnotationResult(
+                        phash=phash,
+                        tags=[],
+                        formatted_output=None,
+                        error="No response from model"
+                    )
+            
+            results.append(result)
+        
+        return results
+    
+    def _preprocess_images(self, images: list[Image.Image]) -> list[Image.Image]:
+        """Provider-levelでは前処理は不要"""
+        return images
+    
+    def _run_inference(self, processed: list[Image.Image]) -> list[dict]:
+        """Provider Managerを通して推論実行"""
+        if not self._api_model_id:
+            raise ValueError(f"Model {self.model_name} has no api_model_id configured")
+        
+        return ProviderManager.run_inference_with_model(
+            model_name=self.model_name,
+            images=processed,
+            api_model_id=self._api_model_id
+        )
+    
+    def _format_predictions(self, raw_outputs: list[dict]) -> list[dict]:
+        """Provider-levelでは整形済みのため変更不要"""
+        return raw_outputs
+    
+    def _generate_tags(self, formatted_output: list[dict]) -> list[str]:
+        """整形済み出力からタグリストを生成"""
+        all_tags = []
+        for output in formatted_output:
+            if output.get("error"):
+                continue
+            annotation = output.get("response")
+            if annotation:
+                if hasattr(annotation, 'tags'):
+                    all_tags.extend(annotation.tags)
+                elif isinstance(annotation, dict) and 'tags' in annotation:
+                    all_tags.extend(annotation['tags'])
+        return all_tags
 
 
 def get_annotator_instance(model_name: str) -> Any:

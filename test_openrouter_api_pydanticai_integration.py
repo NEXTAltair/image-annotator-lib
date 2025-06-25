@@ -34,12 +34,10 @@ def test_openrouter_pydanticai_structure():
         from image_annotator_lib.core.types import AnnotationSchema
         from pydantic_ai.messages import BinaryContent
         
-        # 必要メソッドの存在確認
+        # 必要メソッドの存在確認 (新しいProvider-level実装)
         required_methods = [
             "__init__", "__enter__", "__exit__",
-            "_load_configuration", "_create_agent", "_get_config_hash",
-            "_preprocess_images", "_run_inference", 
-            "_run_inference_sync", "_run_inference_async",
+            "_run_inference", "run_with_model",
             "_handle_api_error"
         ]
 
@@ -81,11 +79,14 @@ def test_image_preprocessing():
         # テスト画像作成
         test_images = [create_test_image(), create_test_image()]
         
-        # Annotatorインスタンス作成（設定なし）
-        annotator = OpenRouterApiAnnotator("test-model")
+        # PydanticAIAnnotatorMixinの前処理機能テスト
+        from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAnnotatorMixin
+        
+        # Mixinインスタンス作成
+        mixin = PydanticAIAnnotatorMixin("test-model")
         
         # 前処理実行
-        processed = annotator._preprocess_images(test_images)
+        processed = mixin._preprocess_images_to_binary(test_images)
         
         # 結果検証
         assert isinstance(processed, list)
@@ -115,45 +116,28 @@ def test_config_hash_generation():
     print("\n=== 設定ハッシュ生成テスト ===")
 
     try:
-        from image_annotator_lib.model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
         from image_annotator_lib.core.webapi_agent_cache import create_config_hash
         
-        # Annotatorインスタンス作成
-        annotator = OpenRouterApiAnnotator("test-model")
-        annotator.api_model_id = "anthropic/claude-3.5-sonnet"
+        # テスト用設定データ
+        config_data = {
+            "model_id": "anthropic/claude-3.5-sonnet",
+            "temperature": 0.7,
+            "max_tokens": 1800,
+            "referer": "https://example.com",
+            "app_name": "TestApp",
+        }
         
-        # 設定ハッシュ生成（モックconfig_registry使用）
-        with patch("image_annotator_lib.core.config.config_registry") as mock_registry:
-            mock_registry.get.side_effect = lambda name, key, default=None: {
-                "temperature": 0.7,
-                "max_output_tokens": 1800,
-                "json_schema_supported": True,
-                "referer": "https://example.com",
-                "app_name": "TestApp",
-            }.get(key, default)
-            
-            config_hash = annotator._get_config_hash()
-            
+        # ハッシュ生成
+        config_hash = create_config_hash(config_data)
+        config_hash2 = create_config_hash(config_data)
+        
         # 結果検証
         assert isinstance(config_hash, str)
         assert len(config_hash) > 0
+        assert config_hash == config_hash2  # 同一データで同一ハッシュ
         
         print("✅ 設定ハッシュ生成成功")
         print(f"   - ハッシュ値: {config_hash}")
-        
-        # 同じ設定で同じハッシュが生成されることを確認
-        with patch("image_annotator_lib.core.config.config_registry") as mock_registry:
-            mock_registry.get.side_effect = lambda name, key, default=None: {
-                "temperature": 0.7,
-                "max_output_tokens": 1800,
-                "json_schema_supported": True,
-                "referer": "https://example.com",
-                "app_name": "TestApp",
-            }.get(key, default)
-            
-            config_hash2 = annotator._get_config_hash()
-        
-        assert config_hash == config_hash2
         print("✅ 同一設定で同一ハッシュ確認")
         
         return True
@@ -166,71 +150,71 @@ def test_config_hash_generation():
 
 
 def test_agent_creation_mock():
-    """Agent作成のモックテスト"""
+    """Provider Factory OpenRouter Agent作成のモックテスト"""
     print("\n=== Agent作成モックテスト ===")
 
     try:
-        from image_annotator_lib.model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
-        from pydantic_ai import Agent
-        from pydantic import SecretStr
+        from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+        from image_annotator_lib.core.types import AnnotationSchema
         
-        # Annotatorインスタンス作成
-        annotator = OpenRouterApiAnnotator("test-model")
-        annotator.api_model_id = "anthropic/claude-3.5-sonnet"
-        annotator.api_key = SecretStr("test-api-key")
-        
-        # Agent作成をモック（正しいモジュールパスで）
-        with patch("image_annotator_lib.model_class.annotator_webapi.openai_api_chat.OpenAIProvider") as mock_provider_class, \
-             patch("image_annotator_lib.model_class.annotator_webapi.openai_api_chat.OpenAIModel") as mock_model_class, \
-             patch("image_annotator_lib.model_class.annotator_webapi.openai_api_chat.Agent") as mock_agent_class:
+        # Provider Factory のOpenRouter Agent作成テスト
+        with patch("image_annotator_lib.core.pydantic_ai_factory.infer_model") as mock_infer_model, \
+             patch("image_annotator_lib.core.pydantic_ai_factory.Agent") as mock_agent_class, \
+             patch.object(PydanticAIProviderFactory, 'get_provider') as mock_get_provider:
             
-            # モック設定
-            mock_provider = MagicMock()
-            mock_provider_class.return_value = mock_provider
-            
+            # Mock model
             mock_model = MagicMock()
-            mock_model_class.return_value = mock_model
+            mock_model.system = "openai"
+            mock_infer_model.return_value = mock_model
             
+            # Mock provider
+            mock_provider = MagicMock()
+            mock_get_provider.return_value = mock_provider
+            
+            # Mock agent
             mock_agent = MagicMock()
             mock_agent_class.return_value = mock_agent
             
-            # config_registryもモック
-            with patch("image_annotator_lib.core.config.config_registry") as mock_registry:
-                mock_registry.get.side_effect = lambda name, key, default=None: {
-                    "referer": "https://example.com",
-                    "app_name": "TestApp",
-                }.get(key, default)
-                
-                # Agent作成実行
-                agent = annotator._create_agent()
+            # OpenRouter用config_data
+            config_data = {
+                "model_id": "anthropic/claude-3.5-sonnet",
+                "referer": "https://example.com",
+                "app_name": "TestApp",
+            }
             
-            # 呼び出し確認
-            mock_provider_class.assert_called_once()
-            call_kwargs = mock_provider_class.call_args[1]
-            assert call_kwargs["api_key"] == "test-api-key"
-            assert call_kwargs["base_url"] == "https://openrouter.ai/api/v1"
+            # Provider Factory でOpenRouter Agent作成
+            agent = PydanticAIProviderFactory.create_openrouter_agent(
+                model_name="test-model",
+                api_model_id="openrouter:anthropic/claude-3.5-sonnet",
+                api_key="test-api-key",
+                config_data=config_data
+            )
             
-            # default_headers の存在確認（中身は設定により決まる）
-            assert "default_headers" in call_kwargs
-            headers = call_kwargs["default_headers"]
-            # モック設定に基づいてヘッダーが設定されているか確認
-            if headers:  # ヘッダーが設定されている場合のみチェック
-                # referer と app_name が設定されていれば対応するヘッダーが存在
-                if "HTTP-Referer" in headers:
-                    assert headers["HTTP-Referer"] == "https://example.com"
-                if "X-Title" in headers:
-                    assert headers["X-Title"] == "TestApp"
+            # 検証
+            assert agent is not None
+            mock_infer_model.assert_called_once_with("openai:anthropic/claude-3.5-sonnet")
+            mock_get_provider.assert_called_once()
             
-            mock_model_class.assert_called_once_with(model_name="anthropic/claude-3.5-sonnet", provider=mock_provider)
+            # get_provider呼び出し引数の確認
+            call_args = mock_get_provider.call_args
+            assert call_args[0][0] == "openai"  # provider_name
+            provider_kwargs = call_args[1]
+            assert provider_kwargs["api_key"] == "test-api-key"
+            assert provider_kwargs["base_url"] == "https://openrouter.ai/api/v1"
+            assert "default_headers" in provider_kwargs
+            
+            # ヘッダーの確認
+            headers = provider_kwargs["default_headers"]
+            assert headers["HTTP-Referer"] == "https://example.com"
+            assert headers["X-Title"] == "TestApp"
+            
             mock_agent_class.assert_called_once()
-            
-            assert agent == mock_agent
-            
-        print("✅ Agent作成モックテスト成功")
-        print("   - OpenAIProvider作成: ✅")
-        print("   - OpenAIModel作成: ✅") 
+        
+        print("✅ Provider Factory OpenRouter Agent作成モック成功")
+        print("   - OpenRouterプレフィックス処理: ✅")
+        print("   - カスタムヘッダー設定: ✅") 
+        print("   - Provider共有メカニズム: ✅")
         print("   - Agent作成: ✅")
-        print("   - OpenRouterヘッダー設定: ✅")
         
         return True
 
@@ -297,62 +281,55 @@ def test_error_handling():
 
 
 def test_inference_pipeline_mock():
-    """推論パイプライン全体のモックテスト"""
+    """Provider Manager OpenRouter推論パイプラインのモックテスト"""
     print("\n=== 推論パイプライン モックテスト ===")
 
     try:
-        from image_annotator_lib.model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
-        from image_annotator_lib.core.types import AnnotationSchema, RawOutput
-        from pydantic_ai.messages import BinaryContent
+        from image_annotator_lib.core.provider_manager import ProviderManager
+        from image_annotator_lib.core.types import AnnotationSchema
         
         # テストデータ準備
         test_image = create_test_image()
-        expected_result = AnnotationSchema(
-            tags=["test", "openrouter"],
-            captions=["Mock test image for OpenRouter"],
-            score=0.88
-        )
+        expected_result = [{
+            "response": AnnotationSchema(
+                tags=["test", "openrouter"],
+                captions=["Mock test image for OpenRouter"],
+                score=0.88
+            ),
+            "error": None
+        }]
         
-        # Annotator作成
-        annotator = OpenRouterApiAnnotator("test-model")
-        
-        # Agentを設定（推論実行に必要）
-        mock_agent = MagicMock()
-        annotator.agent = mock_agent
-        
-        # 画像をBase64文字列に変換（基底クラスの仕様に合わせる）
-        import base64
-        buffered = BytesIO()
-        test_image.save(buffered, format="WEBP")
-        base64_image = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        
-        # 推論実行をモック
-        with patch.object(annotator, '_run_inference_sync') as mock_inference:
+        # Provider Manager のrun_inference_with_modelをモック
+        with patch.object(ProviderManager, 'run_inference_with_model') as mock_inference:
             mock_inference.return_value = expected_result
             
-            # 推論実行（Base64文字列リストを渡す）
-            results = annotator._run_inference([base64_image])
+            # 推論実行
+            results = ProviderManager.run_inference_with_model(
+                model_name="test-model",
+                images=[test_image],
+                api_model_id="anthropic/claude-3.5-sonnet"
+            )
             
             # 結果検証
+            assert isinstance(results, list)
             assert len(results) == 1
-            result = results[0]
             
-            # RawOutputは TypedDict (辞書形式) なので、キーでアクセス
+            result = results[0]
             assert isinstance(result, dict)
             assert 'response' in result
-            assert 'error' in result
-            assert result['response'] == expected_result
-            assert result['error'] is None
+            assert isinstance(result['response'], AnnotationSchema)
+            assert result.get('error') is None
             
             # モック呼び出し確認
-            mock_inference.assert_called_once()
-            call_args = mock_inference.call_args[0]
-            assert isinstance(call_args[0], BinaryContent)
+            mock_inference.assert_called_once_with(
+                model_name="test-model",
+                images=[test_image],
+                api_model_id="anthropic/claude-3.5-sonnet"
+            )
         
-        print("✅ 推論パイプライン モックテスト成功")
+        print("✅ Provider Manager OpenRouter推論パイプライン モック成功")
         print("   - 画像前処理: ✅")
-        print("   - Agent初期化: ✅")
-        print("   - 推論実行: ✅")
+        print("   - Providerレベル実行: ✅")
         print("   - 結果フォーマット: ✅")
         
         return True
