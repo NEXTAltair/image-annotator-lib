@@ -1,27 +1,22 @@
-from typing import cast, override
-import asyncio
 import base64
 from io import BytesIO
+from typing import override
 
 from PIL import Image
-from pydantic import SecretStr
-from pydantic_ai.messages import BinaryContent
 
 from image_annotator_lib.exceptions.errors import (
-    ConfigurationError, 
-    WebApiError,
     ApiAuthenticationError,
     ApiRateLimitError,
-    ApiTimeoutError,
     ApiServerError,
+    ApiTimeoutError,
+    WebApiError,
 )
 
 from ...core.base import WebApiBaseAnnotator
 from ...core.config import config_registry
-from ...core.types import AnnotationSchema, RawOutput
-from ...core.utils import logger
 from ...core.pydantic_ai_factory import PydanticAIAnnotatorMixin, PydanticAIProviderFactory
-from .webapi_shared import BASE_PROMPT, JSON_SCHEMA, SYSTEM_PROMPT
+from ...core.types import RawOutput
+from ...core.utils import logger
 
 
 class OpenRouterApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
@@ -35,7 +30,7 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
         """コンテキストマネージャーのエントリーポイント"""
         # OpenRouter専用の設定でAgentを作成
         self._load_configuration()
-        
+
         # OpenRouter固有の設定データ
         config_data = {
             "model_id": self.api_model_id,
@@ -44,15 +39,15 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
             "referer": config_registry.get(self.model_name, "referer"),
             "app_name": config_registry.get(self.model_name, "app_name"),
         }
-        
+
         # OpenRouter固有のAgentを取得 (キャッシュ付き)
         self.agent = PydanticAIProviderFactory.get_cached_agent(
             model_name=self.model_name,
             api_model_id=f"openrouter:{self.api_model_id}",  # openrouter prefix
             api_key=self.api_key.get_secret_value(),
-            config_data=config_data
+            config_data=config_data,
         )
-        
+
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -67,22 +62,22 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
                 "Agent が初期化されていません。コンテキストマネージャーを使用してください。",
                 provider_name="OpenRouter",
             )
-        
+
         binary_contents = self._preprocess_images_to_binary(images)
-        
+
         results: list[RawOutput] = []
         for binary_content in binary_contents:
             try:
                 self._wait_for_rate_limit()
-                
+
                 # 指定されたモデルIDで推論実行
                 annotation = self._run_inference_with_model(binary_content, model_id)
                 results.append({"response": annotation, "error": None})
-                
+
             except Exception as e:
                 error_message = self._handle_api_error(e)
                 results.append({"response": None, "error": error_message})
-        
+
         return results
 
     @override
@@ -107,14 +102,14 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
         except Exception as e:
             logger.error(f"画像前処理エラー: {e}")
             return [{"response": None, "error": f"画像前処理エラー: {e}"}] * len(processed_images)
-        
+
         # デフォルトモデルで実行
         return self.run_with_model(pil_images, self.api_model_id)
 
     def _handle_api_error(self, error: Exception) -> str:
         """API エラーを適切な例外に変換"""
         error_str = str(error)
-        
+
         # OpenRouter/OpenAI 互換エラーパターン
         if "401" in error_str or "authentication" in error_str.lower():
             raise ApiAuthenticationError(f"OpenRouter API 認証エラー: {error_str}")
@@ -124,8 +119,7 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
             raise ApiTimeoutError(f"OpenRouter API タイムアウト: {error_str}")
         elif "500" in error_str or "server error" in error_str.lower():
             raise ApiServerError(f"OpenRouter API サーバーエラー: {error_str}")
-        
+
         # 一般エラー
         logger.error(f"OpenRouter API エラー: {error}")
         return f"OpenRouter API Error: {error_str}"
-

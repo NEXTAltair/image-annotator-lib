@@ -1,124 +1,118 @@
 """Provider-level instance manager for efficient PydanticAI usage."""
 
-from typing import Dict, Any, ClassVar, Optional
+from typing import Any, ClassVar
+
 from PIL import Image
 
+from ..exceptions.errors import WebApiError
 from .config import config_registry
 from .types import RawOutput
 from .utils import logger
-from .pydantic_ai_factory import PydanticAIProviderFactory
-from ..exceptions.errors import WebApiError
 
 
 class ProviderManager:
     """Manages provider-level instances for efficient PydanticAI usage"""
-    
-    _provider_instances: ClassVar[Dict[str, Any]] = {}
-    
+
+    _provider_instances: ClassVar[dict[str, Any]] = {}
+
     @classmethod
     def get_provider_instance(cls, provider_name: str) -> Any:
         """Get or create provider-level instance"""
-        
+
         if provider_name not in cls._provider_instances:
             # Create new provider-level instance
             if provider_name == "anthropic":
-                from ..model_class.annotator_webapi.anthropic_api import AnthropicApiAnnotator
+
                 cls._provider_instances[provider_name] = AnthropicProviderInstance()
             elif provider_name == "openai":
-                from ..model_class.annotator_webapi.openai_api_response import OpenAIApiAnnotator
-                cls._provider_instances[provider_name] = OpenAIProviderInstance() 
+
+                cls._provider_instances[provider_name] = OpenAIProviderInstance()
             elif provider_name == "openrouter":
-                from ..model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
+
                 cls._provider_instances[provider_name] = OpenRouterProviderInstance()
             elif provider_name == "google":
-                from ..model_class.annotator_webapi.google_api import GoogleApiAnnotator
+
                 cls._provider_instances[provider_name] = GoogleProviderInstance()
             else:
                 raise WebApiError(f"Unsupported provider: {provider_name}")
-            
+
             logger.debug(f"Created new provider instance: {provider_name}")
-        
+
         return cls._provider_instances[provider_name]
-    
+
     @classmethod
     def run_inference_with_model(
-        cls, 
-        model_name: str, 
-        images: list[Image.Image], 
-        api_model_id: str
+        cls, model_name: str, images: list[Image.Image], api_model_id: str
     ) -> list[RawOutput]:
         """Run inference with specified model ID using provider sharing"""
-        
+
         # Determine provider from model configuration or model ID
         provider_name = cls._determine_provider(model_name, api_model_id)
-        
+
         # Get provider instance
         provider_instance = cls.get_provider_instance(provider_name)
-        
+
         # Execute inference
         return provider_instance.run_with_model(model_name, images, api_model_id)
-    
+
     @classmethod
     def _determine_provider(cls, model_name: str, api_model_id: str) -> str:
         """Determine provider from model configuration or model ID"""
-        
+
         # First check explicit provider configuration
         provider = config_registry.get(model_name, "provider")
         if provider:
             return provider.lower()
-        
+
         # Auto-detect from model ID
         if ":" in api_model_id:
             return api_model_id.split(":", 1)[0]
-        
+
         # Auto-detect from model name patterns
-        if api_model_id.startswith(('gpt', 'o1', 'o3')):
-            return 'openai'
-        elif api_model_id.startswith('claude'):
-            return 'anthropic'
-        elif api_model_id.startswith('gemini'):
-            return 'google'
+        if api_model_id.startswith(("gpt", "o1", "o3")):
+            return "openai"
+        elif api_model_id.startswith("claude"):
+            return "anthropic"
+        elif api_model_id.startswith("gemini"):
+            return "google"
         else:
             # Default fallback based on model configuration structure
             if config_registry.get(model_name, "anthropic_api_key"):
-                return 'anthropic'
+                return "anthropic"
             elif config_registry.get(model_name, "openai_api_key"):
-                return 'openai'
+                return "openai"
             elif config_registry.get(model_name, "google_api_key"):
-                return 'google'
+                return "google"
             else:
-                return 'openai'  # Default fallback
+                return "openai"  # Default fallback
 
 
 class ProviderInstanceBase:
     """Base class for provider instances"""
-    
+
     def __init__(self):
         self._active_contexts = {}
-    
+
     def run_with_model(
-        self, 
-        model_name: str, 
-        images: list[Image.Image], 
-        api_model_id: str
+        self, model_name: str, images: list[Image.Image], api_model_id: str
     ) -> list[RawOutput]:
         """Run inference with specified model ID"""
-        
+
         # Get or create context-managed annotator for this model_name
         if model_name not in self._active_contexts:
             annotator = self._create_annotator(model_name)
             context = annotator.__enter__()
             self._active_contexts[model_name] = (annotator, context)
-        
+
         _, context = self._active_contexts[model_name]
-        
+
         # Execute inference with specified model
         return context.run_with_model(images, api_model_id)
-    
+
     def _create_annotator(self, model_name: str):
         """Create annotator instance - to be implemented by subclasses"""
         raise NotImplementedError
-    
+
     def cleanup_context(self, model_name: str):
         """Clean up context for specific model"""
         if model_name in self._active_contexts:
@@ -132,31 +126,35 @@ class ProviderInstanceBase:
 
 class AnthropicProviderInstance(ProviderInstanceBase):
     """Anthropic provider instance"""
-    
+
     def _create_annotator(self, model_name: str):
         from ..model_class.annotator_webapi.anthropic_api import AnthropicApiAnnotator
+
         return AnthropicApiAnnotator(model_name)
 
 
 class OpenAIProviderInstance(ProviderInstanceBase):
     """OpenAI provider instance"""
-    
+
     def _create_annotator(self, model_name: str):
         from ..model_class.annotator_webapi.openai_api_response import OpenAIApiAnnotator
+
         return OpenAIApiAnnotator(model_name)
 
 
 class OpenRouterProviderInstance(ProviderInstanceBase):
     """OpenRouter provider instance"""
-    
+
     def _create_annotator(self, model_name: str):
         from ..model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
+
         return OpenRouterApiAnnotator(model_name)
 
 
 class GoogleProviderInstance(ProviderInstanceBase):
     """Google provider instance"""
-    
+
     def _create_annotator(self, model_name: str):
         from ..model_class.annotator_webapi.google_api import GoogleApiAnnotator
+
         return GoogleApiAnnotator(model_name)
