@@ -1,15 +1,20 @@
 # アクティブコンテキスト
 
 ## 1. 現作業焦点 (Current Focus)
-- PydanticAI対応に向けた改修（進行中）
-- Linterエラーおよび型エラーの完全解消(特に `annotator_webapi.py` 周辺)。
-- ユニットテストの全パス達成とテストカバレッジ75%以上維持･向上。
+- **✅ PydanticAI統合完了**: Provider-levelアーキテクチャによる4プロバイダー統合達成
+- **✅ Agent caching system**: LRU戦略による効率的なAgent再利用実装完了
+- **✅ OpenRouter統合**: カスタムヘッダー対応を含む完全なPydanticAI実装完了
+- Linterエラーおよび型エラーの完全解消とコード品質向上
+- ユニットテストの全パス達成とテストカバレッジ75%以上維持･向上
 
 ## 2. 進行中の主要課題･決定事項 (Ongoing Key Issues and Decisions)
-- **PydanticAI 統合:**
-    - 現在、`pydanticai` ライブラリへの対応を進めており、改修作業は進行中です。
-    - LLM連携部分の型安全性向上と開発効率化を目指しています。
-    - 関連ユニットテストの修正･拡充も並行して実施中です。
+- **PydanticAI 統合 (完了):**
+    - ✅ **Provider-level統合完了**: OpenAI、Anthropic、Google、OpenRouterの4プロバイダーでPydanticAI Agent実装完了
+    - ✅ **PydanticAIProviderFactory**: Provider instance共有とAgent cachingシステム実装
+    - ✅ **ProviderManager**: Provider-level推論実行とmodel ID routingシステム実装
+    - ✅ **PydanticAIAnnotatorMixin**: PIL Image → BinaryContent変換パイプライン実装
+    - ✅ **統一テストスイート**: 6/6テスト成功、包括的なProviderレベル検証完了
+    - ✅ **メモリ効率**: 共有Provider instanceによるリソース最適化達成
 - **BDDテスト戦略:**
     - 現状: ステップ定義ファイルおよび関連 `conftest.py` は削除済み。Featureファイルのみ再実装前提で残存。
     - 方針: ユニットテストとインテグレーションテストに注力。BDDステップは将来的に高品質なものを再実装。
@@ -24,21 +29,29 @@
     - 全てのルールファイルおよびドキュメントは、常に最新の状態を反映するように維持･管理する。
 
 ## 3. 最近の主要な変更点 (Recent Key Changes)
-- PydanticAI 対応に向けた初期改修に着手。
-- テスト戦略の大幅見直し:BDDステップ定義を全て削除し、Featureファイルのみ残存。
-- テストのクリーンアップ作業完了。
-- 主要な実装バグ(UnboundLocalError等)の修正完了。
-- `tasks/tasks_plan.md` のフォーマットを `memory.mdc` ルールに基づき修正。
+- **✅ PydanticAI 0.3.2統合完了**: Provider-levelアーキテクチャで4プロバイダー統一実装
+- **✅ Agent cachingシステム**: LRU戦略とconfig change detectionによる効率的リソース管理
+- **✅ OpenRouter統合**: HTTP-RefererとX-Titleカスタムヘッダー対応完了
+- **✅ 統一テストフレームワーク**: test_unified_provider_level_integration.py (6/6成功)
+- **✅ ドキュメント正規化**: 行末文字CRLF→LF正規化とProvider-level実装の一貫性向上
+- **✅ 旧テストファイル整理**: 8個の個別プロバイダーテストファイルを削除、統一テストに集約
+- **✅ PydanticAIWebAPIWrapper**: 既存annotate() APIとの完全な後方互換性実装
 
 ## 4. 次のステップ (Next Steps)
-- PydanticAI 統合を引き続き推進し、未対応箇所の改修と関連ユニットテストの拡充を行う。
-- Linterエラーおよび型エラーの完全な解消。
-- 全てのユニットテストをパスさせる。
-- テストカバレッジの目標値達成と維持。
-- (将来的に) Featureファイルに基づき、品質の高いBDDステップ定義を再実装する。
-- 全てのタスク進捗および意思決定は、本ファイルを含む関連ドキュメントに即時反映する。
-- 複数人での並行作業を想定し、ファイル競合や修正内容の重複に注意する。
-- 重要な方針変更時は、影響範囲を考慮し、関連ドキュメント全てを更新する。
+- **Provider-level統合後の最適化**:
+  - Provider instance共有パフォーマンスの実測・調整
+  - Agent cache効率の監視と改善
+  - メモリ使用量の最適化検証
+- **品質向上**:
+  - Linterエラーおよび型エラーの完全な解消
+  - 全てのユニットテストをパスさせる
+  - テストカバレッジの目標値達成と維持
+- **将来的な拡張**:
+  - (将来的に) Featureファイルに基づき、品質の高いBDDステップ定義を再実装する
+  - 新しいAPIプロバイダーの追加時のProvider-level統合パターン確立
+- **ドキュメント管理**:
+  - 全てのタスク進捗および意思決定は、本ファイルを含む関連ドキュメントに即時反映する
+  - PydanticAI統合完了に伴う関連ドキュメントの更新完了
 
 ## 5. 参照すべき主要ドキュメント (Key Documents to Refer To)
 - `docs/architecture.md` (システムアーキテクチャ)

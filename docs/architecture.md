@@ -352,66 +352,149 @@ graph TD
 
 ---
 
-### 3.4. PydanticAI連携アーキテクチャ (PoCベース)
+### 3.4. PydanticAI Provider-levelアーキテクチャ (統合完了)
 
-PydanticAIの導入により、特にWeb APIを利用した画像アノテーション処理において、より高度なプロンプト管理、型安全なデータフロー、そして構造化されたLLM応答の取り扱いが可能になる。PoCスクリプト (`tools/pydantic_ai_agent.py`) で検証されたアーキテクチャの概要は以下の通り。
+**✅ 2025-06-25統合完了**: PydanticAI 0.3.2によるProvider-levelアーキテクチャが完全実装され、OpenAI、Anthropic、Google、OpenRouterの4プロバイダーで統一的なAgent実装を達成。Agent cachingシステムとProvider instance共有により、メモリ効率と実行パフォーマンスが大幅に向上。
+
+#### Provider-level統合アーキテクチャ図
 
 ```mermaid
 graph TD
-    subgraph User Application / Script
-        App(Application Logic)
+    subgraph User Application
+        UserApp(ユーザーアプリケーション)
+        AnnotateAPI[annotate() API]
     end
 
-    subgraph PydanticAI Core
-        Agent[PydanticAI Agent]
-        LLMModel(PydanticAI LLM Model e.g., GeminiModel, OpenAIModel)
-        ToolDef(Tool Definition e.g., ImageAnnotationTool)
+    subgraph Provider-Level Management Layer
+        PydanticAIWrapper[PydanticAIWebAPIWrapper]
+        ProviderManager[ProviderManager]
+        ProviderFactory[PydanticAIProviderFactory]
     end
 
-    subgraph Image Annotator Library
-        AnnotatorDeps[ImageAnnotatorDependencies]
-        ImageProcessing(Image Preprocessing)
-        AnnotationSchema(Pydantic Output Schema e.g., Annotation)
-        UnifiedToolLogic(Unified Annotation Logic for Tool)
-        LegacyWebApiAnnotators(Existing WebApiAnnotators - Referenced or Adapted)
+    subgraph Shared Provider Instances
+        OpenAIProvider[OpenAI Provider Instance]
+        AnthropicProvider[Anthropic Provider Instance] 
+        GoogleProvider[Google Provider Instance]
+        OpenRouterProvider[OpenRouter Provider Instance]
     end
 
-    App -- User Prompt / Images --> Agent
-    App -- Dependencies --> Agent
-    Agent -- System Prompt --> LLMModel
-    Agent -- Formatted Prompt (Text + Image) --> LLMModel
-    LLMModel -- LLM API Call --> ExternalLLM[External LLM API (OpenAI, Google)]
-    ExternalLLM -- Raw Response --> LLMModel
-    LLMModel -- Structured/Validated Response --> Agent
-    Agent -- Selects & Calls --> ToolDef
-    ToolDef -- Uses --> UnifiedToolLogic
-    UnifiedToolLogic -- Uses --> AnnotatorDeps
-    UnifiedToolLogic -- Uses --> ImageProcessing
-    UnifiedToolLogic -- Returns instance of --> AnnotationSchema
-    Agent -- Final Output (AnnotationSchema) --> App
+    subgraph Agent Cache Layer
+        AgentCacheLRU[Agent Cache (LRU Strategy)]
+        ConfigDetection[Config Change Detection]
+    end
 
-    %% Connections for how existing annotators might be used
-    %% UnifiedToolLogic -.-> LegacyWebApiAnnotators
+    subgraph Legacy Annotators
+        WebApiAnnotators[WebApiBaseAnnotator系統]
+        LegacyAnnotators[従来のAnnotatorクラス]
+    end
+
+    subgraph PydanticAI Integration
+        PydanticAIMixin[PydanticAIAnnotatorMixin]
+        ImageConverter[PIL → BinaryContent変換]
+        StructuredOutput[AnnotationSchema出力]
+    end
+
+    UserApp --> AnnotateAPI
+    AnnotateAPI --> PydanticAIWrapper
+    PydanticAIWrapper --> ProviderManager
+    ProviderManager --> ProviderFactory
+    
+    ProviderFactory --> OpenAIProvider
+    ProviderFactory --> AnthropicProvider
+    ProviderFactory --> GoogleProvider
+    ProviderFactory --> OpenRouterProvider
+
+    ProviderFactory --> AgentCacheLRU
+    AgentCacheLRU --> ConfigDetection
+
+    ProviderManager --> PydanticAIMixin
+    PydanticAIMixin --> ImageConverter
+    PydanticAIMixin --> StructuredOutput
+
+    AnnotateAPI --> LegacyAnnotators
+    WebApiAnnotators --> PydanticAIMixin
 ```
 
-**主要な登場要素:**
+#### 主要コンポーネント
 
--   **PydanticAI Agent**:
-    -   中核となるオーケストレーター。
-    -   システムプロンプト、ユーザープロンプト（画像データとテキスト指示を含むマルチモーダル入力）、依存性（`ImageAnnotatorDependencies`）を受け取る。
-    -   内部でPydanticAIの `LLMModel`（`GeminiModel` や `OpenAIModel`）を使用してLLMと通信。
-    -   定義された `Tool`（例: `ImageAnnotationTool`）を適切なタイミングで呼び出し、構造化された結果を返す。
--   **ImageAnnotationTool (PydanticAI Tool)**:
-    -   Web API経由での画像アノテーション処理をカプセル化したPydanticAIのツール。
-    -   `run` メソッド内で、`ImageAnnotatorDependencies` からAPIキーやプロバイダ情報を取得し、画像の前処理、LLMへのリクエスト送信、結果のパース（`AnnotationSchema` 形式）を行う。
-    -   PoCではこのツール自体がLLMを直接呼び出すのではなく、AgentがLLMとの主要な対話を行い、ツールは特定のタスクを実行する形も考えられる (ツールの責務による)。PoCではAgentが直接LLMに問い合わせ、その結果を構造化して返した。
--   **ImageAnnotatorDependencies**:
-    -   APIキー、プロバイダ名、モデルIDなど、アノテーション処理に必要な設定やリソースをまとめたPydanticモデル。
-    -   `Agent` の `deps_type` として指定され、`agent.run(deps=...)` でインスタンスが渡されることで、`Tool` 内で利用可能になる。
--   **AnnotationSchema**:
-    -   アノテーション結果の構造を定義したPydanticモデル。LLMからの応答はこのスキーマに従って検証・パースされ、型安全性が保証される。
--   **プロンプト**:
-    -   システムプロンプト: Agentの基本的な振る舞いや応答形式を指示。
-    -   ユーザープロンプト: `BinaryContent` (画像データ) とテキスト指示 (例: `BASE_PROMPT`) を組み合わせたマルチモーダル形式。`Sequence[str | BinaryContent]` として型付けされる。
+**Provider-Level Management Layer:**
 
-このアーキテクチャにより、LLMとの連携部分がより堅牢になり、将来的な機能拡張やメンテナンス性の向上が期待される。
+-   **PydanticAIWebAPIWrapper**:
+    -   既存の`annotate()` APIとProvider-levelシステム間のブリッジ
+    -   PydanticAI annotatorの自動検出とProvider Managerへのルーティング
+    -   従来のAnnotationResult形式への変換による完全な後方互換性
+
+-   **ProviderManager** (`core/provider_manager.py`):
+    -   Provider-level推論実行の中央管理システム
+    -   model IDからの適切なProvider自動選択
+    -   model ID prefixハンドリング（例: "openrouter:" prefix）
+    -   Provider間での統一的な推論実行インターフェース
+
+-   **PydanticAIProviderFactory** (`core/pydantic_ai_factory.py`):
+    -   Provider instanceのオブジェクトID基盤キャッシュ管理
+    -   PydanticAI AgentのLRU戦略によるキャッシュシステム
+    -   Provider固有設定（OpenRouterカスタムヘッダーなど）の管理
+    -   PydanticAIの`infer_model()`と`infer_provider()`組み込み関数の活用
+
+**Shared Provider Instances:**
+
+-   **Provider Instance共有**:
+    -   単一Provider instanceを複数モデルリクエスト間で共有
+    -   メモリフットプリント削減とリソース効率向上
+    -   provider-specificな初期化処理の最適化
+
+**Agent Cache Layer:**
+
+-   **Agent Cache (LRU Strategy)**:
+    -   設定変更検出による自動キャッシュ無効化
+    -   初期化オーバーヘッド削減によるパフォーマンス向上
+    -   多数のAPIモデルサポートに対応するスケーラビリティ
+
+**PydanticAI Integration:**
+
+-   **PydanticAIAnnotatorMixin**:
+    -   PydanticAI-basedアノテーターの共通機能提供
+    -   PIL Image → BinaryContent変換パイプライン
+    -   async推論実行とsync wrapperサポート
+    -   設定読み込みとAgent setup管理
+
+-   **統一実装パターン**:
+    -   すべてのWebAPIアノテーターがWebApiBaseAnnotator + PydanticAIAnnotatorMixinを継承
+    -   provider-level実行のための一貫したrun_with_model()メソッド
+    -   統一_handle_api_error()エラーハンドリング
+    -   標準化_setup_agent() Agent初期化プロセス
+
+#### アーキテクチャの利点
+
+**メモリ効率:**
+- Provider instance共有によるメモリフットプリント削減
+- Agent cachingとLRU戦略による初期化オーバーヘッド最小化
+
+**パフォーマンス:**
+- 共有リソースによる並行処理効率向上
+- config change detectionによる適応的キャッシュ管理
+
+**スケーラビリティ:**
+- Provider-level共有による大規模APIモデル数への対応
+- model ID override サポートによる動的モデル選択
+
+**保守性:**
+- 中央集権Provider管理によるシンプルな設定
+- 統一実装パターンによる一貫性確保
+
+#### 使用パターン例
+
+```python
+# 従来（非効率）
+model1 = AnthropicApiAnnotator("model1")  # Provider instance作成
+model2 = AnthropicApiAnnotator("model2")  # 別Provider instance作成
+
+# Provider-level（効率的）
+results = ProviderManager.run_inference_with_model(
+    model_name="model1", 
+    images=images, 
+    api_model_id="claude-3-5-sonnet"
+)  # 共有Anthropic providerを再利用
+```
+
+このProvider-levelアーキテクチャにより、LLMとの連携がより効率的かつ堅牢になり、メモリ使用量の最適化と実行パフォーマンスの大幅向上を実現。

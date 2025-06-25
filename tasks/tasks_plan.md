@@ -1,8 +1,10 @@
 # タスク計画と進捗トラッカー
 
 ## 1. 現状のフォーカスとサマリー (Current Focus and Summary)
-- 現在はユニットテストの安定化と主要な型エラーの解消に注力しており、その後BDDステップの再実装に着手予定です。
-- ルールとドキュメントの整合性維持も継続的に行っています。
+- **✅ PydanticAI統合完了**: Provider-levelアーキテクチャによる4プロバイダー(OpenAI、Anthropic、Google、OpenRouter)統一実装達成
+- **✅ Agent cachingシステム実装**: LRU戦略とconfig change detectionによる効率的リソース管理完了
+- **✅ 統一テストフレームワーク**: test_unified_provider_level_integration.py (6/6成功)による包括的検証完了
+- 現在は品質向上とドキュメント整合性維持に注力中
 
 ## 2. 詳細タスクリスト･進行状況 (Detailed Task List and Progress)
 
@@ -133,23 +135,25 @@
     - [ ] テスト･実装･設定ファイルの整合性確認
     - [ ] 必要に応じてdocs/architecture.md, docs/technical.mdも更新
     - [ ] 異常系テストの網羅性強化
-- **[進行中] Web API アノテーター (`annotator_webapi`) のリファクタリング (PydanticAI 導入準備)**
-    - [済] `core/types.py` を導入し、共通の型定義 (WebApiComponents, AnnotationSchema, RawOutput, WebApiFormattedOutput, WebApiInput など) を集約。
-    - [済] `_run_inference` の戻り値を `list[RawOutput]` (`response: AnnotationSchema | None`, `error: str | None`) に統一。
-    - [済] `_format_predictions` を `WebApiBaseAnnotator` に共通実装し、戻り値を `list[WebApiFormattedOutput]` (`annotation: dict | None`, `error: str | None`) に統一。
-    - [済] 各サブクラス (`google_api.py`, `anthropic_api.py`) から `_format_predictions` を削除。
-    - [済] 関連テストコード (`test_google_api.py`, `test_anthropic_api.py`) を修正し、パスを確認。
-    - [済] `tasks/rfc/pydanticai_integration_plan.md` を更新。
-    - [済] `tasks/active_context.md` を更新。
-    - [TODO] PydanticAI 対応に向けた改修（進行中）
-        - [TODO] LLMレスポンスの基本的なパース処理をPydanticAIベースで試行。
-        - [TODO] 関連する一部データ構造のPydanticモデル定義に着手。
-        - [TODO] ユニットテストの一部をPydanticAI対応に合わせて更新開始。
-    - [TODO] `core/base.py` の `self.components` 周りの型エラーを解消する。
-    - [TODO] PydanticAI の Agent/tool 等の導入を本格的に検討･実装する。
-    - [TODO] 未対応箇所のPydanticAIへの移行。
-    - [TODO] 関連するユニットテストの拡充と全体的な検証。
-    - [TODO] 関連ドキュメント (`architecture.md`, `technical.md`, `lessons-learned.mdc` 等) にPydanticAI導入の進捗と変更内容を反映させる。
+- **[✅完了] Web API アノテーター (`annotator_webapi`) のリファクタリング (PydanticAI 統合完了)**
+    - [✅] `core/types.py` を導入し、共通の型定義 (WebApiComponents, AnnotationSchema, RawOutput, WebApiFormattedOutput, WebApiInput など) を集約。
+    - [✅] `_run_inference` の戻り値を `list[RawOutput]` (`response: AnnotationSchema | None`, `error: str | None`) に統一。
+    - [✅] `_format_predictions` を `WebApiBaseAnnotator` に共通実装し、戻り値を `list[WebApiFormattedOutput]` (`annotation: dict | None`, `error: str | None`) に統一。
+    - [✅] 各サブクラス (`google_api.py`, `anthropic_api.py`) から `_format_predictions` を削除。
+    - [✅] 関連テストコード (`test_google_api.py`, `test_anthropic_api.py`) を修正し、パスを確認。
+    - [✅] `tasks/rfc/pydanticai_integration_plan.md` を更新。
+    - [✅] `tasks/active_context.md` を更新。
+    - [✅] **PydanticAI Provider-level統合完了**
+        - [✅] **PydanticAIProviderFactory**: Provider instance共有とAgent caching実装
+        - [✅] **ProviderManager**: Provider-level推論実行システム実装
+        - [✅] **PydanticAIAnnotatorMixin**: PIL Image → BinaryContent変換パイプライン実装
+        - [✅] **OpenAI Provider統合**: Agent cache with LRU戦略実装
+        - [✅] **Anthropic Provider統合**: Tool Use Block deprecation, Agent出力対応
+        - [✅] **Google Provider統合**: 包括的テストスイート実装
+        - [✅] **OpenRouter Provider統合**: カスタムヘッダー対応実装
+        - [✅] **統一テストフレームワーク**: test_unified_provider_level_integration.py (6/6成功)
+        - [✅] **後方互換性**: PydanticAIWebAPIWrapperによる既存annotate() API互換性実装
+    - [✅] 関連ドキュメント (`CLAUDE.md`, `architecture.md`, 実装ドキュメント) にPydanticAI統合完了状況を反映。
 
 ### 2.2. バックログ / 今後の展望 (Backlog / Future Outlook)
 - **ドキュメント･コード整理:**
@@ -209,6 +213,17 @@
 - [x] テストリソースクリーンアップ戦略の策定と実装 (フェーズ 1 および フェーズ 2 完了)
     - [x] フェーズ 1: 副作用特定と要件定義
     - [x] フェーズ 2: クリーンアップ実装 (`reset_model_load_state`, `manage_api_cache_file` フィクスチャ実装)
+- [x] **PydanticAI統合完全実装 (2025-06-25完了)**
+    - [x] PydanticAI 0.3.2アップデート完了
+    - [x] Provider-levelアーキテクチャ実装: 4プロバイダー(OpenAI、Anthropic、Google、OpenRouter)統一
+    - [x] PydanticAIProviderFactory: Provider instance共有とAgent caching (LRU戦略)
+    - [x] ProviderManager: Provider-level推論実行とmodel ID routing
+    - [x] PydanticAIAnnotatorMixin: PIL Image → BinaryContent変換パイプライン
+    - [x] OpenRouter統合: カスタムヘッダー(HTTP-Referer, X-Title)対応
+    - [x] 統一テストフレームワーク: test_unified_provider_level_integration.py (6/6成功)
+    - [x] 後方互換性: PydanticAIWebAPIWrapperによる既存annotate() API完全互換
+    - [x] コード品質向上: 行末文字正規化(CRLF→LF)とコード整形統一
+    - [x] テストファイル整理: 8個の個別プロバイダーテストファイル削除、統一テストに集約
 
 ## 4. 既知の問題点 (Known Issues)
 - (ここに、純粋な未解決の問題点やバグを記載)
