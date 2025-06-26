@@ -1,4 +1,4 @@
-# Image Annotator Lib Makefile  
+# Image Annotator Lib Makefile
 # Development task automation
 
 .PHONY: help test lint format install install-dev clean run-example typecheck test-unit test-integration test-webapi test-scorer test-tagger test-cov setup
@@ -32,58 +32,59 @@ setup:
 # Development targets
 install:
 	@echo "Installing project dependencies..."
-	uv sync
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv sync
 
 install-dev:
 	@echo "Installing development dependencies..."
-	uv sync --dev
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv sync --dev
 
 run-example:
 	@echo "Running example script..."
-	uv run python example/example_lib.py
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run python example/example_lib.py
 
 # Testing targets
 test:
 	@echo "Running all tests..."
-	uv run pytest
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest
 
 test-unit:
 	@echo "Running unit tests..."
-	uv run pytest -m unit
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m unit
 
 test-integration:
 	@echo "Running integration tests..."
-	uv run pytest -m integration
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m integration
 
 test-webapi:
 	@echo "Running Web API tests..."
-	uv run pytest -m webapi
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m webapi
 
 test-scorer:
 	@echo "Running scorer model tests..."
-	uv run pytest -m scorer
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m scorer
 
 test-tagger:
 	@echo "Running tagger model tests..."
-	uv run pytest -m tagger
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m tagger
 
 test-cov:
 	@echo "Running tests with coverage..."
-	uv run pytest --cov=src --cov-report=html --cov-report=xml
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest --cov=src --cov-report=html --cov-report=xml
 
 # Code quality targets
 lint:
 	@echo "Running code linting..."
-	uv run ruff check
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run ruff check
 
 format:
 	@echo "Formatting code..."
-	uv run ruff format
-	uv run ruff check --fix
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run ruff format
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run ruff check --fix
+
 
 typecheck:
 	@echo "Running type checking..."
-	uv run mypy src/
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run mypy src/
 
 # Cleanup target
 clean:

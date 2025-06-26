@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(uv pip show:*)",
+      "Bash(rg:*)",
+      "WebFetch(domain:ai.pydantic.dev)"
+    ],
+    "deny": []
+  }
+}

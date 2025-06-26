@@ -6,44 +6,45 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Environment Setup
 ```bash
-# Install dependencies using uv
-uv sync --dev
+# Setup development environment (recommended)
+make setup
 
-# Add new dependencies
+# Install dependencies manually
+make install      # Production dependencies
+make install-dev  # Development dependencies
+
+# Add new dependencies (manual uv commands)
 uv add package-name
-
-# Add development dependencies
 uv add --dev package-name
 ```
 
 ### Testing
 ```bash
 # Run all tests
-pytest
+make test
 
-# Run specific test categories using markers
-pytest -m unit        # Unit tests only
-pytest -m integration # Integration tests only  
-pytest -m webapi      # Web API tests only
-pytest -m scorer      # Scorer model tests only
-pytest -m tagger      # Tagger model tests only
-
-# Run single test file
-pytest tests/unit/core/test_config.py
+# Run specific test categories
+make test-unit        # Unit tests only
+make test-integration # Integration tests only
+make test-webapi      # Web API tests only
+make test-scorer      # Scorer model tests only
+make test-tagger      # Tagger model tests only
 
 # Run with coverage
-pytest --cov=src --cov-report=xml
-pytest --cov=src --cov-report=html
+make test-cov
+
+# Run single test file (manual pytest)
+pytest tests/unit/core/test_config.py
 ```
 
 ### Code Quality
 ```bash
 # Run linting and formatting
-ruff check
-ruff format
+make lint
+make format
 
 # Run type checking
-mypy src/
+make typecheck
 ```
 
 ### Example Usage
@@ -61,7 +62,7 @@ The library follows a clean 3-layer architecture for annotators:
 1. **BaseAnnotator** (`core/base/annotator.py`) - Common interface and shared functionality
 2. **Framework-specific base classes** - Located in `core/base/` directory:
    - `core/base/webapi.py` - WebApiBaseAnnotator
-   - `core/base/onnx.py` - ONNXBaseAnnotator  
+   - `core/base/onnx.py` - ONNXBaseAnnotator
    - `core/base/transformers.py` - TransformersBaseAnnotator
    - `core/base/tensorflow.py` - TensorflowBaseAnnotator
    - `core/base/clip.py` - ClipBaseAnnotator
@@ -87,7 +88,7 @@ The library follows a clean 3-layer architecture for annotators:
   - `anthropic_api.py` - AnthropicApiAnnotator (Provider-level with Agent caching)
   - `google_api.py` - GoogleApiAnnotator (Provider-level with Agent caching)
   - `openai_api_chat.py` - OpenAI & OpenRouter implementations (Provider-level)
-  - `openai_api_response.py` - Legacy OpenAI implementations  
+  - `openai_api_response.py` - Legacy OpenAI implementations
   - `webapi_shared.py` - Shared WebAPI utilities and prompts
 - **Specialized Models**: DeepDanbooru taggers, aesthetic scorers, captioning models
 
@@ -254,8 +255,8 @@ model2 = AnthropicApiAnnotator("model2")  # Creates another provider instance
 
 # Provider-level (efficient)
 results = ProviderManager.run_inference_with_model(
-    model_name="model1", 
-    images=images, 
+    model_name="model1",
+    images=images,
     api_model_id="claude-3-5-sonnet"
 )  # Reuses shared Anthropic provider
 ```
