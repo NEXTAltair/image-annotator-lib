@@ -53,7 +53,7 @@ class GoogleApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
         logger.debug("Provider-level Google Agent コンテキスト終了")
 
     def run_with_model(self, images: list[Image.Image], model_id: str) -> list[RawOutput]:
-        """指定されたモデルIDで推論を実行する（Provider-level実装）"""
+        """指定されたモデルIDで推論を実行する(Provider-level実装)"""
         logger.debug(f"Google API 推論実行: model={model_id}, images={len(images)}")
 
         try:
@@ -65,7 +65,7 @@ class GoogleApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
                 try:
                     self._wait_for_rate_limit()
 
-                    # PydanticAI Agent で推論実行（model override付き）
+                    # PydanticAI Agent で推論実行(model override付き)
                     annotation = self._run_inference_with_model(binary_content, model_id)
                     results.append({"response": annotation, "error": None})
 

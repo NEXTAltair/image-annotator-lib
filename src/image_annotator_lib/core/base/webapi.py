@@ -30,9 +30,9 @@ from .annotator import BaseAnnotator
 class WebApiBaseAnnotator(BaseAnnotator):
     """Web API を利用するアノテーターの基底クラス。"""
 
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, config_registry: Any = config_registry):
         """初期化 (model_name のみ受け取るように変更)"""
-        super().__init__(model_name)
+        super().__init__(model_name, config_registry=config_registry)
         self.prompt_template = config_registry.get(
             self.model_name, "prompt_template", "Describe this image."
         )

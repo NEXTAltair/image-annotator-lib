@@ -22,16 +22,12 @@ class ProviderManager:
         if provider_name not in cls._provider_instances:
             # Create new provider-level instance
             if provider_name == "anthropic":
-
                 cls._provider_instances[provider_name] = AnthropicProviderInstance()
             elif provider_name == "openai":
-
                 cls._provider_instances[provider_name] = OpenAIProviderInstance()
             elif provider_name == "openrouter":
-
                 cls._provider_instances[provider_name] = OpenRouterProviderInstance()
             elif provider_name == "google":
-
                 cls._provider_instances[provider_name] = GoogleProviderInstance()
             else:
                 raise WebApiError(f"Unsupported provider: {provider_name}")

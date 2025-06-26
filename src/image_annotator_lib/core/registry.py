@@ -19,7 +19,7 @@ _MODEL_CLASS_OBJ_REGISTRY: dict[str, ModelClass] = {}
 
 
 def _list_module_files(directory: str) -> list[Path]:
-    """指定されたディレクトリ内の全てのPythonモジュールファイル（サブディレクトリ含む、__init__.py除く）をリストアップ"""
+    """指定されたディレクトリ内の全てのPythonモジュールファイル(サブディレクトリ含む、__init__.py除く)をリストアップ"""
     try:
         base_dir = Path(__file__).parent.parent
         abs_path = (base_dir / directory).resolve()
@@ -351,7 +351,7 @@ def initialize_registry() -> None:
                     f"API からモデル情報を取得し、{AVAILABLE_API_MODELS_CONFIG_PATH} を更新しました。"
                 )
             except Exception as api_e:
-                # API取得に失敗しても、処理は続行する（ログには残す）
+                # API取得に失敗しても、処理は続行する(ログには残す)
                 logger.error(f"API からのモデル情報取得中にエラーが発生しました: {api_e}", exc_info=True)
                 logger.warning(
                     "APIからのモデル情報取得に失敗したため、Web API モデルの自動設定は行われない可能性があります。"
