@@ -8,46 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-@pytest.fixture(scope="session", autouse=True)
-def mock_heavy_libraries():
-    """重いMLライブラリを一括モック"""
-    # torch のモック
-    torch_mock = MagicMock()
-    torch_mock.cuda = MagicMock()
-    torch_mock.cuda.OutOfMemoryError = Exception
-    torch_mock.cuda.max_memory_allocated = MagicMock(return_value=1024 * 1024 * 1024)  # 1GB
-    torch_mock.tensor = MagicMock()
-    torch_mock.Tensor = MagicMock
-
-    # transformers のモック
-    transformers_mock = MagicMock()
-    transformers_mock.CLIPProcessor = MagicMock()
-    transformers_mock.BlipProcessor = MagicMock()
-    transformers_mock.BlipForConditionalGeneration = MagicMock()
-
-    # tensorflow のモック
-    tensorflow_mock = MagicMock()
-    tensorflow_mock.keras = MagicMock()
-    tensorflow_mock.config = MagicMock()
-
-    # onnxruntime のモック
-    onnxruntime_mock = MagicMock()
-    onnxruntime_mock.InferenceSession = MagicMock()
-
-    # sys.modules への設定
-    mocked_modules = {
-        "torch": torch_mock,
-        "transformers": transformers_mock,
-        "tensorflow": tensorflow_mock,
-        "onnxruntime": onnxruntime_mock,
-        "clip": MagicMock(),
-        "PIL": MagicMock(),
-        "numpy": MagicMock(),
-        "cv2": MagicMock(),
-    }
-
-    with patch.dict(sys.modules, mocked_modules):
-        yield
+# Removed automatic session-scope mocking of all ML libraries
+# This was causing "mock for the sake of mocking" issues
+# Use individual fixtures below only when specifically needed
 
 
 @pytest.fixture
