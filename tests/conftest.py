@@ -3,11 +3,23 @@
 このモジュールでは、複数のテストファイルで使用される共通のfixtureを定義します。
 """
 
+# Import shared fixtures from fixtures module
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from PIL import Image
+
+# Add the tests directory to sys.path
+tests_dir = Path(__file__).parent
+sys.path.insert(0, str(tests_dir))
+
+# Temporarily disable shared fixtures for testing
+# from unit.fixtures.mock_libraries import *
+# from unit.fixtures.mock_configs import *
+# from unit.fixtures.mock_components import *
+# from unit.fixtures.shared_fixtures import *
 
 resources_dir = Path("tests") / "resources"
 

@@ -78,6 +78,7 @@ INVALID_API_DATA_INVALID_ARCH = {
 # --- Tests for _format_model_data_for_toml --- #
 
 
+@pytest.mark.unit
 def test_format_model_data_name_split():
     """Name によるプロバイダー/モデル名分割が正しく行われるかテスト。"""
     result = _format_model_data_for_toml(VALID_API_DATA_NAME_SPLIT)
@@ -92,6 +93,7 @@ def test_format_model_data_name_split():
     assert "deprecated_on" not in result
 
 
+@pytest.mark.unit
 def test_format_model_data_id_split():
     """ID によるプロバイダー/モデル名分割と大文字化が正しく行われるかテスト。"""
     result = _format_model_data_for_toml(VALID_API_DATA_ID_SPLIT)
@@ -102,6 +104,7 @@ def test_format_model_data_id_split():
     assert result["created"] == "2023-12-13T00:00:00Z"
 
 
+@pytest.mark.unit
 def test_format_model_data_fallback():
     """Name/ID で分割できない場合のフォールバック処理をテスト。"""
     result = _format_model_data_for_toml(VALID_API_DATA_FALLBACK)
@@ -111,6 +114,7 @@ def test_format_model_data_fallback():
     assert result["display_name"] == "Some Random Model"
 
 
+@pytest.mark.unit
 def test_format_model_data_openai_case():
     """openai プロバイダー名が特別扱いされるかテスト。"""
     result = _format_model_data_for_toml(VALID_API_DATA_OPENAI_CASE)
@@ -121,12 +125,14 @@ def test_format_model_data_openai_case():
     assert result["created"] == "2024-07-18T00:00:00Z"
 
 
+@pytest.mark.unit
 def test_format_model_data_missing_key():
     """必須キーが欠けている場合に None を返すかテスト。"""
     result = _format_model_data_for_toml(INVALID_API_DATA_MISSING_KEY)
     assert result is None
 
 
+@pytest.mark.unit
 def test_format_model_data_invalid_arch():
     """architecture 構造が不正な場合に None を返すかテスト。"""
     result = _format_model_data_for_toml(INVALID_API_DATA_INVALID_ARCH)
@@ -306,6 +312,7 @@ EXPECTED_UPDATED_DATA = {
 }
 
 
+@pytest.mark.unit
 def test_update_toml_with_api_results():
     """既存 TOML と API 結果のマージ、last_seen/deprecated_on 更新をテスト。"""
     # 関数を呼び出し
@@ -326,6 +333,7 @@ RAW_MODELS_FOR_FILTER_TEST = [
         "id": "vision/model1",
         "name": "Vision Model 1",
         "architecture": {"input_modalities": ["text", "image"]},
+        "supported_parameters": ["structured_outputs", "tools"],
     },
     # 無効なデータ (辞書ではない)
     "not_a_dict",
@@ -360,10 +368,19 @@ RAW_MODELS_FOR_FILTER_TEST = [
         "id": "vision/model3",
         "name": "Vision Model 3",
         "architecture": {"input_modalities": ["image"]},
+        "supported_parameters": ["structured_outputs", "tools"],
+    },
+    # Vision モデルだが、ツール利用に非対応
+    {
+        "id": "vision/model4",
+        "name": "Vision Model 4",
+        "architecture": {"input_modalities": ["image"]},
+        "supported_parameters": ["structured_outputs"],
     },
 ]
 
 
+@pytest.mark.unit
 def test_filter_vision_models():
     """_filter_vision_models が正しく Vision モデルのみを抽出するかテスト。"""
     # image_annotator_lib.core.api_model_discovery から _filter_vision_models をインポート
@@ -403,6 +420,7 @@ MOCK_API_SUCCESS_RESPONSE = {
                 "modality": "text+image->text",
                 "input_modalities": ["text", "image"],
             },
+            "supported_parameters": ["structured_outputs", "tools"],
         },
         {
             "id": "google/gemini-pro-vision",
@@ -412,6 +430,7 @@ MOCK_API_SUCCESS_RESPONSE = {
                 "modality": "text+image->text",
                 "input_modalities": ["text", "image"],
             },
+            "supported_parameters": ["structured_outputs", "tools"],
         },
         {
             "id": "anthropic/claude-3-opus",  # Vision対応
@@ -421,6 +440,7 @@ MOCK_API_SUCCESS_RESPONSE = {
                 "modality": "text+image->text",
                 "input_modalities": ["text", "image"],
             },
+            "supported_parameters": ["structured_outputs", "tools"],
         },
         {
             "id": "meta-llama/llama-3-8b-instruct",  # Vision非対応
@@ -430,6 +450,7 @@ MOCK_API_SUCCESS_RESPONSE = {
                 "modality": "text->text",
                 "input_modalities": ["text"],
             },
+            "supported_parameters": [],
         },
     ]
 }
@@ -449,6 +470,7 @@ MOCK_EXISTING_TOML_DATA = {
 }
 
 
+@pytest.mark.unit
 @mock.patch("image_annotator_lib.core.api_model_discovery.load_available_api_models")
 def test_discover_from_existing_toml(mock_load_toml):
     """既存のTOMLファイルからモデルリストを正常に読み込むケース。"""
@@ -462,6 +484,7 @@ def test_discover_from_existing_toml(mock_load_toml):
     mock_load_toml.assert_called_once()
 
 
+@pytest.mark.unit
 @mock.patch("image_annotator_lib.core.api_model_discovery.save_available_api_models")
 @mock.patch("image_annotator_lib.core.api_model_discovery.load_available_api_models")
 @mock.patch("requests.get")
@@ -498,6 +521,7 @@ def test_discover_force_refresh_success(mock_requests_get, mock_load_toml, mock_
     assert saved_data["openai/gpt-4o"]["last_seen"] is not None
 
 
+@pytest.mark.unit
 @mock.patch("image_annotator_lib.core.api_model_discovery.save_available_api_models")
 @mock.patch("image_annotator_lib.core.api_model_discovery.load_available_api_models")
 @mock.patch("requests.get")
@@ -528,6 +552,7 @@ def test_discover_initial_load_success(mock_requests_get, mock_load_toml, mock_s
 
 
 # APIエラーハンドリングのテストケース
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "exception_to_raise, expected_error_type",
     [
@@ -584,6 +609,7 @@ def test_discover_api_errors(
     mock_save_toml.assert_not_called()  # エラー時は保存しない
 
 
+@pytest.mark.unit
 @mock.patch("image_annotator_lib.core.api_model_discovery.save_available_api_models")
 @mock.patch("image_annotator_lib.core.api_model_discovery.load_available_api_models")
 @mock.patch("requests.get")

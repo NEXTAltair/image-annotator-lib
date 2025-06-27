@@ -62,6 +62,7 @@ MOCK_API_MODELS = {
 }
 
 
+@pytest.mark.unit
 @patch("image_annotator_lib.core.registry.register_annotators")
 @patch("image_annotator_lib.core.registry._update_config_with_api_models")
 @patch("image_annotator_lib.core.api_model_discovery._fetch_and_update_vision_models")
@@ -86,6 +87,7 @@ def test_initialize_registry_api_models_file_not_exists_calls_fetch_and_update(
     mock_register.assert_called_once()
 
 
+@pytest.mark.unit
 @patch("image_annotator_lib.core.registry.register_annotators")
 @patch("image_annotator_lib.core.registry._update_config_with_api_models")
 @patch("image_annotator_lib.core.api_model_discovery._fetch_and_update_vision_models")
@@ -110,6 +112,7 @@ def test_initialize_registry_api_models_file_exists_skips_fetch(
     mock_register.assert_called_once()
 
 
+@pytest.mark.unit
 @patch("image_annotator_lib.core.registry.register_annotators")
 @patch("image_annotator_lib.core.registry._update_config_with_api_models")
 @patch("image_annotator_lib.core.api_model_discovery._fetch_and_update_vision_models")
@@ -138,6 +141,7 @@ def test_initialize_registry_continues_if_fetch_api_fails(
 # --- Tests for _update_config_with_api_models ---
 
 
+@pytest.mark.unit
 @patch("image_annotator_lib.core.config.config_registry.add_default_setting")
 @patch("image_annotator_lib.core.registry._gather_available_classes")
 @patch("image_annotator_lib.core.registry.load_available_api_models")
@@ -173,6 +177,7 @@ def test_update_config_with_api_models_success(
     assert mock_add_setting.call_count == len(expected_calls)
 
 
+@pytest.mark.unit
 @patch("image_annotator_lib.core.config.config_registry.add_default_setting")
 @patch("image_annotator_lib.core.registry._gather_available_classes")
 @patch("image_annotator_lib.core.registry.load_available_api_models")
@@ -191,6 +196,7 @@ def test_update_config_with_api_models_no_api_data(
     mock_add_setting.assert_not_called()  # Should not add settings
 
 
+@pytest.mark.unit
 @patch("image_annotator_lib.core.config.config_registry.add_default_setting")
 @patch("image_annotator_lib.core.registry._gather_available_classes")
 @patch("image_annotator_lib.core.registry.load_available_api_models")
@@ -224,6 +230,7 @@ def test_update_config_with_api_models_no_classes(
 # --- Tests for _find_annotator_class_by_provider ---
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "provider_name, expected_class_name",
     [
@@ -244,6 +251,7 @@ def test_find_annotator_class_by_provider(mock_logger, provider_name, expected_c
     assert result == expected_class_name
 
 
+@pytest.mark.unit
 @patch("image_annotator_lib.core.registry.logger")  # Mock logger
 def test_find_annotator_class_by_provider_no_available_classes(mock_logger):
     """Test fallback when available_classes is empty."""

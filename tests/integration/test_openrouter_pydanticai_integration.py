@@ -6,8 +6,9 @@ PydanticAI版OpenRouter APIアノテーターの実動作を検証する
 pytest形式に準拠したテスト実装
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 from PIL import Image
 
 pytestmark = [pytest.mark.integration, pytest.mark.webapi]
@@ -23,10 +24,7 @@ def test_image() -> Image.Image:
 @pytest.fixture
 def multiple_test_images() -> list[Image.Image]:
     """複数のテスト画像を作成するフィクスチャ"""
-    return [
-        Image.new("RGB", (64, 64), color="green"),
-        Image.new("RGB", (64, 64), color="blue")
-    ]
+    return [Image.new("RGB", (64, 64), color="green"), Image.new("RGB", (64, 64), color="blue")]
 
 
 class TestOpenRouterPydanticAIStructure:
@@ -51,10 +49,12 @@ class TestOpenRouterPydanticAIStructure:
 
     def test_base_class_inheritance(self):
         """基底クラス継承確認"""
-        from image_annotator_lib.model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
         from image_annotator_lib.core.base import WebApiBaseAnnotator
+        from image_annotator_lib.model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
 
-        assert issubclass(OpenRouterApiAnnotator, WebApiBaseAnnotator), "WebApiBaseAnnotator inheritance failed"
+        assert issubclass(OpenRouterApiAnnotator, WebApiBaseAnnotator), (
+            "WebApiBaseAnnotator inheritance failed"
+        )
 
 
 class TestImagePreprocessing:
@@ -63,6 +63,7 @@ class TestImagePreprocessing:
     def test_image_preprocessing_to_binary(self, multiple_test_images):
         """画像前処理のテスト"""
         from pydantic_ai.messages import BinaryContent
+
         from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAnnotatorMixin
 
         # Mixinインスタンス作成
@@ -175,7 +176,7 @@ class TestErrorHandling:
         from image_annotator_lib.model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
 
         annotator = OpenRouterApiAnnotator("test-model")
-        
+
         with pytest.raises(ApiAuthenticationError):
             annotator._handle_api_error(Exception("401 authentication failed"))
 
@@ -185,7 +186,7 @@ class TestErrorHandling:
         from image_annotator_lib.model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
 
         annotator = OpenRouterApiAnnotator("test-model")
-        
+
         with pytest.raises(ApiRateLimitError):
             annotator._handle_api_error(Exception("429 rate limit exceeded"))
 
@@ -195,7 +196,7 @@ class TestErrorHandling:
         from image_annotator_lib.model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
 
         annotator = OpenRouterApiAnnotator("test-model")
-        
+
         with pytest.raises(ApiTimeoutError):
             annotator._handle_api_error(Exception("timeout occurred"))
 
@@ -205,7 +206,7 @@ class TestErrorHandling:
         from image_annotator_lib.model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
 
         annotator = OpenRouterApiAnnotator("test-model")
-        
+
         with pytest.raises(ApiServerError):
             annotator._handle_api_error(Exception("500 server error"))
 
@@ -221,7 +222,7 @@ class TestErrorHandling:
 class TestInferencePipeline:
     """Provider Manager OpenRouter推論パイプラインのモックテスト"""
 
-    @patch('image_annotator_lib.core.provider_manager.ProviderManager.run_inference_with_model')
+    @patch("image_annotator_lib.core.provider_manager.ProviderManager.run_inference_with_model")
     def test_inference_pipeline_mock(self, mock_inference, test_image):
         """推論パイプライン モックテスト"""
         from image_annotator_lib.core.provider_manager import ProviderManager
@@ -231,9 +232,7 @@ class TestInferencePipeline:
         expected_result = [
             {
                 "response": AnnotationSchema(
-                    tags=["test", "openrouter"], 
-                    captions=["Mock test image for OpenRouter"], 
-                    score=0.88
+                    tags=["test", "openrouter"], captions=["Mock test image for OpenRouter"], score=0.88
                 ),
                 "error": None,
             }
@@ -243,9 +242,7 @@ class TestInferencePipeline:
 
         # 推論実行
         results = ProviderManager.run_inference_with_model(
-            model_name="test-model", 
-            images=[test_image], 
-            api_model_id="anthropic/claude-3.5-sonnet"
+            model_name="test-model", images=[test_image], api_model_id="anthropic/claude-3.5-sonnet"
         )
 
         # 結果検証
@@ -260,9 +257,7 @@ class TestInferencePipeline:
 
         # モック呼び出し確認
         mock_inference.assert_called_once_with(
-            model_name="test-model", 
-            images=[test_image], 
-            api_model_id="anthropic/claude-3.5-sonnet"
+            model_name="test-model", images=[test_image], api_model_id="anthropic/claude-3.5-sonnet"
         )
 
 

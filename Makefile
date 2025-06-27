@@ -1,7 +1,7 @@
 # Image Annotator Lib Makefile
 # Development task automation
 
-.PHONY: help test lint format install install-dev clean run-example typecheck test-unit test-integration test-webapi test-scorer test-tagger test-cov setup
+.PHONY: help test lint format install install-dev clean run-example typecheck test-unit test-integration test-webapi test-scorer test-tagger test-cov test-fast test-standard test-unit-optimized setup
 
 # Default target
 help:
@@ -18,6 +18,9 @@ help:
 	@echo "  test-webapi  Run Web API tests only"
 	@echo "  test-scorer  Run scorer model tests only"
 	@echo "  test-tagger  Run tagger model tests only"
+	@echo "  test-fast    Run fast tests only (<1s each)"
+	@echo "  test-standard Run standard unit tests (<5s each)"
+	@echo "  test-unit-optimized Run optimized unit tests (fast + standard)"
 	@echo "  test-cov     Run tests with coverage report"
 	@echo "  lint         Run code linting (ruff)"
 	@echo "  format       Format code (ruff format)"
@@ -66,6 +69,18 @@ test-scorer:
 test-tagger:
 	@echo "Running tagger model tests..."
 	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m tagger
+
+test-fast:
+	@echo "Running fast tests (development)..."
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m "fast" --maxfail=5
+
+test-standard:
+	@echo "Running standard unit tests..."
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m "standard"
+
+test-unit-optimized:
+	@echo "Running optimized unit tests (fast + standard)..."
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m "fast or standard"
 
 test-cov:
 	@echo "Running tests with coverage..."

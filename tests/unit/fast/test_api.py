@@ -44,6 +44,7 @@ def clear_instance_registry():  # Renamed fixture, removed mock resets
 # --- Test Cases ---
 
 
+@pytest.mark.unit
 @patch("image_annotator_lib.api.get_cls_obj_registry", return_value=MOCK_CLASS_REGISTRY_WITH_REAL_CLASSES)
 def test_create_web_api_instance_success(mock_get_cls_reg):
     """Test successful instantiation call for a Web API annotator, patching __init__."""
@@ -59,6 +60,7 @@ def test_create_web_api_instance_success(mock_get_cls_reg):
     assert isinstance(instance, RealGoogleAnnotatorClass)
 
 
+@pytest.mark.unit
 @patch("image_annotator_lib.api.get_cls_obj_registry", return_value=MOCK_CLASS_REGISTRY_WITH_REAL_CLASSES)
 def test_create_local_model_instance_success(mock_get_cls_reg):
     """Test successful instantiation call for a local model annotator, patching __init__."""
@@ -73,6 +75,7 @@ def test_create_local_model_instance_success(mock_get_cls_reg):
     assert isinstance(instance, RealLocalAnnotatorClass)
 
 
+@pytest.mark.unit
 @patch("image_annotator_lib.api.get_cls_obj_registry", return_value=MOCK_CLASS_REGISTRY_WITH_REAL_CLASSES)
 def test_create_web_api_instance_model_not_found_in_toml(mock_get_cls_reg):
     """Test KeyError when Web API model info is missing in available_api_models.toml."""
@@ -84,6 +87,7 @@ def test_create_web_api_instance_model_not_found_in_toml(mock_get_cls_reg):
     mock_get_cls_reg.assert_called_once()
 
 
+@pytest.mark.unit
 def test_get_annotator_instance_caches_instance():
     """Test that get_annotator_instance caches the created instance."""
     # Use a realistic local model name

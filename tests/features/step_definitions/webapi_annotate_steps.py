@@ -137,7 +137,7 @@ def run_annotation_expect_error(single_image):
     # ここではフィーチャーファイルでモデル指定がないため、代表的なモデルを使用。
     # 以前の pytest.raises で指定していたモデルに合わせる。
     model_to_use = "Gemini 2.5 Pro Preview"
-    logger.info(f"エラーシナリオ用のアノテーション実行（モデル: {model_to_use}）")
+    logger.info(f"エラーシナリオ用のアノテーション実行(モデル: {model_to_use})")
     result = annotate([single_image], [model_to_use])
     return result
 
@@ -221,7 +221,7 @@ def api_specific_error_message_is_returned(annotation_result, expected_error_typ
                     "APIキー" in error_message or "API key" in error_message or "環境変数" in error_message
                 ), (
                     f"モデル '{model_name}' (画像ハッシュ: {image_hash}) の ApiAuthenticationError メッセージ '{error_message}' に "
-                    f"APIキー関連のキーワード（APIキー, API key, 環境変数）が含まれていません。"
+                    f"APIキー関連のキーワード(APIキー, API key, 環境変数)が含まれていません。"
                 )
 
     assert found_at_least_one_model_result, (

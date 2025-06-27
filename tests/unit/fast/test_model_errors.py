@@ -11,6 +11,7 @@ from image_annotator_lib.exceptions.errors import (
 )
 
 
+@pytest.mark.unit
 def test_model_exceptions():
     """例外クラスのテスト"""
     # 各例外クラスのインスタンス化テスト

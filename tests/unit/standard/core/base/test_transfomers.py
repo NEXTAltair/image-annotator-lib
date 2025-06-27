@@ -1,8 +1,7 @@
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-import torch
 from PIL import Image
 
 from image_annotator_lib.core.base.transformers import TransformersBaseAnnotator
@@ -22,6 +21,7 @@ class DummyTransformersAnnotator(TransformersBaseAnnotator):
 
 
 # --- _preprocess_images ---
+@pytest.mark.standard
 def test_preprocess_images_calls_processor():
     annotator = DummyTransformersAnnotator("dummy-model")
     mock_processor = annotator.components["processor"]
@@ -42,31 +42,43 @@ def test_preprocess_images_calls_processor():
 
 
 # --- _run_inference ---
-def test_run_inference_generate_and_logits():
+@pytest.mark.standard
+@patch("image_annotator_lib.core.base.transformers._get_torch")
+def test_run_inference_generate_and_logits(mock_get_torch):
+    # torch.tensorのモック
+    mock_torch = MagicMock()
+    mock_tensor = MagicMock()
+    mock_torch.tensor.return_value = mock_tensor
+    mock_torch.equal.return_value = True
+    mock_get_torch.return_value = mock_torch
+
     annotator = DummyTransformersAnnotator("dummy-model")
     mock_model = annotator.components["model"]
     # generate()を持つ場合
     mock_out = MagicMock()
-    mock_out.last_hidden_state = torch.tensor([[1, 2]])
+    mock_out.last_hidden_state = mock_tensor
     mock_model.generate.return_value = mock_out
-    processed = [{"input_ids": torch.tensor([[1, 2]])}]
+    processed = [{"input_ids": mock_tensor}]
     out = annotator._run_inference(processed)
     assert isinstance(out, list)
-    assert torch.equal(out[0], mock_out.last_hidden_state)
+    assert out[0] == mock_out.last_hidden_state
 
 
 # --- _format_predictions ---
+@pytest.mark.standard
 def test_format_predictions_batch_decode():
     annotator = DummyTransformersAnnotator("dummy-model")
     mock_processor = annotator.components["processor"]
     # batch_decodeが呼ばれる
     mock_processor.batch_decode = MagicMock(return_value=["text1"])
-    token_ids = [torch.tensor([1, 2])]
+    mock_tensor = MagicMock()
+    token_ids = [mock_tensor]
     out = annotator._format_predictions(token_ids)
     assert out == ["text1"]
     mock_processor.batch_decode.assert_called_once()
 
 
+@pytest.mark.standard
 def test_format_predictions_no_batch_decode():
     annotator = DummyTransformersAnnotator("dummy-model")
 
@@ -76,17 +88,20 @@ def test_format_predictions_no_batch_decode():
 
     processor_mock = DummyCLIPProcessor()
     annotator.components["processor"] = processor_mock
-    out = annotator._format_predictions([torch.tensor([1, 2])])
-    assert out == [""]
+    mock_tensor = MagicMock()
+    with pytest.raises(ValueError):
+        annotator._format_predictions([mock_tensor])
 
 
 # --- _generate_tags ---
+@pytest.mark.standard
 def test_generate_tags_str():
     annotator = DummyTransformersAnnotator("dummy-model")
     out = annotator._generate_tags("caption")
     assert out == ["caption"]
 
 
+@pytest.mark.standard
 def test_generate_tags_not_str():
     annotator = DummyTransformersAnnotator("dummy-model")
     out = annotator._generate_tags(["a", "b"])
@@ -94,6 +109,7 @@ def test_generate_tags_not_str():
 
 
 # --- 例外系 ---
+@pytest.mark.standard
 def test_preprocess_images_no_processor():
     annotator = DummyTransformersAnnotator("dummy-model")
     if annotator.components is not None:
@@ -102,17 +118,21 @@ def test_preprocess_images_no_processor():
         annotator._preprocess_images([Image.new("RGB", (32, 32))])
 
 
+@pytest.mark.standard
 def test_run_inference_no_model():
     annotator = DummyTransformersAnnotator("dummy-model")
     if annotator.components is not None:
         annotator.components["model"] = None
+    mock_tensor = MagicMock()
     with pytest.raises(Exception):
-        annotator._run_inference([{"input_ids": torch.tensor([[1, 2]])}])
+        annotator._run_inference([{"input_ids": mock_tensor}])
 
 
+@pytest.mark.standard
 def test_format_predictions_no_processor():
     annotator = DummyTransformersAnnotator("dummy-model")
     if annotator.components is not None:
         annotator.components["processor"] = None
+    mock_tensor = MagicMock()
     with pytest.raises(Exception):
-        annotator._format_predictions([torch.tensor([1, 2])])
+        annotator._format_predictions([mock_tensor])

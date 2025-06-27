@@ -41,6 +41,7 @@ class MockAnnotator(BaseAnnotator):
 class TestBaseAnnotator:
     """BaseAnnotator クラスのテスト"""
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.config_registry")
     def test_init_with_default_device(self, mock_config):
         """初期化テスト - デフォルトデバイス"""
@@ -64,6 +65,7 @@ class TestBaseAnnotator:
         mock_config.get.assert_any_call("test_model", "model_path")
         mock_config.get.assert_any_call("test_model", "device", "cpu")
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.config_registry")
     def test_init_with_custom_device(self, mock_config):
         """初期化テスト - カスタムデバイス"""
@@ -81,6 +83,7 @@ class TestBaseAnnotator:
 
         assert annotator.device == "cuda"
 
+    @pytest.mark.standard
     def test_context_manager(self):
         """コンテキストマネージャーのテスト"""
         with patch("image_annotator_lib.core.base.annotator.config_registry"):
@@ -96,6 +99,7 @@ class TestBaseAnnotator:
             assert annotator.entered
             assert annotator.exited
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.imagehash")
     def test_calculate_phash_success(self, mock_imagehash):
         """知覚ハッシュ計算成功テスト"""
@@ -112,6 +116,7 @@ class TestBaseAnnotator:
             assert result == "abc123"
             mock_imagehash.phash.assert_called_once_with(image)
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.imagehash")
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_calculate_phash_failure(self, mock_logger, mock_imagehash):
@@ -127,6 +132,7 @@ class TestBaseAnnotator:
             assert result is None
             mock_logger.warning.assert_called_once()
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_empty_images(self, mock_logger):
         """空の画像リストでの予測テスト"""
@@ -140,6 +146,7 @@ class TestBaseAnnotator:
                 "空の画像リストが渡されました。アノテーションをスキップします。"
             )
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_success_single_image(self, mock_logger):
         """単一画像での予測成功テスト"""
@@ -159,6 +166,7 @@ class TestBaseAnnotator:
             assert result[0].get("formatted_output") == "formatted_inference_processed_0"
             assert result[0].get("error") is None
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_success_multiple_images(self, mock_logger):
         """複数画像での予測成功テスト"""
@@ -178,6 +186,7 @@ class TestBaseAnnotator:
                 ]
                 assert res.get("error") is None
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_with_provided_phash(self, mock_logger):
         """事前計算されたハッシュでの予測テスト"""
@@ -192,6 +201,7 @@ class TestBaseAnnotator:
             assert result[0].get("phash") == "provided_hash1"
             assert result[1].get("phash") == "provided_hash2"
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_tag_generation_error(self, mock_logger):
         """タグ生成エラーのテスト"""
@@ -212,6 +222,7 @@ class TestBaseAnnotator:
             assert error_msg is not None and "タグ生成エラー" in error_msg
             mock_logger.exception.assert_called_once()
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_out_of_memory_error(self, mock_logger):
         """メモリ不足エラーのテスト"""
@@ -233,6 +244,7 @@ class TestBaseAnnotator:
 
             mock_logger.error.assert_called_once()
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_unexpected_error(self, mock_logger):
         """予期せぬエラーのテスト"""
@@ -254,6 +266,7 @@ class TestBaseAnnotator:
 
             mock_logger.exception.assert_called_once()
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_single_formatted_output(self, mock_logger):
         """単一の整形出力での予測テスト"""
@@ -272,6 +285,7 @@ class TestBaseAnnotator:
                 assert res.get("formatted_output") == "single_formatted_output"
                 assert res.get("tags") == ["tag1_single_formatted_output", "tag2_single_formatted_output"]
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_timing_logs(self, mock_logger):
         """処理時間ログのテスト"""
@@ -286,6 +300,7 @@ class TestBaseAnnotator:
             debug_calls = [call for call in mock_logger.debug.call_args_list if "時間:" in str(call)]
             assert len(debug_calls) == 3
 
+    @pytest.mark.standard
     def test_abstract_methods_not_implemented(self):
         """抽象メソッドが実装されていない場合のテスト"""
         with patch("image_annotator_lib.core.base.annotator.config_registry"):
@@ -293,6 +308,7 @@ class TestBaseAnnotator:
             with pytest.raises(TypeError):
                 BaseAnnotator("test_model")  # type: ignore
 
+    @pytest.mark.standard
     def test_abstract_methods_raise_not_implemented(self):
         """抽象メソッドが NotImplementedError を発生させることのテスト"""
 
@@ -331,6 +347,7 @@ class TestBaseAnnotator:
             with pytest.raises(NotImplementedError):
                 annotator._generate_tags([])
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_phash_list_shorter_than_images(self, mock_logger):
         """ハッシュリストが画像リストより短い場合のテスト"""
@@ -347,6 +364,7 @@ class TestBaseAnnotator:
             assert result[1].get("phash") == "hash2"
             assert result[2].get("phash") == "calculated_hash"  # 計算されたハッシュ
 
+    @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_error_with_phash_list(self, mock_logger):
         """エラー時にハッシュリストが正しく使用されることのテスト"""

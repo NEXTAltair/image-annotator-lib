@@ -60,6 +60,7 @@ dependencies = [
     "pydantic-ai>=0.3.2",
     "pyyaml>=6.0.2",
     "polars>=1.31.0",
+    "pytest-xdist>=3.7.0",
 ]
 
 [dependency-groups]
@@ -121,16 +122,25 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+norecursedirs = ["prototypes", "examples", "docs", ".git", ".ruff_cache", ".mypy_cache", "__pycache__"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-addopts = ["--import-mode=importlib", "-v", "-s", "-ra", "--tb=short", "--showlocals", "--cov=src", "--cov-report=xml"]
+addopts = [
+    "--import-mode=importlib",
+    "--strict-markers",
+    "--tb=short", 
+    "--maxfail=5",
+    "-ra"
+]
 markers = [
-    "unit: Unit tests",
-    "integration: Integration tests",
-    "slow: Tests that take more time",
-    "webapi: Tests related to Web API based annotators",
-    "scorer: Tests specific to scorer models",
-    "tagger: Tests specific to tagger models",
+    "unit: ユニットテスト（全体）",
+    "integration: 統合テスト",
+    "webapi: Web APIテスト",
+    "scorer: スコアラーモデルテスト",
+    "tagger: タガーモデルテスト",
+    "fast: 高速実行テスト（外部依存なし、<1秒）",
+    "standard: 標準ユニットテスト（軽いモック、<5秒）",
+    "heavy: 重いテスト（実際のライブラリ、>5秒）",
     "model_factory: Tests for the model factory (ModelLoad)"
 ]
 

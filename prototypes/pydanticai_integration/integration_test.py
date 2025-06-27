@@ -109,7 +109,7 @@ def test_dependency_model_validation():
     print("\n=== Dependency Model Validation Test ===")
 
     try:
-        # Test valid dependencies
+        # Test valid dependenciesP
         valid_deps = OpenAIDependencies(
             model_name="test",
             api_model_id="gpt-4o-mini",

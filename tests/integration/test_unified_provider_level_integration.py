@@ -2,7 +2,7 @@
 """
 統一Provider-level PydanticAI統合テスト (pytest形式)
 
-全WebAPIプロバイダー（OpenAI, Anthropic, Google, OpenRouter）の
+全WebAPIプロバイダー(OpenAI, Anthropic, Google, OpenRouter)の
 Provider-level実装の統一性とデザインパターンを検証する
 """
 
@@ -62,7 +62,9 @@ class TestAllProvidersStructure:
                 assert hasattr(annotator_class, method), f"{provider_name}: Method {method} not found"
 
             # PydanticAIAnnotatorMixin継承確認
-            assert issubclass(annotator_class, PydanticAIAnnotatorMixin), f"{provider_name}: PydanticAIAnnotatorMixin inheritance failed"
+            assert issubclass(annotator_class, PydanticAIAnnotatorMixin), (
+                f"{provider_name}: PydanticAIAnnotatorMixin inheritance failed"
+            )
 
 
 class TestProviderManagerIntegration:
@@ -84,7 +86,9 @@ class TestProviderManagerIntegration:
 
         for api_model_id, expected_provider in test_cases:
             determined_provider = ProviderManager._determine_provider("test-model", api_model_id)
-            assert determined_provider == expected_provider, f"Provider determination failed for {api_model_id}: expected {expected_provider}, got {determined_provider}"
+            assert determined_provider == expected_provider, (
+                f"Provider determination failed for {api_model_id}: expected {expected_provider}, got {determined_provider}"
+            )
 
     def test_provider_manager_required_methods(self):
         """ProviderManager必要メソッド確認"""
@@ -140,6 +144,7 @@ class TestUnifiedImagePreprocessing:
     def test_image_preprocessing(self, test_image):
         """統一画像前処理テスト"""
         from pydantic_ai.messages import BinaryContent
+
         from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAnnotatorMixin
 
         # テスト画像作成
@@ -179,7 +184,9 @@ class TestAPIWrapperBackwardCompatibility:
         ]
 
         for provider_name, annotator_class in pydantic_annotators:
-            assert _is_pydantic_ai_webapi_annotator(annotator_class), f"{provider_name}: PydanticAI WebAPI annotator detection failed"
+            assert _is_pydantic_ai_webapi_annotator(annotator_class), (
+                f"{provider_name}: PydanticAI WebAPI annotator detection failed"
+            )
 
     def test_wrapper_methods(self):
         """ラッパー必要メソッドテスト"""
@@ -208,7 +215,7 @@ class TestUnifiedErrorHandling:
             ApiTimeoutError,
         )
 
-        # エラーハンドリング対象プロバイダー（OpenRouterは同一実装なのでOpenAIと同じ）
+        # エラーハンドリング対象プロバイダー(OpenRouterは同一実装なのでOpenAIと同じ)
         providers_with_modules = [
             (
                 "OpenAI",
@@ -241,10 +248,12 @@ class TestUnifiedErrorHandling:
             for error_message, expected_exception in error_test_cases:
                 with pytest.raises(expected_exception), pytest.warns(None) as warnings:
                     annotator._handle_api_error(Exception(error_message))
-                
-                # 警告が出ていないことを確認（厳密なエラーハンドリング）
+
+                # 警告が出ていないことを確認(厳密なエラーハンドリング)
                 if warnings:
-                    pytest.fail(f"{provider_name}: Unexpected warning during {expected_exception.__name__} handling: {warnings[0].message}")
+                    pytest.fail(
+                        f"{provider_name}: Unexpected warning during {expected_exception.__name__} handling: {warnings[0].message}"
+                    )
 
 
 if __name__ == "__main__":
