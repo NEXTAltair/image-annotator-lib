@@ -43,14 +43,12 @@ def test_preprocess_images_calls_processor():
 
 # --- _run_inference ---
 @pytest.mark.standard
-@patch("image_annotator_lib.core.base.transformers._get_torch")
-def test_run_inference_generate_and_logits(mock_get_torch):
+@patch("image_annotator_lib.core.base.transformers.torch")
+def test_run_inference_generate_and_logits(mock_torch):
     # torch.tensorのモック
-    mock_torch = MagicMock()
     mock_tensor = MagicMock()
     mock_torch.tensor.return_value = mock_tensor
     mock_torch.equal.return_value = True
-    mock_get_torch.return_value = mock_torch
 
     annotator = DummyTransformersAnnotator("dummy-model")
     mock_model = annotator.components["model"]
