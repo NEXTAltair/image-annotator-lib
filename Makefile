@@ -1,7 +1,7 @@
 # Image Annotator Lib Makefile
 # Development task automation
 
-.PHONY: help test lint format install install-dev clean run-example typecheck test-unit test-integration test-webapi test-scorer test-tagger test-cov test-fast test-standard test-unit-optimized test-fast-parallel test-standard-parallel test-unit-optimized-parallel setup
+.PHONY: help test lint format install install-dev clean run-example typecheck test-unit test-integration test-webapi test-scorer test-tagger test-cov setup
 
 # Default target
 help:
@@ -18,12 +18,6 @@ help:
 	@echo "  test-webapi  Run Web API tests only"
 	@echo "  test-scorer  Run scorer model tests only"
 	@echo "  test-tagger  Run tagger model tests only"
-	@echo "  test-fast    Run fast tests only (<1s each)"
-	@echo "  test-standard Run standard unit tests (<5s each)"
-	@echo "  test-unit-optimized Run optimized unit tests (fast + standard)"
-	@echo "  test-fast-parallel Run fast tests in parallel"
-	@echo "  test-standard-parallel Run standard unit tests in parallel"
-	@echo "  test-unit-optimized-parallel Run optimized unit tests in parallel"
 	@echo "  test-cov     Run tests with coverage report"
 	@echo "  lint         Run code linting (ruff)"
 	@echo "  format       Format code (ruff format)"
@@ -51,11 +45,11 @@ run-example:
 # Testing targets
 test:
 	@echo "Running all tests..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -n auto
 
 test-unit:
 	@echo "Running unit tests..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m unit
+	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m unit -n auto
 
 test-integration:
 	@echo "Running integration tests..."
@@ -72,30 +66,6 @@ test-scorer:
 test-tagger:
 	@echo "Running tagger model tests..."
 	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m tagger
-
-test-fast:
-	@echo "Running fast tests (development)..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m "fast" --maxfail=5
-
-test-standard:
-	@echo "Running standard unit tests..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m "standard"
-
-test-unit-optimized:
-	@echo "Running optimized unit tests (fast + standard)..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m "fast or standard"
-
-test-fast-parallel:
-	@echo "Running fast tests in parallel..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m "fast" -n auto --dist=worksteal --maxfail=5
-
-test-standard-parallel:
-	@echo "Running standard unit tests in parallel..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m "standard" -n auto --dist=worksteal
-
-test-unit-optimized-parallel:
-	@echo "Running optimized unit tests in parallel (fast + standard)..."
-	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m "fast or standard" -n auto --dist=worksteal
 
 test-cov:
 	@echo "Running tests with coverage..."
