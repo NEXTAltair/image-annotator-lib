@@ -1,190 +1,36 @@
 # アクティブコンテキスト
 
 ## 1. 現作業焦点 (Current Focus)
-- **✅ PydanticAI統合完了**: Provider-levelアーキテクチャによる4プロバイダー統合達成
-- **✅ Agent caching system**: LRU戦略による効率的なAgent再利用実装完了
-- **✅ OpenRouter統合**: カスタムヘッダー対応を含む完全なPydanticAI実装完了
-- Linterエラーおよび型エラーの完全解消とコード品質向上
-- ユニットテストの全パス達成とテストカバレッジ75%以上維持･向上
+- **統合テスト実装**: RFC 005に基づく包括的統合テストスイートの構築。Provider-level PydanticAIアーキテクチャの信頼性と安定性を保証する3段階ハイブリッド戦略を実装中。
+    - **Phase 1 (第1週)**: Provider Manager、PydanticAI Factory、Cross-Provider統合テストの実装
+    - **Phase 2 (第2週)**: メモリ管理・設定統合テストの実装
+    - **Phase 3 (第3週)**: エンドツーエンドワークフロー・エラー伝播統合テストの実装
 
 ## 2. 進行中の主要課題･決定事項 (Ongoing Key Issues and Decisions)
-- **PydanticAI 統合 (完了):**
-    - ✅ **Provider-level統合完了**: OpenAI、Anthropic、Google、OpenRouterの4プロバイダーでPydanticAI Agent実装完了
-    - ✅ **PydanticAIProviderFactory**: Provider instance共有とAgent cachingシステム実装
-    - ✅ **ProviderManager**: Provider-level推論実行とmodel ID routingシステム実装
-    - ✅ **PydanticAIAnnotatorMixin**: PIL Image → BinaryContent変換パイプライン実装
-    - ✅ **統一テストスイート**: 6/6テスト成功、包括的なProviderレベル検証完了
-    - ✅ **メモリ効率**: 共有Provider instanceによるリソース最適化達成
-- **BDDテスト戦略:**
-    - 現状: ステップ定義ファイルおよび関連 `conftest.py` は削除済み。Featureファイルのみ再実装前提で残存。
-    - 方針: ユニットテストとインテグレーションテストに注力。BDDステップは将来的に高品質なものを再実装。
-- **テスト方針:**
-    - ユニットテストおよびインテグレーションテストを中心に品質を確保 (pytest使用)。
-    - モックやダミーの使用は、ユニットテストの範囲に限定する。
-- **コアロジック･API設計:**
-    - `docs/architecture.md` および `docs/technical.md` に準拠。
-- **設計･ルール準拠:**
-    - `.cursor/rules/` 配下、および `docs/rules.md` に記載のルール･設計方針を厳密に遵守。
-- **ドキュメント管理:**
-    - 全てのルールファイルおよびドキュメントは、常に最新の状態を反映するように維持･管理する。
+- **3層ハイブリッド戦略の採用**: CI対応高速テスト、実API検証テスト、システム統合テストの組み合わせ
+- **テストカバレッジ向上**: 31.56% → 85%への向上を統合テストで実現
+- **品質保証指標の確立**: 実行時間、成功率、メモリ使用量等の明確な指標設定
+- **リスク管理戦略**: API仕様変更、リソース競合、テスト不安定性への対策
 
 ## 3. 最近の主要な変更点 (Recent Key Changes)
-- **✅ PydanticAI 0.3.2統合完了**: Provider-levelアーキテクチャで4プロバイダー統一実装
-- **✅ Agent cachingシステム**: LRU戦略とconfig change detectionによる効率的リソース管理
-- **✅ OpenRouter統合**: HTTP-RefererとX-Titleカスタムヘッダー対応完了
-- **✅ 統一テストフレームワーク**: test_unified_provider_level_integration.py (6/6成功)
-- **✅ ドキュメント正規化**: 行末文字CRLF→LF正規化とProvider-level実装の一貫性向上
-- **✅ 旧テストファイル整理**: 8個の個別プロバイダーテストファイルを削除、統一テストに集約
-- **✅ PydanticAIWebAPIWrapper**: 既存annotate() APIとの完全な後方互換性実装
+- **RFC 005策定完了**: 統合テスト実装計画の詳細化と承認
+- **TodoList更新**: 統合テスト実装の具体的タスク分解
+- **プランニングルール適用**: `.cursor/rules/plan.mdc`に従った体系的計画立案
 
 ## 4. 次のステップ (Next Steps)
-- **Provider-level統合後の最適化**:
-  - Provider instance共有パフォーマンスの実測・調整
-  - Agent cache効率の監視と改善
-  - メモリ使用量の最適化検証
-- **品質向上**:
-  - Linterエラーおよび型エラーの完全な解消
-  - 全てのユニットテストをパスさせる
-  - テストカバレッジの目標値達成と維持
-- **将来的な拡張**:
-  - (将来的に) Featureファイルに基づき、品質の高いBDDステップ定義を再実装する
-  - 新しいAPIプロバイダーの追加時のProvider-level統合パターン確立
-- **ドキュメント管理**:
-  - 全てのタスク進捗および意思決定は、本ファイルを含む関連ドキュメントに即時反映する
-  - PydanticAI統合完了に伴う関連ドキュメントの更新完了
+1. **Phase 1実装開始**: Provider Manager統合テスト (`test_provider_manager_integration.py`) の作成
+2. **テストインフラ構築**: 共通フィクスチャ、ユーティリティ、モック戦略の実装
+3. **CI統合準備**: 高速統合テストのCI環境組み込み設定
 
 ## 5. 参照すべき主要ドキュメント (Key Documents to Refer To)
-- `docs/architecture.md` (システムアーキテクチャ)
-- `docs/technical.md` (技術仕様、開発環境)
-- `docs/product_requirement_docs.md` (製品要求仕様)
+- `tasks/rfc/integration_test_implementation_plan.md` (RFC 005: 統合テスト実装計画)
 - `tasks/tasks_plan.md` (全体タスク計画、バックログ)
-- `.cursor/rules/lessons-learned.mdc` (過去の教訓、知見)
-- `.cursor/rules/error-documentation.mdc` (既知のエラーと解決策)
+- `tests/integration/test_openrouter_pydanticai_integration.py` (テスト実装の参考)
+- `tests/integration/test_unified_provider_level_integration.py` (統合テスト構造の参考)
+- `docs/architecture.md` (テスト対象のアーキテクチャ理解)
 
-## [2025-05-10] Google Gemini annotator レスポンス型･エラーハンドリング設計変更
-
-### 現状
-- google_api.py のレスポンス型を WebApiFormattedOutput (annotation: dict[str, Any] | None, error: str | None) に統一済み。
-- スキーマ不一致･APIエラー時も error に詳細を格納し、annotationはNoneで返す設計。
-- テスト･型定義もこの設計に合わせて修正済み。
-
-### 決定事項
-- annotation/errorペア型の全WebAPIアノテーターでの統一運用。
-- 型重複(Responsedict等)の排除。
-- annotationはdict型、_format_predictionsでAnnotationSchemaへ変換。
-
-### 次ステップ
-- 他WebAPIアノテーターへの同様の設計適用(必要に応じて)
-- ドキュメント･設計方針の定期的な見直し
-
-## 2025-05-10 OpenAIApiAnnotator変更経緯
-
-- OpenAI API画像入力(base64)はimage_url: dict型で渡す必要があることを公式ドキュメント･SDK型定義で再確認。
-- 型エラー(ImageURL型)を辞書型指定で解消。
-- 構造化出力モデルをAnnotationSchema(webapi_shared.py)に統一。
-- _run_inference/_format_predictionsの型安全･エラーハンドリングを整理。
-- ユニットテスト(test_openai_api_response.py)を追加し、正常系･異常系･API例外を網羅。
-
-## 2025-05-10 AnthropicApiAnnotator変更経緯(テスト用ToolUseBlockクラス名修正･型判定整理)
-
-- テスト用ダミークラスのクラス名をToolUseBlockに合わせ、type(obj).__name__ == "ToolUseBlock" の判定に合致させることでテストがパス。
-- _format_predictionsでAnnotationSchema型を許容し、APIレスポンスの型安全性･一貫性を向上。
-- これにより、Anthropic/Claude系APIの構造化出力テストが全てパス。
-
-## 2025-05-10 annotator_webapi.py から OpenAIApiAnnotator･AnthropicApiAnnotator 分離の作業内容･進捗
-
-- annotator_webapi.py から OpenAIApiAnnotator を openai_api_response.py へ、AnthropicApiAnnotator を anthropic_api.py へ分離。
-- 分離に伴い、型定義･エラーハンドリング･テストを整理。
-- 共通スキーマ(AnnotationSchema)は webapi_shared.py に集約。
-- テスト用ダミークラスのクラス名･型判定ロジックを実装と一致させ、テストの信頼性を担保。
-- テスト全パスを確認。
-
-### 今後のタスク
-- 他API(Google, OpenRouter等)も同様の分離･整理を検討。
-- ドキュメント･設計方針の定期的な見直し。
-
-### 2024/05/10 OpenRouterApiAnnotator テスト･型･設計最新状況
-- OpenRouterApiAnnotatorのユニットテストを追加･修正し、全ケースでパスを確認。
-- テスト失敗の主因(クライアント型チェック)を特定し、OpenAIインスタンス利用で解決。
-- AnnotationSchemaによる型安全な注釈生成･バリデーションを徹底。
-- レスポンス異常系(content空、choices空、JSON不正、API例外)も網羅的にテスト。
-
-# Active Context (2025-08-07)
-
-## 現在のフォーカス
-- Web API アノテーター (`annotator_webapi` 関連) のリファクタリング。
-- Pydantic および PydanticAI の導入による型安全性と保守性の向上。(進行中)
-- `_run_inference` と `_format_predictions` のインターフェース(型シグネチャ)統一。
-
-## 最近の主な変更･決定事項
-- **`core/types.py` の導入:** 共通の型定義 (TypedDict, Pydanticモデル) を一元管理。
-- **`_run_inference` の戻り値統一:** `list[RawOutput]` (`response: AnnotationSchema | None`, `error: str | None`) に統一。
-- **`_format_predictions` の共通化:** `WebApiBaseAnnotator` に共通ロジックを実装。
-    - 戻り値は `list[WebApiFormattedOutput]` (`annotation: dict | None`, `error: str | None`) に統一。
-    - 各サブクラス (Google, Anthropic) からメソッドを削除。
-- **テストコードの修正:** 上記変更に伴い、`test_google_api.py` と `test_anthropic_api.py` を修正し、パスすることを確認。
-- **ドキュメント更新:** `pydanticai_integration_plan.md` を最新の状態に更新。
-
-## 現在の課題･ペンディング事項
-- **`src/image_annotator_lib/core/base.py` の型エラー:** `_format_predictions` を移動した際に発生した `self.components` 周りの型エラーが未解決。(リンターエラーは無視する指示あり)
-
-## 次のステップ
-1.  **`src/image_annotator_lib/core/base.py` の型エラー解消:** `self.components` の型ヒント問題を解決する。(一時的に `Any` にしている箇所)
-2.  **リファクタリング内容のドキュメント反映:** `architecture.md`, `technical.md`, `lessons-learned.mdc` など、関連する他のドキュメントに今回の変更内容(`types.py` の導入、`_format_predictions` の共通化、PydanticAI導入の進捗など)を反映させる。
-3.  **PydanticAI の Agent/tool 等の導入検討:** 依存性注入やエージェント設計をさらに進めるか検討。
-
-## 関連 RFC/ドキュメント
-- [tasks/rfc/pydanticai_integration_plan.md](mdc:tasks/rfc/pydanticai_integration_plan.md)
-- [src/image_annotator_lib/core/types.py](mdc:src/image_annotator_lib/core/types.py)
-- [src/image_annotator_lib/core/base.py](mdc:src/image_annotator_lib/core/base.py)
-- [docs/architecture.md](mdc:docs/architecture.md)
-
-## 開発現状 (2025-05-13)
-
-### 現作業焦点
-- Web API アノテーター周りのリファクタリングと、それに伴うBDDテストの修正･安定化。
-- 特にAPIキー未設定、タイムアウト、APIエラーレスポンスなどの異常系シナリオのテスト動作確認と修正。
-
-### 進行中決定･検討事項
-- `src/image_annotator_lib/api.py` の `annotate` 関数の戻り値型ヒントのリンターエラー対応。(`PHashAnnotationResults` と `dict[str, dict[str, AnnotationResult]]` の不一致)
-
-### 最近変更
-- **`src/image_annotator_lib/api.py` の `_handle_error` 関数を修正 (2025-05-13):**
-  - エラーメッセージを生成する際に、元の例外の型名 (e.g., `type(e).__name__`) をメッセージに含めるように変更した。
-  - これにより、BDDテスト (`test_apiキーが未設定の場合は認証エラーが発生する`) で、エラーメッセージ内に期待するエラータイプ名 (`ApiAuthenticationError`) が含まれるようになり、テストがパスするようになった。
-- **BDDステップ定義 (`tests/features/step_definitions/webapi_annotate_steps.py`) の修正 (2025-05-13):**
-  - APIキー未設定シナリオの `@when` ステップから `pytest.raises` を削除し、結果辞書を返すように変更。
-  - 対応する `@then` ステップで、結果辞書内のエラーメッセージに期待されるエラータイプ名が含まれていることを検証するように修正。
-- **フィーチャーファイル (`tests/features/webapi_annotate.feature`) の修正 (2025-05-13):**
-  - APIキー未設定シナリオの `@then` ステップを、エラーメッセージの内容を検証するように変更 (`Then "ApiAuthenticationError" のエラーメッセージが返される`)。
-
-### 次ステップ
-- `src/image_annotator_lib/api.py` の `annotate` 関数の戻り値型ヒントに関するリンターエラーを修正する。
-- PydanticAI 統合に関するテストとリファクタリングを継続する。
-- 他のエラー関連BDDシナリオ(タイムアウト、APIエラーレスポンス)が、今回の `api.py` の `_handle_error` 関数の変更によって影響を受けていないか(意図せず失敗するようになっていないか等)、念のためテストを実行して確認する。
-
-### 既知問題点
-- (特になし)
-
-## 現在の状況 (2025-06-23)
-
-### PydanticAI 0.3.2 アップデート完了
-- **重要な進展**: PydanticAI を 0.1.11 から 0.3.2 へアップデート完了
-- **OpenRouter統合の技術的問題解決**: 以前発生していた `TypeError: 'NoneType' object cannot be interpreted as an integer` エラーが完全に解決
-- **基本接続確認済み**: OpenRouterProviderクラスが正常に動作し、APIエンドポイントへの接続が確立されることを確認
-
-### 統合状況の評価
-- **✅ 解決済み**: PydanticAI TypeErrorの完全解決、OpenRouterProviderの認識、API接続の確立
-- **⚠️ 制限事項**: 一部freeモデルの利用可能性、ツール使用サポートの有無、画像入力サポートの差異
-- **📈 評価**: PydanticAI統合における基本的な技術的障壁は解決済み、次フェーズへの準備完了
-
-### 技術仕様更新
-- pyproject.tomlでPydanticAI依存関係を`pydantic-ai[anthropic,google,logfire,openai]>=0.3.2`に更新
-- OpenRouterProviderの初期化パラメータがAPI仕様変更により`base_url`パラメータ不要となったことを確認
-- 公式ドキュメントに基づく正しい使用パターンを検証済み
-
-## 次のステップ
-
-- **PydanticAI統合計画の次フェーズ実装**: Phase 1のPydanticAIAgentAnnotator基盤クラス作成に着手
-- **既存WebAPIアノテーターとの統合**: OpenAI, Google, Anthropic, OpenRouterの段階的置き換え計画の実行
-- **関連ドキュメント更新**: `pydanticai_integration_plan.md`、`technical.md`、`lessons-learned.mdc`への進捗反映
+## 6. 重要な設計決定事項 (Key Design Decisions)
+- **ハイブリッドテスト戦略**: モック中心のCI適用可能テストと、実API検証の組み合わせ
+- **段階的実装**: 3フェーズによるリスク最小化と段階的価値提供
+- **標準化パターン**: 再利用可能なテストユーティリティとフィクスチャの確立
+- **性能重視**: CI実行時間<5分、高い成功率の維持
