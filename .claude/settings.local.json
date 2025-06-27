@@ -9,5 +9,8 @@
       "WebFetch(domain:ai.pydantic.dev)"
     ],
     "deny": []
+  },
+  "env": {
+    "BASH_MAX_TIMEOUT_MS": "500000"
   }
 }

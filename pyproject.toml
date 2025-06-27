@@ -132,6 +132,8 @@ addopts = [
     "--maxfail=5",
     "-ra"
 ]
+# Note: Parallel execution options are configured in Makefile targets
+# Use make test-fast-parallel for parallel execution with pytest-xdist
 markers = [
     "unit: ユニットテスト（全体）",
     "integration: 統合テスト",
