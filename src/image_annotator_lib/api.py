@@ -279,6 +279,16 @@ def _handle_error(
     }
 
 
+def list_available_annotators() -> list[str]:
+    """利用可能なアノテーターモデル名のリストを返す
+    
+    Returns:
+        利用可能なモデル名のリスト
+    """
+    from .core.registry import list_available_annotators as _list_available_annotators
+    return _list_available_annotators()
+
+
 def annotate(
     images_list: list[Image.Image], model_name_list: list[str], phash_list: list[str] | None = None
 ) -> PHashAnnotationResults:

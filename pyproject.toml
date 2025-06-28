@@ -141,7 +141,11 @@ markers = [
     "fast: 高速実行テスト（外部依存なし、<1秒）",
     "standard: 標準ユニットテスト（軽いモック、<5秒）",
     "heavy: 重いテスト（実際のライブラリ、>5秒）",
-    "model_factory: Tests for the model factory (ModelLoad)"
+    "model_factory: Tests for the model factory (ModelLoad)",
+    "fast_integration: CI対応モックテスト",
+    "real_api: 実API検証テスト",
+    "system_integration: エンドツーエンドシナリオ",
+    "provider_specific: プロバイダー固有テスト",
 ]
 
 [tool.coverage.run]

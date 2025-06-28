@@ -67,6 +67,8 @@ test-tagger:
 	@echo "Running tagger model tests..."
 	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest -m tagger
 
+
+
 test-cov:
 	@echo "Running tests with coverage..."
 	UV_PROJECT_ENVIRONMENT=.venv_linux uv run pytest --cov=src --cov-report=html --cov-report=xml

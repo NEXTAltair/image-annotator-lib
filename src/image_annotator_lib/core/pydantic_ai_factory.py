@@ -9,13 +9,23 @@ from pydantic import SecretStr
 from pydantic_ai import Agent
 from pydantic_ai.messages import BinaryContent
 from pydantic_ai.models import infer_model
-from pydantic_ai.providers import infer_provider
+from pydantic_ai.providers.anthropic import AnthropicProvider
+from pydantic_ai.providers.google_gla import GoogleGLAProvider as GoogleProvider
+from pydantic_ai.providers.openai import OpenAIProvider
 
 from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
 from .config import config_registry
 from .types import AnnotationSchema
 from .utils import logger
 from .webapi_agent_cache import WebApiAgentCache, create_cache_key, create_config_hash
+
+
+_PROVIDER_MAP = {
+    "anthropic": AnthropicProvider,
+    "google": GoogleProvider,
+    "openai": OpenAIProvider,
+    "openrouter": OpenAIProvider,  # OpenRouter uses the OpenAI provider structure
+}
 
 
 class PydanticAIProviderFactory:
@@ -27,10 +37,16 @@ class PydanticAIProviderFactory:
     @classmethod
     def get_provider(cls, provider_name: str, **provider_kwargs) -> Any:
         """Get or create provider instance for the given provider name"""
-        provider_key = f"{provider_name}:{id(provider_kwargs)}"
+        import json
+        # Convert kwargs to a stable string for the key
+        provider_key_suffix = json.dumps(provider_kwargs, sort_keys=True, default=str)
+        provider_key = f"{provider_name}:{provider_key_suffix}"
 
         if provider_key not in cls._providers:
-            provider_cls = infer_provider(provider_name)
+            provider_cls = _PROVIDER_MAP.get(provider_name)
+            if not provider_cls:
+                raise ValueError(f"Unsupported provider: {provider_name}")
+            
             cls._providers[provider_key] = provider_cls(**provider_kwargs)
             logger.debug(f"Created new {provider_name} provider instance: {provider_key}")
 
@@ -42,6 +58,8 @@ class PydanticAIProviderFactory:
     ) -> Agent:
         """Create PydanticAI Agent with provider reuse and caching"""
 
+        provider_name = cls._extract_provider_name(api_model_id)
+        
         # Use PydanticAI's built-in model inference
         if ":" not in api_model_id:
             # Auto-detect provider from model name
@@ -58,9 +76,6 @@ class PydanticAIProviderFactory:
 
         # Use PydanticAI's native model inference
         model = infer_model(full_model_name)
-
-        # Extract provider name from model
-        provider_name = model.system
 
         # Create or reuse provider
         provider_kwargs = {"api_key": api_key}
@@ -87,7 +102,7 @@ class PydanticAIProviderFactory:
 
         def creator_func() -> Agent:
             # Handle OpenRouter special case
-            if api_model_id.startswith("openrouter:"):
+            if provider_name == "openrouter":
                 return cls.create_openrouter_agent(model_name, api_model_id, api_key, config_data)
             else:
                 return cls.create_agent(model_name, api_model_id, api_key, config_hash)
@@ -101,8 +116,8 @@ class PydanticAIProviderFactory:
         """Create OpenRouter-specific Agent with custom headers"""
 
         # Extract actual model ID from openrouter: prefix
-        actual_model_id = api_model_id[11:]  # Remove "openrouter:" prefix
-        full_model_name = f"openai:{actual_model_id}"  # Use OpenAI provider
+        actual_model_id = api_model_id.split(":", 1)[1]
+        full_model_name = f"openai:{actual_model_id}"  # Use OpenAI provider structure
 
         # Setup OpenRouter specific provider kwargs
         provider_kwargs = {"api_key": api_key, "base_url": "https://openrouter.ai/api/v1"}
@@ -122,7 +137,7 @@ class PydanticAIProviderFactory:
         model = infer_model(full_model_name)
 
         # Create or reuse OpenAI provider with OpenRouter settings
-        provider = cls.get_provider("openai", **provider_kwargs)
+        provider = cls.get_provider("openrouter", **provider_kwargs)
 
         # Override model's provider with our shared instance
         model._provider = provider
@@ -131,6 +146,13 @@ class PydanticAIProviderFactory:
         agent = Agent(model=model, output_type=AnnotationSchema, system_prompt=BASE_PROMPT)
 
         return agent
+
+    @classmethod
+    def clear_cache(cls):
+        """Clear all cached agents and providers"""
+        cls._agent_cache.clear_cache()
+        cls._providers.clear()
+        logger.debug("Cleared all PydanticAI provider cache and agent cache")
 
     @classmethod
     def _extract_provider_name(cls, api_model_id: str) -> str:

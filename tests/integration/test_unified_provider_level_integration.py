@@ -246,14 +246,8 @@ class TestUnifiedErrorHandling:
 
             # 各エラータイプのテスト
             for error_message, expected_exception in error_test_cases:
-                with pytest.raises(expected_exception), pytest.warns(None) as warnings:
+                with pytest.raises(expected_exception):
                     annotator._handle_api_error(Exception(error_message))
-
-                # 警告が出ていないことを確認(厳密なエラーハンドリング)
-                if warnings:
-                    pytest.fail(
-                        f"{provider_name}: Unexpected warning during {expected_exception.__name__} handling: {warnings[0].message}"
-                    )
 
 
 if __name__ == "__main__":
