@@ -54,6 +54,69 @@ def managed_config_registry():
     config_registry.set = original_set
 
 
+def _ensure_test_class_mapping(model_name: str, config: dict):
+    """Ensure test model class mappings exist in the class registry."""
+    from image_annotator_lib.core.registry import get_cls_obj_registry
+    
+    registry = get_cls_obj_registry()
+    class_name = config.get("class")
+    
+    print(f"MAPPING DEBUG: model_name='{model_name}', class_name='{class_name}', already_in_registry={model_name in registry}")
+    
+    if class_name and model_name not in registry:
+        # For WebAPI models, directly import and register the classes
+        if class_name in ["OpenAIApiAnnotator", "AnthropicApiAnnotator", "GoogleApiAnnotator"]:
+            try:
+                print(f"IMPORT DEBUG: Attempting to import {class_name}")
+                if class_name == "OpenAIApiAnnotator":
+                    # Use the correct OpenAI class
+                    from image_annotator_lib.model_class.annotator_webapi.openai_api_response import OpenAIApiAnnotator
+                    registry[model_name] = OpenAIApiAnnotator
+                    print(f"IMPORT SUCCESS: {model_name} -> OpenAIApiAnnotator")
+                elif class_name == "AnthropicApiAnnotator":
+                    from image_annotator_lib.model_class.annotator_webapi.anthropic_api import AnthropicApiAnnotator
+                    registry[model_name] = AnthropicApiAnnotator
+                    print(f"IMPORT SUCCESS: {model_name} -> AnthropicApiAnnotator")
+                elif class_name == "GoogleApiAnnotator":
+                    from image_annotator_lib.model_class.annotator_webapi.google_api import GoogleApiAnnotator
+                    registry[model_name] = GoogleApiAnnotator
+                    print(f"IMPORT SUCCESS: {model_name} -> GoogleApiAnnotator")
+                return
+            except ImportError as e:
+                print(f"IMPORT FAILED: {class_name} - {e}")
+                pass
+            except Exception as e:
+                print(f"IMPORT ERROR: {class_name} - {e}")
+                pass
+        
+        # For local models that need direct import
+        if class_name == "WDTagger":
+            try:
+                print(f"IMPORT DEBUG: Attempting to import WDTagger")
+                from image_annotator_lib.model_class.tagger_onnx import WDTagger
+                registry[model_name] = WDTagger
+                print(f"IMPORT SUCCESS: {model_name} -> WDTagger")
+                return
+            except ImportError as e:
+                print(f"IMPORT FAILED: WDTagger - {e}")
+                pass
+        
+        # For local models, try existing registry lookup
+        if class_name in registry:
+            registry[model_name] = registry[class_name]
+            print(f"REGISTRY SUCCESS: {model_name} -> {class_name} (from existing registry)")
+            return
+            
+        # Fallback: search by class name pattern
+        for registered_name, class_obj in registry.items():
+            if class_name.lower() in registered_name.lower():
+                registry[model_name] = class_obj
+                print(f"PATTERN SUCCESS: {model_name} -> {registered_name} (pattern match)")
+                break
+        else:
+            print(f"MAPPING FAILED: No solution found for {model_name} with class {class_name}")
+
+
 @pytest.fixture(scope="session")
 def integration_test_config():
     """

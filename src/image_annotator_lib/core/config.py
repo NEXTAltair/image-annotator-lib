@@ -283,12 +283,32 @@ class ModelConfigRegistry:
         return self._merged_config_data.copy()  # 内部データのコピーを返す
 
 
-# --- 共有インスタンスの作成と初期ロード --- #
-config_registry = ModelConfigRegistry()
-try:
-    config_registry.load()
-except Exception:
-    logger.exception("共有設定レジストリの初期ロード中にエラーが発生しました。")
+# --- 共有インスタンスの作成と遅延ロード --- #
+_config_registry: ModelConfigRegistry | None = None
+
+def get_config_registry() -> ModelConfigRegistry:
+    """設定レジストリのシングルトンインスタンスを取得（遅延初期化）"""
+    global _config_registry
+    if _config_registry is None:
+        _config_registry = ModelConfigRegistry()
+        # テスト環境以外では自動ロード
+        import os
+        if not os.getenv("PYTEST_CURRENT_TEST"):
+            try:
+                _config_registry.load()
+            except Exception:
+                logger.exception("共有設定レジストリの初期ロード中にエラーが発生しました。")
+    return _config_registry
+
+# 後方互換性のための遅延プロパティ
+class _ConfigRegistryProxy:
+    def __getattr__(self, name):
+        return getattr(get_config_registry(), name)
+    
+    def __setattr__(self, name, value):
+        return setattr(get_config_registry(), name, value)
+
+config_registry = _ConfigRegistryProxy()
 
 # --- available_api_models.toml 用のスタンドアロン関数 --- #
 

@@ -4,7 +4,7 @@ Integration tests for Anthropic API annotator.
 Tests Provider-level PydanticAI integration, error handling, and Claude-specific functionality.
 """
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from PIL import Image
 import base64
 from io import BytesIO
@@ -57,7 +57,7 @@ class TestAnthropicApiAnnotatorIntegration:
         """Test proper initialization of Anthropic API annotator."""
         assert anthropic_annotator.model_name == "anthropic_test_model"
         assert anthropic_annotator.api_model_id == "claude-3-5-sonnet"
-        assert anthropic_annotator._api_key == "test-anthropic-api-key"
+        assert anthropic_annotator.api_key.get_secret_value() == "test-anthropic-api-key"
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -85,7 +85,7 @@ class TestAnthropicApiAnnotatorIntegration:
             mock_response = MagicMock()
             mock_response.tags = ["anthropic_tag_1", "anthropic_tag_2"]
             mock_response.caption = "Claude generated caption"
-            mock_agent.run.return_value = MagicMock(data=mock_response)
+            mock_agent.run = AsyncMock(return_value=MagicMock(data=mock_response))
             mock_get_agent.return_value = mock_agent
 
             # Setup agent
@@ -112,7 +112,7 @@ class TestAnthropicApiAnnotatorIntegration:
             mock_agent = MagicMock()
             mock_response = MagicMock()
             mock_response.tags = ["claude_haiku_tag"]
-            mock_agent.run.return_value = MagicMock(data=mock_response)
+            mock_agent.run = AsyncMock(return_value=MagicMock(data=mock_response))
             mock_get_agent.return_value = mock_agent
 
             anthropic_annotator._setup_agent()
@@ -133,7 +133,7 @@ class TestAnthropicApiAnnotatorIntegration:
         """Test handling of Anthropic API authentication errors."""
         with patch('image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent') as mock_get_agent:
             mock_agent = MagicMock()
-            mock_agent.run.side_effect = Exception("authentication failed")
+            mock_agent.run = AsyncMock(side_effect=Exception("authentication failed"))
             mock_get_agent.return_value = mock_agent
 
             anthropic_annotator._setup_agent()
@@ -150,7 +150,7 @@ class TestAnthropicApiAnnotatorIntegration:
         """Test handling of Anthropic API rate limiting."""
         with patch('image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent') as mock_get_agent:
             mock_agent = MagicMock()
-            mock_agent.run.side_effect = Exception("rate limit exceeded")
+            mock_agent.run = AsyncMock(side_effect=Exception("rate limit exceeded"))
             mock_get_agent.return_value = mock_agent
 
             anthropic_annotator._setup_agent()
@@ -167,7 +167,7 @@ class TestAnthropicApiAnnotatorIntegration:
         """Test handling of model not found errors (404)."""
         with patch('image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent') as mock_get_agent:
             mock_agent = MagicMock()
-            mock_agent.run.side_effect = Exception("404 not_found_error model: claude-invalid-model")
+            mock_agent.run = AsyncMock(side_effect=Exception("404 not_found_error model: claude-invalid-model"))
             mock_get_agent.return_value = mock_agent
 
             anthropic_annotator._setup_agent()
@@ -184,7 +184,7 @@ class TestAnthropicApiAnnotatorIntegration:
         """Test handling of Anthropic API timeouts."""
         with patch('image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent') as mock_get_agent:
             mock_agent = MagicMock()
-            mock_agent.run.side_effect = Exception("timeout occurred")
+            mock_agent.run = AsyncMock(side_effect=Exception("timeout occurred"))
             mock_get_agent.return_value = mock_agent
 
             anthropic_annotator._setup_agent()
@@ -201,7 +201,7 @@ class TestAnthropicApiAnnotatorIntegration:
         """Test handling of Anthropic API server errors."""
         with patch('image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent') as mock_get_agent:
             mock_agent = MagicMock()
-            mock_agent.run.side_effect = Exception("500 server error")
+            mock_agent.run = AsyncMock(side_effect=Exception("500 server error"))
             mock_get_agent.return_value = mock_agent
 
             anthropic_annotator._setup_agent()
@@ -218,7 +218,7 @@ class TestAnthropicApiAnnotatorIntegration:
         """Test handling of generic Anthropic API errors."""
         with patch('image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent') as mock_get_agent:
             mock_agent = MagicMock()
-            mock_agent.run.side_effect = Exception("unknown error")
+            mock_agent.run = AsyncMock(side_effect=Exception("unknown error"))
             mock_get_agent.return_value = mock_agent
 
             anthropic_annotator._setup_agent()
@@ -238,14 +238,15 @@ class TestAnthropicApiAnnotatorIntegration:
         with patch('image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent') as mock_get_agent:
             captured_inputs = []
             
-            def mock_run(binary_content, **kwargs):
-                captured_inputs.append(binary_content)
+            def mock_run(user_prompt=None, message_history=None, model_settings=None, **kwargs):
+                if message_history:
+                    captured_inputs.append(message_history[0])  # binary_content is in message_history[0]
                 mock_response = MagicMock()
                 mock_response.tags = ["preprocessing_test"]
                 return MagicMock(data=mock_response)
 
             mock_agent = MagicMock()
-            mock_agent.run.side_effect = mock_run
+            mock_agent.run = AsyncMock(side_effect=mock_run)
             mock_get_agent.return_value = mock_agent
 
             anthropic_annotator._setup_agent()
@@ -304,7 +305,7 @@ class TestAnthropicApiAnnotatorIntegration:
                     return MagicMock(data=mock_response)
 
             mock_agent = MagicMock()
-            mock_agent.run.side_effect = mock_run
+            mock_agent.run = AsyncMock(side_effect=mock_run)
             mock_get_agent.return_value = mock_agent
 
             anthropic_annotator._setup_agent()
@@ -330,7 +331,7 @@ class TestAnthropicApiAnnotatorIntegration:
             mock_agent = MagicMock()
             mock_response = MagicMock()
             mock_response.tags = ["provider_manager_claude"]
-            mock_agent.run.return_value = MagicMock(data=mock_response)
+            mock_agent.run = AsyncMock(return_value=MagicMock(data=mock_response))
             mock_get_agent.return_value = mock_agent
 
             # Test through Provider Manager
@@ -357,7 +358,7 @@ class TestAnthropicApiAnnotatorIntegration:
                 mock_agent = MagicMock()
                 mock_response = MagicMock()
                 mock_response.tags = ["rate_limit_test"]
-                mock_agent.run.return_value = MagicMock(data=mock_response)
+                mock_agent.run = AsyncMock(return_value=MagicMock(data=mock_response))
                 mock_get_agent.return_value = mock_agent
 
                 anthropic_annotator._setup_agent()
@@ -415,14 +416,14 @@ class TestAnthropicApiAnnotatorIntegration:
         with patch('image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent') as mock_get_agent:
             captured_model_calls = []
             
-            def mock_run(binary_content, model=None, **kwargs):
-                captured_model_calls.append(model)
+            def mock_run(user_prompt=None, message_history=None, model_settings=None, **kwargs):
+                captured_model_calls.append(model_settings)  # model info is in model_settings
                 mock_response = MagicMock()
                 mock_response.tags = ["model_override_test"]
                 return MagicMock(data=mock_response)
 
             mock_agent = MagicMock()
-            mock_agent.run.side_effect = mock_run
+            mock_agent.run = AsyncMock(side_effect=mock_run)
             mock_get_agent.return_value = mock_agent
 
             anthropic_annotator._setup_agent()
@@ -456,7 +457,7 @@ class TestAnthropicApiAnnotatorIntegration:
                 return MagicMock(data=mock_response)
 
             mock_agent = MagicMock()
-            mock_agent.run.side_effect = mock_run
+            mock_agent.run = AsyncMock(side_effect=mock_run)
             mock_get_agent.return_value = mock_agent
 
             anthropic_annotator._setup_agent()
@@ -483,7 +484,7 @@ class TestAnthropicApiAnnotatorIntegration:
             mock_agent = MagicMock()
             mock_response = MagicMock()
             mock_response.tags = ["large_image_test"]
-            mock_agent.run.return_value = MagicMock(data=mock_response)
+            mock_agent.run = AsyncMock(return_value=MagicMock(data=mock_response))
             mock_get_agent.return_value = mock_agent
 
             anthropic_annotator._setup_agent()

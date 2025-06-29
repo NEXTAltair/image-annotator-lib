@@ -118,7 +118,7 @@ class PydanticAIWebAPIWrapper(BaseAnnotator):
 
         # Provider Managerを通して実行
         raw_outputs = ProviderManager.run_inference_with_model(
-            model_name=self.model_name, images=images, api_model_id=self._api_model_id
+            model_name=self.model_name, images_list=images, api_model_id=self._api_model_id
         )
 
         # 結果をAnnotationResult形式に変換
@@ -162,7 +162,7 @@ class PydanticAIWebAPIWrapper(BaseAnnotator):
             raise ValueError(f"Model {self.model_name} has no api_model_id configured")
 
         return ProviderManager.run_inference_with_model(
-            model_name=self.model_name, images=processed, api_model_id=self._api_model_id
+            model_name=self.model_name, images_list=processed, api_model_id=self._api_model_id
         )
 
     def _format_predictions(self, raw_outputs: list[dict]) -> list[dict]:
@@ -371,8 +371,10 @@ def annotate(
                     results_by_phash[phash_key][model_name] = error_entry.copy()
 
         except Exception as e:
-            # エラーハンドリング (エラー結果を results_by_phash に設定)
-            _handle_error(e, model_name, "", results_by_phash, 0, len(model_name_list))
+            # エラーハンドリング: このモデルでの処理は失敗とみなし、全画像にエラーを記録
+            logger.error(f"モデル '{model_name}' の処理中に致命的なエラー: {e}")
+            for phash in phash_list:
+                _handle_error(e, model_name, phash, results_by_phash, 0, 1)
 
     logger.info(f"全モデル ({len(model_name_list)}個) の評価完了。画像キー数: {len(results_by_phash)}")
     return results_by_phash

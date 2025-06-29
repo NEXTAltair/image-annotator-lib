@@ -29,6 +29,8 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
         """
         WebApiBaseAnnotator.__init__(self, model_name)
         PydanticAIAnnotatorMixin.__init__(self, model_name)
+        # 設定を初期化時に読み込む
+        self._load_configuration()
 
     def __enter__(self):
         """コンテキストマネージャーのエントリーポイント"""

@@ -66,7 +66,7 @@ class TestErrorHandlingAndFallbackIntegration:
         with patch('image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent') as mock_get_agent:
             with patch('image_annotator_lib.api._create_annotator_instance') as mock_load_model:
                 
-                def mock_agent_creation(model_name, api_model_id, api_key, config_hash=None):
+                def mock_agent_creation(model_name, api_model_id, api_key, config_data=None):
                     mock_agent = MagicMock()
                     
                     if "failing" in model_name:
@@ -136,7 +136,7 @@ class TestErrorHandlingAndFallbackIntegration:
         """Test handling of network timeouts and connection errors."""
         with patch('image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent') as mock_get_agent:
             
-            def mock_agent_with_timeout(model_name, api_model_id, api_key, config_hash=None):
+            def mock_agent_with_timeout(model_name, api_model_id, api_key, config_data=None):
                 mock_agent = MagicMock()
                 
                 # Simulate network timeout
@@ -172,7 +172,7 @@ class TestErrorHandlingAndFallbackIntegration:
             
             call_count = 0
             
-            def mock_agent_with_rate_limit(model_name, api_model_id, api_key, config_hash=None):
+            def mock_agent_with_rate_limit(model_name, api_model_id, api_key, config_data=None):
                 nonlocal call_count
                 mock_agent = MagicMock()
                 
@@ -398,7 +398,7 @@ class TestErrorHandlingAndFallbackIntegration:
                 # Create a scenario where one failure type doesn't affect others
                 failure_cascade_test = False
                 
-                def mock_agent_creation(model_name, api_model_id, api_key, config_hash=None):
+                def mock_agent_creation(model_name, api_model_id, api_key, config_data=None):
                     nonlocal failure_cascade_test
                     
                     mock_agent = MagicMock()
@@ -510,7 +510,7 @@ class TestErrorHandlingAndFallbackIntegration:
                 # Create a stress scenario with multiple error types
                 call_count = 0
                 
-                def mock_agent_with_various_errors(model_name, api_model_id, api_key, config_hash=None):
+                def mock_agent_with_various_errors(model_name, api_model_id, api_key, config_data=None):
                     nonlocal call_count
                     call_count += 1
                     

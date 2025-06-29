@@ -61,7 +61,7 @@ class TestProviderManagerCrossProviderIntegration:
         """Test sequential usage of different providers."""
         with patch('image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent') as mock_get_agent:
             # Mock successful agent creation and inference for all providers
-            def mock_agent_creation(model_name, api_model_id, api_key, config_hash=None):
+            def mock_agent_creation(model_name, api_model_id, api_key, config_data=None):
                 mock_agent = MagicMock()
                 
                 # Simulate different responses from different providers
@@ -108,7 +108,7 @@ class TestProviderManagerCrossProviderIntegration:
             # Track concurrent agent creation
             created_agents = {}
             
-            def mock_agent_creation(model_name, api_model_id, api_key, config_hash=None):
+            def mock_agent_creation(model_name, api_model_id, api_key, config_data=None):
                 provider_key = f"{model_name}_{api_model_id}"
                 
                 if provider_key not in created_agents:
@@ -157,7 +157,7 @@ class TestProviderManagerCrossProviderIntegration:
             agent_creation_calls = []
             shared_agents = {}
             
-            def mock_agent_creation(model_name, api_model_id, api_key, config_hash=None):
+            def mock_agent_creation(model_name, api_model_id, api_key, config_data=None):
                 call_signature = (model_name, api_model_id, api_key, config_hash)
                 agent_creation_calls.append(call_signature)
                 
@@ -206,7 +206,7 @@ class TestProviderManagerCrossProviderIntegration:
             provider_switches = []
             current_provider = None
             
-            def mock_agent_creation(model_name, api_model_id, api_key, config_hash=None):
+            def mock_agent_creation(model_name, api_model_id, api_key, config_data=None):
                 nonlocal current_provider
                 
                 # Determine provider from api_model_id
@@ -264,7 +264,7 @@ class TestProviderManagerCrossProviderIntegration:
         """Test that errors in one provider don't affect others."""
         with patch('image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent') as mock_get_agent:
             
-            def mock_agent_creation(model_name, api_model_id, api_key, config_hash=None):
+            def mock_agent_creation(model_name, api_model_id, api_key, config_data=None):
                 mock_agent = MagicMock()
                 
                 # Make anthropic provider fail
@@ -353,7 +353,7 @@ class TestProviderManagerCrossProviderIntegration:
             active_providers = set()
             max_concurrent_providers = 0
             
-            def mock_agent_creation(model_name, api_model_id, api_key, config_hash=None):
+            def mock_agent_creation(model_name, api_model_id, api_key, config_data=None):
                 # Determine provider
                 if "gpt" in api_model_id:
                     provider = "openai"

@@ -81,7 +81,7 @@ class TestMemoryManagementIntegration:
             provider_instances = {}
             call_count = 0
             
-            def mock_agent_creation(model_name, api_model_id, api_key, config_hash=None):
+            def mock_agent_creation(model_name, api_model_id, api_key, config_data=None):
                 nonlocal call_count
                 call_count += 1
                 
@@ -187,7 +187,7 @@ class TestMemoryManagementIntegration:
             cache_contents = {}
             max_cache_size = 2
             
-            def mock_get_cached_agent(model_name, api_model_id, api_key, config_hash=None):
+            def mock_get_cached_agent(model_name, api_model_id, api_key, config_data=None):
                 cache_key = f"{model_name}_{api_model_id}_{api_key}"
                 
                 if cache_key in cache_contents:
@@ -303,7 +303,7 @@ class TestMemoryManagementIntegration:
                 concurrent_webapi_calls = []
                 concurrent_local_loads = []
                 
-                def mock_agent_creation(model_name, api_model_id, api_key, config_hash=None):
+                def mock_agent_creation(model_name, api_model_id, api_key, config_data=None):
                     concurrent_webapi_calls.append({
                         "time": time.time(),
                         "model": model_name,
@@ -369,7 +369,7 @@ class TestMemoryManagementIntegration:
             # Track cache state
             cache_state = {"agents": {}, "cleared": False}
             
-            def mock_get_cached_agent(model_name, api_model_id, api_key, config_hash=None):
+            def mock_get_cached_agent(model_name, api_model_id, api_key, config_data=None):
                 cache_key = f"{model_name}_{api_model_id}"
                 
                 if cache_key not in cache_state["agents"]:
@@ -424,7 +424,7 @@ class TestMemoryManagementIntegration:
                     "peak_local": 0
                 }
                 
-                def mock_agent_creation(model_name, api_model_id, api_key, config_hash=None):
+                def mock_agent_creation(model_name, api_model_id, api_key, config_data=None):
                     resource_usage["webapi_agents"] += 1
                     resource_usage["peak_webapi"] = max(
                         resource_usage["peak_webapi"], 

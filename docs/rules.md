@@ -4,8 +4,8 @@
 ## 3. 300+ユーザー使用の安定版ベース、**アジャイル**ワークフロー準拠。
 ## 変更履歴:
 1. (a) Cursor、(b) CLINE、(c) RooCode、(d) 他からのルール分離･独立性は非常に正確。
-    a. 1ファイル定義、再利用にシンボリックリンク作成。
-    b. Cursor用`.cursor/rules/`に元ファイル。`.roo/`、`.clinerules/`は元ファイルへのシンボリックリンク。
+    a. 1ファイル定義、再利用にリンク作成。
+    b. Cursor用`.cursor/rules/`に元ファイル。`.roo/` は元ファイルへのリンク。
 
 2. (a) RooCode、(b) Cursorカスタムモードでトークン節約。デフォルト上書き用に広範キュレーション済みシステムプロンプト。
 3. Roo Code/CLINE最新カスタムプロンプト構文準拠に更新。
@@ -197,29 +197,29 @@ Cursor/CLINE/RooCode/他使用しコーディング開始のみ。
 
 (最初のプロンプトとして上記コピー!)
 
-### シンボリックリンク(自動設定済):
+### リンク(自動設定済):
 
 完了済、何も不要。参考情報。
 
 #### .roo/
-1. `.roo/rules/memory.mdc`は`.cursor/rules/memeory.mdc`へのシンボリックリンク有。
-2. `.roo/rules/directory-structure.mdc`は`.cursor/rules/directory-structure.mdc`へのシンボリックリンク有。
-3. `.roo/rules/rules.mdc`は`.cursor/rules/rules.mdc`へのシンボリックリンク有。
+1. `.roo/rules/memory.mdc`は`.cursor/rules/memeory.mdc`へのリンク有。
+2. `.roo/rules/directory-structure.mdc`は`.cursor/rules/directory-structure.mdc`へのリンク有。
+3. `.roo/rules/rules.mdc`は`.cursor/rules/rules.mdc`へのリンク有。
 モード固有指示:
-4. `.roo/rules-architect/plan.mdc`は`.cursor/rules/plan.mdc`へのシンボリックリンク有。
-5. `.roo/rules-code/implement.mdc`は`.cursor/rules/implement.mdc`へのシンボリックリンク有。
-6. `.roo/rules-debug/debug.mdc`は`.cursor/rules/debug.mdc`へのシンボリックリンク有。
+4. `.roo/rules-architect/plan.mdc`は`.cursor/rules/plan.mdc`へのリンク有。
+5. `.roo/rules-code/implement.mdc`は`.cursor/rules/implement.mdc`へのリンク有。
+6. `.roo/rules-debug/debug.mdc`は`.cursor/rules/debug.mdc`へのリンク有。
 
 #### .clinerules/
-1. `.clinerules/rules/memory.mdc`は`.cursor/rules/memeory.mdc`へのシンボリックリンク有。
-2. `.clinerules/rules/directory-structure.mdc`は`.cursor/rules/directory-structure.mdc`へのシンボリックリンク有。
-3. `.clinerules/rules/rules.mdc`は`.cursor/rules/rules.mdc`へのシンボリックリンク有。
+1. `.clinerules/rules/memory.mdc`は`.cursor/rules/memeory.mdc`へのリンク有。
+2. `.clinerules/rules/directory-structure.mdc`は`.cursor/rules/directory-structure.mdc`へのリンク有。
+3. `.clinerules/rules/rules.mdc`は`.cursor/rules/rules.mdc`へのリンク有。
 モード固有指示:
-4. `.roo/rules-architect/plan.mdc`は`.clinerules/PLAN/plan.mdc`へのシンボリックリンク有。
-5. `.roo/rules-code/implement.mdc`は`.clinerules/ACT/implement.mdc`へのシンボリックリンク有。
-6. `.roo/rules-debug/debug.mdc`は`.clinerules/ACT/debug.mdc`へのシンボリックリンク有。
+4. `.roo/rules-architect/plan.mdc`は`.clinerules/PLAN/plan.mdc`へのリンク有。
+5. `.roo/rules-code/implement.mdc`は`.clinerules/ACT/implement.mdc`へのリンク有。
+6. `.roo/rules-debug/debug.mdc`は`.clinerules/ACT/debug.mdc`へのリンク有。
 ---
-**注意1**: *これらシンボリックリンク利点は、インスタンス1つのみ、いずれか編集で全更新。*
+**注意1**: *これらリンク利点は、インスタンス1つのみ、いずれか編集で全更新。*
 **注意2**: *ディレクトリ`.cursor/rules/`は元ファイル含むため、**削除禁止**。**Cursor**未使用でも保持。*
 
 
