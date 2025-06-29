@@ -142,13 +142,13 @@ def test_initialize_registry_continues_if_fetch_api_fails(
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.core.config.config_registry.add_default_setting")
+@patch("image_annotator_lib.core.registry.config_registry")
 @patch("image_annotator_lib.core.registry._gather_available_classes")
 @patch("image_annotator_lib.core.registry.load_available_api_models")
 def test_update_config_with_api_models_success(
     mock_load_api_models,
     mock_gather_classes,
-    mock_add_setting,
+    mock_config_registry,
 ):
     """Test _update_config_with_api_models successfully calls add_default_setting."""
     mock_load_api_models.return_value = MOCK_API_MODELS
@@ -172,19 +172,19 @@ def test_update_config_with_api_models_success(
         # Missing provider model is skipped, invalid format is skipped
     ]
     # Use assert_has_calls with any_order=True as dict iteration order isn't guaranteed
-    mock_add_setting.assert_has_calls(expected_calls, any_order=True)
+    mock_config_registry.add_default_setting.assert_has_calls(expected_calls, any_order=True)
     # Check total calls, excluding skipped models
-    assert mock_add_setting.call_count == len(expected_calls)
+    assert mock_config_registry.add_default_setting.call_count == len(expected_calls)
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.core.config.config_registry.add_default_setting")
+@patch("image_annotator_lib.core.registry.config_registry")
 @patch("image_annotator_lib.core.registry._gather_available_classes")
 @patch("image_annotator_lib.core.registry.load_available_api_models")
 def test_update_config_with_api_models_no_api_data(
     mock_load_api_models,
     mock_gather_classes,
-    mock_add_setting,
+    mock_config_registry,
 ):
     """Test _update_config_with_api_models when no API models are loaded."""
     mock_load_api_models.return_value = {}
@@ -193,17 +193,17 @@ def test_update_config_with_api_models_no_api_data(
 
     mock_load_api_models.assert_called_once()
     mock_gather_classes.assert_not_called()  # Should not gather if no models
-    mock_add_setting.assert_not_called()  # Should not add settings
+    mock_config_registry.add_default_setting.assert_not_called()  # Should not add settings
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.core.config.config_registry.add_default_setting")
+@patch("image_annotator_lib.core.registry.config_registry")
 @patch("image_annotator_lib.core.registry._gather_available_classes")
 @patch("image_annotator_lib.core.registry.load_available_api_models")
 def test_update_config_with_api_models_no_classes(
     mock_load_api_models,
     mock_gather_classes,
-    mock_add_setting,
+    mock_config_registry,
 ):
     """Test _update_config_with_api_models when no annotator classes are found."""
     mock_load_api_models.return_value = MOCK_API_MODELS
@@ -223,8 +223,8 @@ def test_update_config_with_api_models_no_classes(
         call("Unknown Model", "class", "OpenRouterApiAnnotator"),
         call("Unknown Model", "max_output_tokens", 1800),
     ]
-    mock_add_setting.assert_has_calls(expected_calls, any_order=True)
-    assert mock_add_setting.call_count == len(expected_calls)
+    mock_config_registry.add_default_setting.assert_has_calls(expected_calls, any_order=True)
+    assert mock_config_registry.add_default_setting.call_count == len(expected_calls)
 
 
 # --- Tests for _find_annotator_class_by_provider ---
