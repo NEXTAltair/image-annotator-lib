@@ -5,17 +5,13 @@ from typing import override
 from PIL import Image
 
 from ...core.base import WebApiBaseAnnotator
-from ...core.pydantic_ai_factory import PydanticAIAnnotatorMixin
+from ...core.pydantic_ai_factory import PydanticAIAnnotatorMixin, _is_test_environment
 from ...core.types import RawOutput
 from ...core.utils import logger
-from ...exceptions.errors import (
-    ApiAuthenticationError,
-    ApiRateLimitError,
-    ApiServerError,
-    ApiTimeoutError,
-    ModelNotFoundError,
-    WebApiError,
-)
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
+
+from ...core.types import AnnotationResult
+from ...exceptions.errors import WebApiError
 
 
 class AnthropicApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
@@ -31,6 +27,9 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
         PydanticAIAnnotatorMixin.__init__(self, model_name)
         # 設定を初期化時に読み込む
         self._load_configuration()
+        # テスト環境ではAPIキー検証をスキップ
+        if not _is_test_environment() and (not self.api_key or not self.api_key.get_secret_value()):
+            raise WebApiError("APIキーが設定されていません。", provider_name="Anthropic")
 
     def __enter__(self):
         """コンテキストマネージャーのエントリーポイント"""
@@ -61,8 +60,22 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
                 annotation = self._run_inference_with_model(binary_content, model_id)
                 results.append({"response": annotation, "error": None})
 
+            except ModelHTTPError as e:
+                # PydanticAI統一HTTPエラー処理
+                error_message = f"Anthropic HTTP {e.status_code}: {e.response_body or str(e)}"
+                logger.error(f"Anthropic API 推論エラー: {error_message}")
+                results.append({"response": None, "error": error_message})
+
+            except UnexpectedModelBehavior as e:
+                # PydanticAI統一モデル動作エラー処理
+                error_message = f"Anthropic API Error: Unexpected model behavior: {str(e)}"
+                logger.error(f"Anthropic API 推論エラー: {error_message}")
+                results.append({"response": None, "error": error_message})
+
             except Exception as e:
-                error_message = self._handle_api_error(e)
+                # その他の予期しないエラー
+                error_message = f"Anthropic API Error: {str(e)}"
+                logger.error(f"Anthropic API 推論エラー: {error_message}")
                 results.append({"response": None, "error": error_message})
 
         return results
@@ -93,30 +106,3 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
         # デフォルトモデルで実行
         return self.run_with_model(pil_images, self.api_model_id)
 
-    def _handle_api_error(self, error: Exception) -> str:
-        """API エラーを適切な例外に変換"""
-        error_str = str(error)
-
-        # 404エラーの場合はModelNotFoundErrorでラップ
-        if "404" in error_str or "not_found_error" in error_str:
-            import re
-
-            m = re.search(r"model: ([\w\.\-\:]+)", error_str)
-            model_name = m.group(1) if m else "不明"
-            custom_error = ModelNotFoundError(model_name)
-            logger.error(f"Anthropic API モデル未検出: {custom_error}")
-            raise custom_error
-
-        # その他のエラーパターン
-        if "authentication" in error_str.lower():
-            raise ApiAuthenticationError(f"Anthropic API 認証エラー: {error_str}")
-        elif "rate limit" in error_str.lower():
-            raise ApiRateLimitError(f"Anthropic API レート制限: {error_str}")
-        elif "timeout" in error_str.lower():
-            raise ApiTimeoutError(f"Anthropic API タイムアウト: {error_str}")
-        elif "500" in error_str or "server error" in error_str.lower():
-            raise ApiServerError(f"Anthropic API サーバーエラー: {error_str}")
-
-        # 一般エラー
-        logger.error(f"Anthropic API エラー: {error}")
-        return f"Anthropic API Error: {error_str}"

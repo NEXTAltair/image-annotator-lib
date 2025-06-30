@@ -4,13 +4,9 @@ from typing import override
 
 from PIL import Image
 
-from image_annotator_lib.exceptions.errors import (
-    ApiAuthenticationError,
-    ApiRateLimitError,
-    ApiServerError,
-    ApiTimeoutError,
-    WebApiError,
-)
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
+
+from image_annotator_lib.exceptions.errors import WebApiError
 
 from ...core.base import WebApiBaseAnnotator
 from ...core.config import config_registry
@@ -74,8 +70,22 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
                 annotation = self._run_inference_with_model(binary_content, model_id)
                 results.append({"response": annotation, "error": None})
 
+            except ModelHTTPError as e:
+                # PydanticAI統一HTTPエラー処理
+                error_message = f"OpenRouter HTTP {e.status_code}: {e.response_body or str(e)}"
+                logger.error(f"OpenRouter API 推論エラー: {error_message}")
+                results.append({"response": None, "error": error_message})
+
+            except UnexpectedModelBehavior as e:
+                # PydanticAI統一モデル動作エラー処理
+                error_message = f"OpenRouter API Error: Unexpected model behavior: {str(e)}"
+                logger.error(f"OpenRouter API 推論エラー: {error_message}")
+                results.append({"response": None, "error": error_message})
+
             except Exception as e:
-                error_message = self._handle_api_error(e)
+                # その他の予期しないエラー
+                error_message = f"OpenRouter API Error: {str(e)}"
+                logger.error(f"OpenRouter API 推論エラー: {error_message}")
                 results.append({"response": None, "error": error_message})
 
         return results
@@ -106,20 +116,3 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
         # デフォルトモデルで実行
         return self.run_with_model(pil_images, self.api_model_id)
 
-    def _handle_api_error(self, error: Exception) -> str:
-        """API エラーを適切な例外に変換"""
-        error_str = str(error)
-
-        # OpenRouter/OpenAI 互換エラーパターン
-        if "401" in error_str or "authentication" in error_str.lower():
-            raise ApiAuthenticationError(f"OpenRouter API 認証エラー: {error_str}")
-        elif "429" in error_str or "rate limit" in error_str.lower():
-            raise ApiRateLimitError(f"OpenRouter API レート制限: {error_str}")
-        elif "timeout" in error_str.lower():
-            raise ApiTimeoutError(f"OpenRouter API タイムアウト: {error_str}")
-        elif "500" in error_str or "server error" in error_str.lower():
-            raise ApiServerError(f"OpenRouter API サーバーエラー: {error_str}")
-
-        # 一般エラー
-        logger.error(f"OpenRouter API エラー: {error}")
-        return f"OpenRouter API Error: {error_str}"

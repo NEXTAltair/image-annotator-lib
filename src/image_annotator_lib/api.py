@@ -116,15 +116,33 @@ class PydanticAIWebAPIWrapper(BaseAnnotator):
         if not self._api_model_id:
             raise ValueError(f"Model {self.model_name} has no api_model_id configured")
 
-        # Provider Managerを通して実行
-        raw_outputs = ProviderManager.run_inference_with_model(
-            model_name=self.model_name, images_list=images, api_model_id=self._api_model_id
-        )
+        try:
+            # Provider Managerを通して実行
+            raw_outputs = ProviderManager.run_inference_with_model(
+                model_name=self.model_name, images_list=images, api_model_id=self._api_model_id
+            )
+        except Exception as e:
+            # ProviderManagerからの例外をキャッチし、全画像にエラー結果を返す
+            logger.error(f"ProviderManagerでの推論中にエラーが発生: {e}", exc_info=True)
+            error_message = f"Failed to run inference: {e}"
+            return [
+                AnnotationResult(
+                    phash=phash_list[i] if i < len(phash_list) else None,
+                    tags=[],
+                    formatted_output=None,
+                    error=error_message,
+                )
+                for i in range(len(images))
+            ]
 
         # 結果をAnnotationResult形式に変換
         results = []
         for i, raw_output in enumerate(raw_outputs):
             phash = phash_list[i] if i < len(phash_list) else None
+
+            # raw_outputが文字列の場合(エラーメッセージ)、辞書に変換
+            if isinstance(raw_output, str):
+                raw_output = {"error": raw_output}
 
             if raw_output.get("error"):
                 result = AnnotationResult(
@@ -281,11 +299,12 @@ def _handle_error(
 
 def list_available_annotators() -> list[str]:
     """利用可能なアノテーターモデル名のリストを返す
-    
+
     Returns:
         利用可能なモデル名のリスト
     """
     from .core.registry import list_available_annotators as _list_available_annotators
+
     return _list_available_annotators()
 
 
@@ -372,9 +391,14 @@ def annotate(
 
         except Exception as e:
             # エラーハンドリング: このモデルでの処理は失敗とみなし、全画像にエラーを記録
-            logger.error(f"モデル '{model_name}' の処理中に致命的なエラー: {e}")
-            for phash in phash_list:
-                _handle_error(e, model_name, phash, results_by_phash, 0, 1)
+            logger.error(f"モデル '{model_name}' の処理中に致命的なエラー: {e}", exc_info=True)
+            error_message = f"{type(e).__name__}: {e}"
+            # predictが例外を投げた場合に備え、全画像にエラー結果を作成
+            error_results = [
+                AnnotationResult(phash=phash, tags=[], formatted_output=None, error=error_message)
+                for phash in phash_list
+            ]
+            _process_model_results(model_name, error_results, results_by_phash)
 
     logger.info(f"全モデル ({len(model_name_list)}個) の評価完了。画像キー数: {len(results_by_phash)}")
     return results_by_phash

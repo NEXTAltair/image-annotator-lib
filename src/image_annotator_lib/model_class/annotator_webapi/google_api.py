@@ -6,12 +6,9 @@ from ...core.base import WebApiBaseAnnotator
 from ...core.pydantic_ai_factory import PydanticAIAnnotatorMixin
 from ...core.types import RawOutput
 from ...core.utils import logger
-from ...exceptions.errors import (
-    ApiAuthenticationError,
-    ApiRateLimitError,
-    ApiServerError,
-    ApiTimeoutError,
-)
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
+
+from ...exceptions.errors import WebApiError
 
 
 class GoogleApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
@@ -71,35 +68,32 @@ class GoogleApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
                     annotation = self._run_inference_with_model(binary_content, model_id)
                     results.append({"response": annotation, "error": None})
 
-                except Exception as e:
-                    error_message = self._handle_api_error(e)
-                    results.append({"response": None, "error": error_message})
+                except ModelHTTPError as e:
+                    # PydanticAI統一HTTPエラー処理
+                    error_message = f"Google HTTP {e.status_code}: {e.response_body or str(e)}"
                     logger.error(f"Google API 推論エラー: {error_message}")
+                    results.append({"response": None, "error": error_message})
+
+                except UnexpectedModelBehavior as e:
+                    # PydanticAI統一モデル動作エラー処理
+                    error_message = f"Google API Error: Unexpected model behavior: {str(e)}"
+                    logger.error(f"Google API 推論エラー: {error_message}")
+                    results.append({"response": None, "error": error_message})
+
+                except Exception as e:
+                    # その他の予期しないエラー
+                    error_message = f"Google API Error: {str(e)}"
+                    logger.error(f"Google API 推論エラー: {error_message}")
+                    results.append({"response": None, "error": error_message})
 
             return results
 
         except Exception as e:
             logger.error(f"Google API run_with_model エラー: {e}")
             # 全画像にエラーを返す
-            error_message = self._handle_api_error(e)
+            error_message = f"Google API Error: {str(e)}"
             return [{"response": None, "error": error_message} for _ in images]
 
-    def _handle_api_error(self, error: Exception) -> str:
-        """Google APIエラーを統一的にハンドリング"""
-        error_message = f"Google API Error: {error!s}"
-
-        # Google API固有のエラーパターン
-        error_str = str(error).lower()
-        if "authentication" in error_str or "401" in error_str:
-            raise ApiAuthenticationError(f"Google API認証エラー: {error}", provider_name="google")
-        elif "rate limit" in error_str or "quota" in error_str or "429" in error_str:
-            raise ApiRateLimitError(f"Google APIレート制限: {error}", provider_name="google")
-        elif "timeout" in error_str:
-            raise ApiTimeoutError(f"Google APIタイムアウト: {error}", provider_name="google")
-        elif "server" in error_str or "500" in error_str or "502" in error_str or "503" in error_str:
-            raise ApiServerError(f"Google APIサーバーエラー: {error}", provider_name="google")
-        else:
-            return error_message
 
     @override
     def _preprocess_images(self, images: list[Image.Image]) -> list[Image.Image]:

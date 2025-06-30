@@ -1,11 +1,14 @@
 # tests/integration/test_provider_manager_integration.py
 import pytest
+
 from image_annotator_lib.core.provider_manager import ProviderManager
+
 
 # A placeholder for checking API key availability
 def api_key_available(provider: str):
     """Placeholder function to check if an API key is available."""
     return False
+
 
 class TestProviderManagerIntegration:
     """
@@ -22,7 +25,12 @@ class TestProviderManagerIntegration:
             ("test_model_explicit_case", "any_id", {"provider": "Anthropic"}, "anthropic"),
             # 2. Provider from model_id prefix
             ("test_model_prefix", "openai:gpt-4", {}, "openai"),
-            ("test_model_prefix_edge", "google:gemini-pro", {"provider": "anthropic"}, "anthropic"), # explicit config wins
+            (
+                "test_model_prefix_edge",
+                "google:gemini-pro",
+                {"provider": "anthropic"},
+                "anthropic",
+            ),  # explicit config wins
             # 3. Provider from model name pattern
             ("test_model_pattern", "gpt-4-turbo", {}, "openai"),
             ("test_model_pattern", "claude-3-opus-20240229", {}, "anthropic"),

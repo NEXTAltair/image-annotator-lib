@@ -41,7 +41,7 @@ class ProviderManager:
         cls, model_name: str, images_list: list[Image.Image], api_model_id: str
     ) -> dict[str, AnnotationResult]:
         """Run inference with specified model ID using provider sharing
-        
+
         Returns:
             Dict mapping image phash to AnnotationResult
         """
@@ -54,41 +54,32 @@ class ProviderManager:
 
         # Execute inference
         raw_outputs = provider_instance.run_with_model(model_name, images_list, api_model_id)
-        
+
         # Convert to phash-based dict format expected by tests
         results = {}
         for i, raw_output in enumerate(raw_outputs):
             # Generate phash for each image
             image_phash = calculate_phash(images_list[i]) if i < len(images_list) else f"unknown_image_{i}"
-            
+
             # Convert RawOutput to AnnotationResult format
             if raw_output.get("error"):
                 annotation_result = AnnotationResult(
-                    phash=image_phash,
-                    tags=[],
-                    formatted_output=None,
-                    error=raw_output["error"]
+                    phash=image_phash, tags=[], formatted_output=None, error=raw_output["error"]
                 )
             else:
                 response = raw_output.get("response")
                 if response:
                     tags = getattr(response, "tags", []) if hasattr(response, "tags") else []
                     annotation_result = AnnotationResult(
-                        phash=image_phash,
-                        tags=tags,
-                        formatted_output=response,
-                        error=None
+                        phash=image_phash, tags=tags, formatted_output=response, error=None
                     )
                 else:
                     annotation_result = AnnotationResult(
-                        phash=image_phash,
-                        tags=[],
-                        formatted_output=None,
-                        error="No response from provider"
+                        phash=image_phash, tags=[], formatted_output=None, error="No response from provider"
                     )
-            
+
             results[image_phash] = annotation_result
-        
+
         return results
 
     @classmethod

@@ -6,13 +6,9 @@ from ...core.base import WebApiBaseAnnotator
 from ...core.pydantic_ai_factory import PydanticAIAnnotatorMixin
 from ...core.types import RawOutput
 from ...core.utils import logger
-from ...exceptions.errors import (
-    ApiAuthenticationError,
-    ApiRateLimitError,
-    ApiServerError,
-    ApiTimeoutError,
-    InsufficientCreditsError,
-)
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
+
+from ...exceptions.errors import WebApiError
 
 
 class OpenAIApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
@@ -70,37 +66,32 @@ class OpenAIApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
                     annotation = self._run_inference_with_model(binary_content, model_id)
                     results.append({"response": annotation, "error": None})
 
-                except Exception as e:
-                    error_message = self._handle_api_error(e)
-                    results.append({"response": None, "error": error_message})
+                except ModelHTTPError as e:
+                    # PydanticAI統一HTTPエラー処理
+                    error_message = f"OpenAI HTTP {e.status_code}: {e.response_body or str(e)}"
                     logger.error(f"OpenAI API 推論エラー: {error_message}")
+                    results.append({"response": None, "error": error_message})
+
+                except UnexpectedModelBehavior as e:
+                    # PydanticAI統一モデル動作エラー処理
+                    error_message = f"OpenAI API Error: Unexpected model behavior: {str(e)}"
+                    logger.error(f"OpenAI API 推論エラー: {error_message}")
+                    results.append({"response": None, "error": error_message})
+
+                except Exception as e:
+                    # その他の予期しないエラー
+                    error_message = f"OpenAI API Error: {str(e)}"
+                    logger.error(f"OpenAI API 推論エラー: {error_message}")
+                    results.append({"response": None, "error": error_message})
 
             return results
 
         except Exception as e:
             logger.error(f"OpenAI API run_with_model エラー: {e}")
             # 全画像にエラーを返す
-            error_message = self._handle_api_error(e)
+            error_message = f"OpenAI API Error: {str(e)}"
             return [{"response": None, "error": error_message} for _ in images]
 
-    def _handle_api_error(self, error: Exception) -> str:
-        """OpenAI APIエラーを統一的にハンドリング"""
-        error_message = f"OpenAI API Error: {error!s}"
-
-        # OpenAI API固有のエラーパターン
-        error_str = str(error).lower()
-        if "authentication" in error_str or "401" in error_str:
-            raise ApiAuthenticationError(f"OpenAI API認証エラー: {error}", provider_name="openai")
-        elif "rate limit" in error_str or "429" in error_str:
-            raise ApiRateLimitError(f"OpenAI APIレート制限: {error}", provider_name="openai")
-        elif "insufficient credits" in error_str or "402" in error_str:
-            raise InsufficientCreditsError(f"OpenAI APIクレジット不足: {error}", provider_name="openai")
-        elif "timeout" in error_str:
-            raise ApiTimeoutError(f"OpenAI APIタイムアウト: {error}", provider_name="openai")
-        elif "server" in error_str or "500" in error_str or "502" in error_str or "503" in error_str:
-            raise ApiServerError(f"OpenAI APIサーバーエラー: {error}", provider_name="openai")
-        else:
-            return error_message
 
     @override
     def _preprocess_images(self, images: list[Image.Image]) -> list[Image.Image]:

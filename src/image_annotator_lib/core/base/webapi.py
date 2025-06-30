@@ -1,25 +1,14 @@
 """Web API を利用するアノテーターの基底クラス。"""
 
-import asyncio
 import json
 import re
-import traceback
 from abc import abstractmethod
-from typing import Any, NoReturn, Self, override
+from typing import Any, Self, override
 
 from PIL import Image
 
 # --- ローカルインポート ---
-from ...exceptions.errors import (
-    ApiAuthenticationError,
-    ApiRateLimitError,
-    ApiRequestError,
-    ApiServerError,
-    ApiTimeoutError,
-    ConfigurationError,
-    InsufficientCreditsError,
-    WebApiError,
-)
+from ...exceptions.errors import ConfigurationError
 from ..config import config_registry
 from ..model_factory import prepare_web_api_components
 from ..types import AnnotationSchema, RawOutput, WebApiComponents, WebApiFormattedOutput
@@ -182,62 +171,6 @@ class WebApiBaseAnnotator(BaseAnnotator):
             time.sleep(wait_time)
         self.last_request_time = time.time()
 
-    def _handle_api_error(self, e: Exception) -> NoReturn:
-        """API エラーを捕捉し、適切なカスタム例外を発生させます。
-
-        Args:
-            e: 発生した例外。
-
-        Raises:
-            ApiAuthenticationError: API認証に失敗した場合 (401)。
-            InsufficientCreditsError: クレジット不足の場合 (402)。
-            ApiRateLimitError: APIのレート制限に達した場合 (429)。
-            ApiRequestError: リクエストの形式または内容に問題があった場合 (400)。
-            ApiServerError: APIサーバーで5xx系のエラーが発生した場合。
-            ApiTimeoutError: APIリクエストがタイムアウトした場合。
-            WebApiError: その他のAPI関連エラーの場合。
-            ConfigurationError: provider_name 属性が設定されていない場合。
-        """
-        error_message = str(e)
-        logger.error(f"API エラーが発生しました: {error_message}")
-        logger.debug(traceback.format_exc())
-
-        # provider_name 属性の存在確認
-        if not hasattr(self, "provider_name") or not self.provider_name:
-            raise ConfigurationError(
-                f"Annotatorクラス ({self.__class__.__name__}) に 'provider_name' 属性が設定されていません。"
-            )
-        provider_name = self.provider_name
-
-        # HTTPステータスコードに基づくエラーハンドリング
-        if hasattr(e, "status_code"):
-            status_code = getattr(e, "status_code", 0)
-            if status_code == 401:
-                raise ApiAuthenticationError(provider_name=provider_name) from e
-            elif status_code == 402:
-                raise InsufficientCreditsError(provider_name=provider_name) from e
-            elif status_code == 429:
-                retry_after_str = getattr(e, "retry_after", "60")  # デフォルト60秒
-                try:
-                    retry_after = int(retry_after_str)
-                except ValueError:
-                    retry_after = 60  # パース失敗時もデフォルト値
-                raise ApiRateLimitError(provider_name=provider_name, retry_after=retry_after) from e
-            elif status_code == 400:
-                raise ApiRequestError(error_message, provider_name=provider_name) from e
-            elif 500 <= status_code < 600:
-                raise ApiServerError(
-                    error_message, provider_name=provider_name, status_code=status_code
-                ) from e
-
-        # タイムアウトエラーの判定を強化
-        if isinstance(e, TimeoutError | asyncio.TimeoutError) or "timeout" in error_message.lower():
-            raise ApiTimeoutError(provider_name=provider_name) from e
-
-        # 上記のいずれにも当てはまらない場合、汎用のWebApiErrorを送出
-        raise WebApiError(
-            f"処理中に予期せぬエラーが発生しました: {error_message}", provider_name=provider_name
-        ) from e
 
     def _parse_common_json_response(self, text_content: str | dict[str, Any]) -> WebApiFormattedOutput:
         """共通のJSONレスポンス文字列を解析し、WebApiFormattedOutputを生成するヘルパー。

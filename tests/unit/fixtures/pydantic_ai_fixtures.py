@@ -1,11 +1,12 @@
 """
 PydanticAI 公式テスト戦略に基づく共有フィクスチャ
 """
+
 import pytest
 from pydantic_ai import models
 from pydantic_ai.messages import ModelResponse, TextPart
-from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.test import TestModel
 
 # グローバル設定で実APIへのリクエストを全面的に禁止
 models.ALLOW_MODEL_REQUESTS = False

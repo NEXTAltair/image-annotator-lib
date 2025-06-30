@@ -206,7 +206,7 @@ class TestAPIWrapperBackwardCompatibility:
 class TestUnifiedErrorHandling:
     """統一エラーハンドリングテスト"""
 
-    def test_unified_error_handling(self):
+    def test_unified_error_handling(self, managed_config_registry, api_key_manager):
         """統一エラーハンドリングテスト"""
         from image_annotator_lib.exceptions.errors import (
             ApiAuthenticationError,
@@ -242,7 +242,18 @@ class TestUnifiedErrorHandling:
             module = __import__(module_path, fromlist=[class_name])
             annotator_class = getattr(module, class_name)
 
-            annotator = annotator_class("test-model")
+            # テスト用の設定をセットアップ
+            test_model_name = f"test-{provider_name.lower()}-model"
+            managed_config_registry.set(
+                test_model_name,
+                {
+                    "api_key": api_key_manager.get_key(provider_name.lower()),
+                    "api_model_id": f"{provider_name.lower()}-test-model",
+                    "class": class_name,
+                },
+            )
+
+            annotator = annotator_class(test_model_name)
 
             # 各エラータイプのテスト
             for error_message, expected_exception in error_test_cases:

@@ -2,11 +2,9 @@
 ML系ライブラリの統一モック
 """
 
-import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # Removed automatic session-scope mocking of all ML libraries
 # This was causing "mock for the sake of mocking" issues

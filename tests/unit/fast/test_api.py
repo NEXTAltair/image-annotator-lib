@@ -50,7 +50,7 @@ def clear_instance_registry():  # Renamed fixture, removed mock resets
 def test_create_web_api_instance_success(mock_is_pydantic, mock_get_cls_reg):
     """Test successful instantiation for a Web API annotator."""
     model_name_short = "Gemini 1.5 Pro"
-    
+
     instance = api._create_annotator_instance(model_name_short)
 
     # Test actual behavior, not mock calls
@@ -68,7 +68,7 @@ def test_create_local_model_instance_success(mock_get_cls_reg):
     with patch.object(RealLocalAnnotatorClass, "__init__", return_value=None):
         instance = api._create_annotator_instance(model_name)
 
-    # Test actual behavior, not mock calls  
+    # Test actual behavior, not mock calls
     assert isinstance(instance, RealLocalAnnotatorClass)
 
 

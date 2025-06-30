@@ -1,8 +1,11 @@
 # tests/integration/test_pydantic_ai_factory_integration.py
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
+
 from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
 from image_annotator_lib.core.webapi_agent_cache import WebApiAgentCache
+
 
 @pytest.fixture(autouse=True)
 def manage_factory_cache():
@@ -10,7 +13,7 @@ def manage_factory_cache():
     # Clear caches before the test
     PydanticAIProviderFactory._providers.clear()
     WebApiAgentCache.clear_cache()
-    
+
     # Store original max size
     original_max_size = WebApiAgentCache._MAX_CACHE_SIZE
 
@@ -45,11 +48,11 @@ class TestPydanticAIFactoryIntegration:
         agent2 = PydanticAIProviderFactory.get_cached_agent("model2", "openai:gpt-4", "key2")
 
         assert id(agent1) != id(agent2)
-        
+
         # --- Step 2: Verify they are cached ---
         agent1_cached = PydanticAIProviderFactory.get_cached_agent("model1", "openai:gpt-4", "key1")
         assert agent1_cached is agent1
-        
+
         cache_info = WebApiAgentCache.get_cache_info()
         assert cache_info["cache_size"] == 2
 
@@ -59,14 +62,13 @@ class TestPydanticAIFactoryIntegration:
         # --- Step 4: Add a new agent to trigger eviction ---
         agent3 = PydanticAIProviderFactory.get_cached_agent("model3", "openai:gpt-4", "key3")
         assert id(agent3) != id(agent1)
-        
+
         cache_info = WebApiAgentCache.get_cache_info()
         assert cache_info["cache_size"] == 2
-        
+
         # --- Step 5: Verify that the least recently used (agent2) was evicted ---
         agent2_new = PydanticAIProviderFactory.get_cached_agent("model2", "openai:gpt-4", "key2")
         assert id(agent2_new) != id(agent2)
-
 
     @patch("image_annotator_lib.core.pydantic_ai_factory.Agent")
     @pytest.mark.integration
@@ -98,7 +100,6 @@ class TestPydanticAIFactoryIntegration:
         )
         assert agent2 is not agent1
 
-
     @patch("image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_provider")
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -106,11 +107,7 @@ class TestPydanticAIFactoryIntegration:
         """
         Tests special handling for OpenRouter, such as custom headers and base_url.
         """
-        config = {
-            "provider": "openrouter",
-            "referer": "http://my-app.com",
-            "app_name": "My Great App"
-        }
+        config = {"provider": "openrouter", "referer": "http://my-app.com", "app_name": "My Great App"}
         managed_config_registry.set("openrouter_model", config)
 
         PydanticAIProviderFactory.get_cached_agent(
