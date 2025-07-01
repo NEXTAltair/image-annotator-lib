@@ -8,7 +8,7 @@ from typing import Any, Self, override
 from PIL import Image
 
 # --- ローカルインポート ---
-from ...exceptions.errors import ConfigurationError
+from ...exceptions.errors import ConfigurationError, ApiAuthenticationError
 from ..config import config_registry
 from ..model_factory import prepare_web_api_components
 from ..types import AnnotationSchema, RawOutput, WebApiComponents, WebApiFormattedOutput

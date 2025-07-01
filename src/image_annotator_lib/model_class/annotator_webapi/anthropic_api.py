@@ -56,9 +56,10 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
             try:
                 self._wait_for_rate_limit()
 
-                # 指定されたモデルIDで推論実行
-                annotation = self._run_inference_with_model(binary_content, model_id)
-                results.append({"response": annotation, "error": None})
+                # The result from agent.run is a ModelResponse object.
+                # The actual content is in the first part of the response.
+                response_content = self._run_inference_with_model(binary_content, model_id)
+                results.append({"response": response_content, "error": None})
 
             except ModelHTTPError as e:
                 # PydanticAI統一HTTPエラー処理

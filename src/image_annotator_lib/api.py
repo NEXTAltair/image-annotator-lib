@@ -86,10 +86,19 @@ def _create_annotator_instance(model_name: str) -> BaseAnnotator:
 
 def _is_pydantic_ai_webapi_annotator(annotator_class) -> bool:
     """PydanticAI WebAPIアノテーターかどうかを判定"""
-    # PydanticAIAnnotatorMixinを継承しているかで判定
-    from .core.pydantic_ai_factory import PydanticAIAnnotatorMixin
-
-    return issubclass(annotator_class, PydanticAIAnnotatorMixin)
+    # PydanticAIWebAPIAnnotatorクラス名で判定
+    if annotator_class.__name__ == "PydanticAIWebAPIAnnotator":
+        return True
+    
+    # 従来のWebAPIクラス名で判定（レジストリで統一実装に置換されるため実質的にPydanticAI）
+    webapi_class_names = {
+        "AnthropicApiAnnotator",
+        "GoogleApiAnnotator", 
+        "OpenAIApiAnnotator",
+        "OpenRouterApiAnnotator"
+    }
+    
+    return annotator_class.__name__ in webapi_class_names
 
 
 class PydanticAIWebAPIWrapper(BaseAnnotator):

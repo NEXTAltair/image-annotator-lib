@@ -148,12 +148,16 @@ def _register_models(
             f"{len(available_classes)} 個の利用可能な {model_type_name} クラスが見つかりました: {list(available_classes.keys())}"
         )
 
+        # PydanticAI統一WebAPIアノテーターを強制登録
+        pydantic_ai_class = available_classes.get("PydanticAIWebAPIAnnotator")
+        if pydantic_ai_class:
+            logger.debug("PydanticAI統一WebAPIアノテーターを強制登録します")
+        
         # 設定ファイルに基づいてモデルを登録
         for model_name, model_config in config.items():
             logger.debug(
                 f"[DEBUG _register_models] 設定エントリを処理中: モデル名='{model_name}', 設定={model_config}"
             )
-            # config_filter によるフィルタリングを削除
 
             desired_class_name = model_config.get("class")
             if not desired_class_name:
@@ -163,11 +167,18 @@ def _register_models(
                 continue
             logger.debug(f"[DEBUG _register_models] 期待されるクラス名: '{desired_class_name}'")
 
-            # 収集された利用可能なクラスからクラスを検索
-            model_cls = available_classes.get(desired_class_name)
-            logger.debug(
-                f"[DEBUG _register_models] 利用可能なクラスから '{desired_class_name}' を検索した結果: {model_cls}"
-            )
+            # WebAPIクラスの場合は強制的にPydanticAI統一実装を使用
+            if desired_class_name.endswith("ApiAnnotator") and pydantic_ai_class:
+                model_cls = pydantic_ai_class
+                logger.debug(
+                    f"[DEBUG _register_models] WebAPIモデル '{model_name}' にPydanticAI統一実装を適用: {desired_class_name} → PydanticAIWebAPIAnnotator"
+                )
+            else:
+                # 非WebAPIクラスは従来通りの処理
+                model_cls = available_classes.get(desired_class_name)
+                logger.debug(
+                    f"[DEBUG _register_models] 利用可能なクラスから '{desired_class_name}' を検索した結果: {model_cls}"
+                )
 
             if model_cls:
                 # 期待されるbase_classのサブクラスであるか、または predict を持つかを確認 (元のロジック踏襲)
@@ -244,31 +255,14 @@ def list_available_annotators() -> list[str]:
 
 
 def _find_annotator_class_by_provider(provider: str, available_classes: dict[str, ModelClass]) -> str:
-    """プロバイダー名に基づいてアノテータークラス名を検索する。
-
-    - provider が google, openai, anthropic の場合、名前に provider が含まれるクラスを探す。
-    - それ以外の場合、または一致するクラスが見つからない場合は OpenRouterApiAnnotator を返す。
+    """プロバイダー名に基づいてアノテータークラス名を決定する。
+    
+    PydanticAI統一実装により、すべてのWebAPIプロバイダーは
+    PydanticAIWebAPIAnnotatorを使用します。
     """
-    provider_lower = provider.lower()
-    specific_providers = {"google", "openai", "anthropic"}
-
-    if provider_lower in specific_providers:
-        # 特定プロバイダーの場合のみクラス名検索
-        for class_name in available_classes:
-            if provider_lower in class_name.lower():
-                logger.debug(f"プロバイダー '{provider}' に一致するクラスが見つかりました: {class_name}")
-                return class_name
-        # 特定プロバイダーだが一致するクラスがなかった場合もフォールバック
-        logger.warning(
-            f"プロバイダー '{provider}' に一致するクラスが見つかりません。OpenRouterApiAnnotator を使用します。"
-        )
-        return "OpenRouterApiAnnotator"
-    else:
-        # 特定プロバイダー以外は OpenRouter を使用
-        logger.debug(
-            f"プロバイダー '{provider}' は特定プロバイダーではないため、OpenRouterApiAnnotator を使用します。"
-        )
-        return "OpenRouterApiAnnotator"
+    # 常にPydanticAI統一実装を使用（すべてのWebAPIプロバイダーを統一）
+    logger.debug(f"プロバイダー '{provider}' に対してPydanticAI統一実装を使用します")
+    return "PydanticAIWebAPIAnnotator"
 
 
 def _update_config_with_api_models() -> None:
@@ -309,15 +303,13 @@ def _update_config_with_api_models() -> None:
                 continue
 
             # プロバイダー名からクラス名を決定
-            if ":" in model_id:  # モデルIDに `:` が含まれている場合は、`OpenRouterApiAnnotator` を使用する
-                target_class_name = "OpenRouterApiAnnotator"
-            else:
-                target_class_name = _find_annotator_class_by_provider(provider, available_classes)
+            target_class_name = _find_annotator_class_by_provider(provider, available_classes)
 
-            # デフォルト設定を追加 (class と max_output_tokens)
+            # デフォルト設定を追加 (class, max_output_tokens, api_model_id)
             # add_default_setting はキーが存在しない場合のみ追加し、自動保存する
             config_registry.add_default_setting(model_name_short, "class", target_class_name)
             config_registry.add_default_setting(model_name_short, "max_output_tokens", 1800)
+            config_registry.add_default_setting(model_name_short, "api_model_id", model_id)
 
         logger.debug("annotator_config.toml の Web API モデル設定の更新が完了しました。")
 

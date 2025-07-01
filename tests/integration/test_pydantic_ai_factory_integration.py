@@ -4,7 +4,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
-from image_annotator_lib.core.webapi_agent_cache import WebApiAgentCache
 
 
 @pytest.fixture(autouse=True)
@@ -12,103 +11,63 @@ def manage_factory_cache():
     """Fixture to automatically clear factory caches before and after each test."""
     # Clear caches before the test
     PydanticAIProviderFactory._providers.clear()
-    WebApiAgentCache.clear_cache()
-
-    # Store original max size
-    original_max_size = WebApiAgentCache._MAX_CACHE_SIZE
 
     yield
 
-    # Restore original max size and clear caches after the test
-    WebApiAgentCache.set_max_cache_size(original_max_size)
+    # Clear caches after the test
     PydanticAIProviderFactory._providers.clear()
-    WebApiAgentCache.clear_cache()
 
 
 class TestPydanticAIFactoryIntegration:
     """
-    Integration tests for the PydanticAI Factory and its caching logic.
+    Integration tests for the PydanticAI Factory and its provider caching logic.
     """
 
     @patch("image_annotator_lib.core.pydantic_ai_factory.Agent")
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_agent_caching_with_lru_strategy(self, MockAgent):
+    def test_provider_caching_functionality(self, MockAgent):
         """
-        Tests that the Agent instances are cached using an LRU strategy.
+        Tests that the Provider instances are cached correctly.
         """
         # Make the mock agent return a new mock instance each time it's called
         MockAgent.side_effect = lambda *args, **kwargs: MagicMock()
 
-        # Set a small cache size for testing
-        WebApiAgentCache.set_max_cache_size(2)
+        # Create agents with same provider - should reuse provider
+        agent1 = PydanticAIProviderFactory.get_cached_agent("model1", "openai:gpt-4", "same_key")
+        agent2 = PydanticAIProviderFactory.get_cached_agent("model2", "openai:gpt-4", "same_key")
 
-        # --- Step 1: Fill the cache ---
-        agent1 = PydanticAIProviderFactory.get_cached_agent("model1", "openai:gpt-4", "key1")
-        agent2 = PydanticAIProviderFactory.get_cached_agent("model2", "openai:gpt-4", "key2")
-
-        assert id(agent1) != id(agent2)
-
-        # --- Step 2: Verify they are cached ---
-        agent1_cached = PydanticAIProviderFactory.get_cached_agent("model1", "openai:gpt-4", "key1")
-        assert agent1_cached is agent1
-
-        cache_info = WebApiAgentCache.get_cache_info()
-        assert cache_info["cache_size"] == 2
-
-        # --- Step 3: Access agent1 to make it recently used ---
-        PydanticAIProviderFactory.get_cached_agent("model1", "openai:gpt-4", "key1")
-
-        # --- Step 4: Add a new agent to trigger eviction ---
-        agent3 = PydanticAIProviderFactory.get_cached_agent("model3", "openai:gpt-4", "key3")
-        assert id(agent3) != id(agent1)
-
-        cache_info = WebApiAgentCache.get_cache_info()
-        assert cache_info["cache_size"] == 2
-
-        # --- Step 5: Verify that the least recently used (agent2) was evicted ---
-        agent2_new = PydanticAIProviderFactory.get_cached_agent("model2", "openai:gpt-4", "key2")
-        assert id(agent2_new) != id(agent2)
+        # Different agents but should share provider configuration
+        assert agent1 is not agent2  # Different agents
+        
+        # Verify provider was created (at least one entry in providers cache)
+        assert len(PydanticAIProviderFactory._providers) >= 1
 
     @patch("image_annotator_lib.core.pydantic_ai_factory.Agent")
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_cache_invalidation_on_config_change(self, MockAgent, managed_config_registry):
+    def test_different_provider_configs(self, MockAgent):
         """
-        Tests that the cache is invalidated when model configuration changes.
+        Tests that different provider configurations create separate cached providers.
         """
         # Make the mock agent return a new mock instance each time it's called
         MockAgent.side_effect = lambda *args, **kwargs: MagicMock()
 
-        config1 = {"temperature": 0.5}
-        config2 = {"temperature": 0.9}
+        # Create agents with different API keys - should create different providers
+        agent1 = PydanticAIProviderFactory.get_cached_agent("model1", "openai:gpt-4", "key1")
+        agent2 = PydanticAIProviderFactory.get_cached_agent("model2", "openai:gpt-4", "key2")
 
-        # --- Step 1: Get an agent with initial config ---
-        agent1 = PydanticAIProviderFactory.get_cached_agent(
-            "model1", "openai:gpt-4", "key1", config_data=config1
-        )
-
-        # --- Step 2: Get it again, should be cached ---
-        agent1_cached = PydanticAIProviderFactory.get_cached_agent(
-            "model1", "openai:gpt-4", "key1", config_data=config1
-        )
-        assert agent1_cached is agent1
-
-        # --- Step 3: Get it with different config, should be a new instance ---
-        agent2 = PydanticAIProviderFactory.get_cached_agent(
-            "model1", "openai:gpt-4", "key1", config_data=config2
-        )
-        assert agent2 is not agent1
+        # Should have multiple provider configurations cached
+        assert len(PydanticAIProviderFactory._providers) >= 2
 
     @patch("image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_provider")
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_openrouter_special_handling(self, mock_get_provider, managed_config_registry):
+    def test_openrouter_special_handling(self, mock_get_provider):
         """
         Tests special handling for OpenRouter, such as custom headers and base_url.
         """
-        config = {"provider": "openrouter", "referer": "http://my-app.com", "app_name": "My Great App"}
-        managed_config_registry.set("openrouter_model", config)
+        config = {"referer": "http://my-app.com", "app_name": "My Great App"}
 
         PydanticAIProviderFactory.get_cached_agent(
             "openrouter_model", "openrouter:some/model", "key1", config_data=config
@@ -123,3 +82,65 @@ class TestPydanticAIFactoryIntegration:
                 "X-Title": "My Great App",
             },
         )
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_extract_provider_name(self):
+        """
+        Tests provider name extraction from model IDs.
+        """
+        assert PydanticAIProviderFactory._extract_provider_name("openai:gpt-4") == "openai"
+        assert PydanticAIProviderFactory._extract_provider_name("anthropic:claude-3") == "anthropic"
+        assert PydanticAIProviderFactory._extract_provider_name("google:gemini-pro") == "google"
+        assert PydanticAIProviderFactory._extract_provider_name("openrouter:mistral/7b") == "openrouter"
+        
+        # Auto-detection tests
+        assert PydanticAIProviderFactory._extract_provider_name("gpt-4") == "openai"
+        assert PydanticAIProviderFactory._extract_provider_name("claude-3-sonnet") == "anthropic"
+        assert PydanticAIProviderFactory._extract_provider_name("gemini-pro") == "google"
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_cache_clear_functionality(self):
+        """
+        Tests that cache clearing works correctly.
+        """
+        # Add some providers to cache
+        PydanticAIProviderFactory.get_provider("openai", api_key="test_key")
+        PydanticAIProviderFactory.get_provider("anthropic", api_key="test_key")
+        
+        # Verify providers are cached
+        assert len(PydanticAIProviderFactory._providers) >= 2
+        
+        # Clear cache
+        PydanticAIProviderFactory.clear_cache()
+        
+        # Verify cache is cleared
+        assert len(PydanticAIProviderFactory._providers) == 0
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration 
+    def test_provider_types_support(self):
+        """
+        Tests that all supported provider types can be created.
+        """
+        supported_providers = ["openai", "anthropic", "google", "openrouter"]
+        
+        for provider_name in supported_providers:
+            try:
+                provider = PydanticAIProviderFactory.get_provider(provider_name, api_key="test_key")
+                assert provider is not None
+            except Exception as e:
+                pytest.fail(f"Failed to create {provider_name} provider: {e}")
+        
+        # Verify all providers are cached
+        assert len(PydanticAIProviderFactory._providers) == len(supported_providers)
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_unsupported_provider_error(self):
+        """
+        Tests that unsupported provider names raise appropriate errors.
+        """
+        with pytest.raises(ValueError, match="Unsupported provider: invalid_provider"):
+            PydanticAIProviderFactory.get_provider("invalid_provider", api_key="test_key")

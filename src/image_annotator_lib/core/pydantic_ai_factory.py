@@ -17,7 +17,6 @@ from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
 from .config import config_registry
 from .types import AnnotationSchema
 from .utils import logger
-from .webapi_agent_cache import WebApiAgentCache, create_cache_key, create_config_hash
 
 
 def _is_test_environment() -> bool:
@@ -49,7 +48,6 @@ class PydanticAIProviderFactory:
     """Provider-level PydanticAI Agent factory for efficient resource sharing"""
 
     _providers: ClassVar[dict[str, Any]] = {}
-    _agent_cache: ClassVar[WebApiAgentCache] = WebApiAgentCache()
 
     @classmethod
     def get_provider(cls, provider_name: str, **provider_kwargs) -> Any:
@@ -72,7 +70,7 @@ class PydanticAIProviderFactory:
 
     @classmethod
     def create_agent(
-        cls, model_name: str, api_model_id: str, api_key: str, config_hash: str | None = None
+        cls, model_name: str, api_model_id: str, api_key: str
     ) -> Agent:
         """Create PydanticAI Agent with provider reuse and caching"""
 
@@ -122,20 +120,13 @@ class PydanticAIProviderFactory:
     ) -> Agent:
         """Get cached Agent or create new one with provider sharing"""
 
-        # Create cache key and config hash
+        # Handle OpenRouter special case
         provider_name = cls._extract_provider_name(api_model_id)
-        cache_key = create_cache_key(model_name, provider_name, api_model_id)
-        config_hash = create_config_hash(config_data or {})
-
-        def creator_func() -> Agent:
-            # Handle OpenRouter special case
-            if provider_name == "openrouter":
-                return cls.create_openrouter_agent(model_name, api_model_id, api_key, config_data)
-            else:
-                return cls.create_agent(model_name, api_model_id, api_key, config_hash)
-
-        # Always cache the agent, even in a test environment
-        return cls._agent_cache.get_agent(cache_key, creator_func, config_hash)
+        if provider_name == "openrouter":
+            return cls.create_openrouter_agent(model_name, api_model_id, api_key, config_data)
+        else:
+            # For other providers, use the standard agent creation
+            return cls.create_agent(model_name, api_model_id, api_key)
 
     @classmethod
     def create_openrouter_agent(
@@ -194,10 +185,9 @@ class PydanticAIProviderFactory:
 
     @classmethod
     def clear_cache(cls):
-        """Clear all cached agents and providers"""
-        cls._agent_cache.clear_cache()
+        """Clear all cached providers"""
         cls._providers.clear()
-        logger.debug("Cleared all PydanticAI provider cache and agent cache")
+        logger.debug("Cleared all PydanticAI provider cache")
 
     @classmethod
     def _extract_provider_name(cls, api_model_id: str) -> str:
@@ -249,30 +239,15 @@ class PydanticAIAnnotatorMixin:
             return PydanticAIProviderFactory._extract_provider_name(self.api_model_id)
         return "Unknown"
 
-    def _get_config_hash(self) -> str:
-        """Generate configuration hash"""
-        config_data = {
-            "model_id": self.api_model_id,
-            "temperature": config_registry.get(self.model_name, "temperature", default=0.7),
-            "max_tokens": config_registry.get(self.model_name, "max_output_tokens", default=1800),
-        }
-        return create_config_hash(config_data)
 
     def _setup_agent(self):
         """Setup PydanticAI Agent with provider sharing"""
         self._load_configuration()
 
-        config_data = {
-            "model_id": self.api_model_id,
-            "temperature": config_registry.get(self.model_name, "temperature", default=0.7),
-            "max_tokens": config_registry.get(self.model_name, "max_output_tokens", default=1800),
-        }
-
         self.agent = PydanticAIProviderFactory.get_cached_agent(
             model_name=self.model_name,
             api_model_id=self.api_model_id,
             api_key=self.api_key.get_secret_value(),
-            config_data=config_data,
         )
 
     def _preprocess_images_to_binary(self, images: list[Image.Image]) -> list[BinaryContent]:
@@ -301,7 +276,7 @@ class PydanticAIAnnotatorMixin:
             temp_agent = PydanticAIProviderFactory.create_agent(
                 model_name=f"{self.model_name}_temp",
                 api_model_id=override_model_id,
-                api_key=self.api_key.get_secret_value(),
+                api_key=self.api_key.get_secret_value()
             )
             agent_to_use = temp_agent
             logger.debug(f"Using temporary agent with model: {override_model_id}")
