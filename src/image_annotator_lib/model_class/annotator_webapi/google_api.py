@@ -70,7 +70,7 @@ class GoogleApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
 
                 except ModelHTTPError as e:
                     # PydanticAI統一HTTPエラー処理
-                    error_message = f"Google HTTP {e.status_code}: {e.response_body or str(e)}"
+                    error_message = f"Google HTTP {e.status_code}: {e.body or str(e)}"
                     logger.error(f"Google API 推論エラー: {error_message}")
                     results.append({"response": None, "error": error_message})
 

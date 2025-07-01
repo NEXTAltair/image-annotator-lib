@@ -73,7 +73,7 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
 
             except ModelHTTPError as e:
                 # PydanticAI統一HTTPエラー処理
-                error_message = f"OpenRouter HTTP {e.status_code}: {e.response_body or str(e)}"
+                error_message = f"OpenRouter HTTP {e.status_code}: {e.body or str(e)}"
                 logger.error(f"OpenRouter API 推論エラー: {error_message}")
                 results.append({"response": None, "error": error_message})
 

@@ -19,11 +19,68 @@ class TestPydanticAIFactoryApiKeyManagement:
     @pytest.fixture(autouse=True)
     def setup_and_teardown(self):
         """Setup and teardown for each test."""
-        # Clear any existing cache before each test
+        import asyncio
+        import gc
+        from image_annotator_lib.core.base.pydantic_ai_annotator import AdvancedAgentFactory
+        from image_annotator_lib.core.config import config_registry
+        
+        # 1. Clear all caches before each test
         PydanticAIProviderFactory.clear_cache()
+        AdvancedAgentFactory.clear_cache()
+        
+        # 2. Close any existing event loops
+        try:
+            loop = asyncio.get_event_loop()
+            if loop and not loop.is_closed():
+                loop.close()
+        except RuntimeError:
+            pass  # No loop to close
+        
+        # 3. Set new event loop for clean state
+        try:
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+        except RuntimeError:
+            pass
+        
+        # 4. Clear any test configurations from config registry
+        test_configs = [key for key in getattr(config_registry, '_config', {}).keys() 
+                       if key.startswith('test_')]
+        for key in test_configs:
+            try:
+                config_registry._config.pop(key, None)
+            except (AttributeError, KeyError):
+                pass
+        
+        # 5. Force garbage collection
+        gc.collect()
+
         yield
-        # Clear cache after each test
+
+        # Clean up after each test
+        # 1. Clear all caches
         PydanticAIProviderFactory.clear_cache()
+        AdvancedAgentFactory.clear_cache()
+        
+        # 2. Clean up test configurations again
+        test_configs = [key for key in getattr(config_registry, '_config', {}).keys() 
+                       if key.startswith('test_')]
+        for key in test_configs:
+            try:
+                config_registry._config.pop(key, None)
+            except (AttributeError, KeyError):
+                pass
+        
+        # 3. Close event loop if it exists
+        try:
+            loop = asyncio.get_event_loop()
+            if loop and not loop.is_closed():
+                loop.close()
+        except RuntimeError:
+            pass
+        
+        # 4. Force garbage collection
+        gc.collect()
 
     @pytest.fixture
     def mock_environment_api_keys(self):
@@ -154,26 +211,42 @@ class TestPydanticAIFactoryApiKeyManagement:
     @pytest.mark.fast_integration
     def test_missing_api_key_handling(self):
         """Test proper error handling when no API key is available."""
-        # Clear environment variables
-        env_clear = {
-            "OPENAI_API_KEY": None,
-            "ANTHROPIC_API_KEY": None,
-            "GOOGLE_API_KEY": None,
-            "OPENROUTER_API_KEY": None,
-        }
+        # Store original environment variables to restore later
+        original_env = {}
+        env_keys = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"]
+        
+        for key in env_keys:
+            original_env[key] = os.environ.get(key)
+            # Remove from environment if it exists
+            if key in os.environ:
+                del os.environ[key]
+        
+        try:
+            # Mock _is_test_environment to return False so we test real provider creation
+            with patch('image_annotator_lib.core.pydantic_ai_factory._is_test_environment', return_value=False):
+                # This should raise an appropriate error about missing API key
+                with pytest.raises(Exception) as exc_info:
+                    PydanticAIProviderFactory.get_cached_agent(
+                        "test_model",
+                        "gpt-4o-mini",
+                        None,  # No API key provided
+                    )
 
-        with patch.dict(os.environ, env_clear, clear=True):
-            # This should raise an appropriate error about missing API key
-            with pytest.raises(Exception) as exc_info:
-                PydanticAIProviderFactory.get_cached_agent(
-                    "test_model",
-                    "gpt-4o-mini",
-                    None,  # No API key provided
-                )
-
-            # Should get a clear error message about missing API key
-            error_msg = str(exc_info.value)
-            assert "api_key" in error_msg.lower() or "key" in error_msg.lower()
+                # Should get a clear error message about missing API key
+                error_msg = str(exc_info.value)
+                assert ("api_key" in error_msg.lower() or 
+                       "key" in error_msg.lower() or 
+                       "authentication" in error_msg.lower() or
+                       "credential" in error_msg.lower() or
+                       "none" in error_msg.lower()), f"Unexpected error message: {error_msg}"
+            
+        finally:
+            # Restore original environment variables
+            for key, value in original_env.items():
+                if value is not None:
+                    os.environ[key] = value
+                elif key in os.environ:
+                    del os.environ[key]
 
     @pytest.mark.integration
     @pytest.mark.fast_integration

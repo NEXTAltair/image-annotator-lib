@@ -49,8 +49,8 @@ class TestAllProvidersStructure:
         """全プロバイダーの必要メソッド存在確認"""
         from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAnnotatorMixin
 
-        # 共通の必要メソッド
-        required_methods = ["__init__", "__enter__", "__exit__", "run_with_model", "_handle_api_error"]
+        # PydanticAI統一実装では_handle_api_errorは不要（統一エラーハンドリング）
+        required_methods = ["__init__", "__enter__", "__exit__", "run_with_model"]
 
         for provider_name, module_path, class_name in provider_test_data:
             # モジュールとクラスをインポート
@@ -206,14 +206,10 @@ class TestAPIWrapperBackwardCompatibility:
 class TestUnifiedErrorHandling:
     """統一エラーハンドリングテスト"""
 
-    def test_unified_error_handling(self, managed_config_registry, api_key_manager):
-        """統一エラーハンドリングテスト"""
-        from image_annotator_lib.exceptions.errors import (
-            ApiAuthenticationError,
-            ApiRateLimitError,
-            ApiServerError,
-            ApiTimeoutError,
-        )
+    def test_unified_error_handling(self, managed_config_registry, api_key_manager, test_image):
+        """統一エラーハンドリングテスト - PydanticAI統一実装版"""
+        from unittest.mock import MagicMock, patch
+        from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 
         # エラーハンドリング対象プロバイダー(OpenRouterは同一実装なのでOpenAIと同じ)
         providers_with_modules = [
@@ -230,11 +226,12 @@ class TestUnifiedErrorHandling:
             ("Google", "image_annotator_lib.model_class.annotator_webapi.google_api", "GoogleApiAnnotator"),
         ]
 
+        # PydanticAIでのエラーテストケース
         error_test_cases = [
-            ("authentication failed", ApiAuthenticationError),
-            ("rate limit exceeded", ApiRateLimitError),
-            ("timeout occurred", ApiTimeoutError),
-            ("server error", ApiServerError),
+            (ModelHTTPError(401, "test-model", "Authentication failed"), "401"),
+            (ModelHTTPError(429, "test-model", "Rate limit exceeded"), "429"),
+            (ModelHTTPError(500, "test-model", "Server error"), "500"),
+            (UnexpectedModelBehavior("Unexpected model behavior"), "Unexpected model behavior"),
         ]
 
         for provider_name, module_path, class_name in providers_with_modules:
@@ -253,12 +250,22 @@ class TestUnifiedErrorHandling:
                 },
             )
 
-            annotator = annotator_class(test_model_name)
-
-            # 各エラータイプのテスト
-            for error_message, expected_exception in error_test_cases:
-                with pytest.raises(expected_exception):
-                    annotator._handle_api_error(Exception(error_message))
+            # PydanticAI統一実装では、エラーハンドリングはrun_with_modelメソッド内で実行される
+            with patch.object(annotator_class, '_run_inference_with_model') as mock_inference:
+                annotator = annotator_class(test_model_name)
+                
+                # 各エラータイプのテスト
+                for test_error, expected_error_content in error_test_cases:
+                    mock_inference.side_effect = test_error
+                    
+                    with annotator:
+                        results = annotator.run_with_model([test_image], f"{provider_name.lower()}-test-model")
+                        
+                        # エラーが適切にハンドリングされていることを確認
+                        assert len(results) == 1
+                        assert results[0]["response"] is None
+                        assert results[0]["error"] is not None
+                        assert expected_error_content in results[0]["error"]
 
 
 if __name__ == "__main__":

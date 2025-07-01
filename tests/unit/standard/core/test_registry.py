@@ -160,14 +160,15 @@ def test_update_config_with_api_models_success(
     mock_gather_classes.assert_called_once_with("model_class")
 
     expected_calls = [
-        # Google model -> GoogleApiAnnotator
-        call("Gemini 1.5 Pro", "class", "GoogleApiAnnotator"),
+        # PydanticAI統一実装: 全WebAPIモデルはPydanticAIWebAPIAnnotatorを使用
+        call("Gemini 1.5 Pro", "class", "PydanticAIWebAPIAnnotator"),
+        call("Gemini 1.5 Pro", "api_model_id", "google/gemini-pro-1.5"),
         call("Gemini 1.5 Pro", "max_output_tokens", 1800),
-        # OpenAI model -> OpenAIApiAnnotator
-        call("GPT-4o", "class", "OpenAIApiAnnotator"),
+        call("GPT-4o", "class", "PydanticAIWebAPIAnnotator"),
+        call("GPT-4o", "api_model_id", "openai/gpt-4o"),
         call("GPT-4o", "max_output_tokens", 1800),
-        # Unknown provider -> OpenRouterApiAnnotator (fallback based on corrected logic)
-        call("Unknown Model", "class", "OpenRouterApiAnnotator"),
+        call("Unknown Model", "class", "PydanticAIWebAPIAnnotator"),
+        call("Unknown Model", "api_model_id", "unknown/some-model"),
         call("Unknown Model", "max_output_tokens", 1800),
         # Missing provider model is skipped, invalid format is skipped
     ]
@@ -214,49 +215,22 @@ def test_update_config_with_api_models_no_classes(
     mock_load_api_models.assert_called_once()
     mock_gather_classes.assert_called_once_with("model_class")
 
-    # Expect calls, but all classes should fallback to OpenRouterApiAnnotator
+    # PydanticAI統一実装: クラスが見つからない場合でもPydanticAIWebAPIAnnotatorを使用
     expected_calls = [
-        call("Gemini 1.5 Pro", "class", "OpenRouterApiAnnotator"),
+        call("Gemini 1.5 Pro", "class", "PydanticAIWebAPIAnnotator"),
+        call("Gemini 1.5 Pro", "api_model_id", "google/gemini-pro-1.5"),
         call("Gemini 1.5 Pro", "max_output_tokens", 1800),
-        call("GPT-4o", "class", "OpenRouterApiAnnotator"),
+        call("GPT-4o", "class", "PydanticAIWebAPIAnnotator"),
+        call("GPT-4o", "api_model_id", "openai/gpt-4o"),
         call("GPT-4o", "max_output_tokens", 1800),
-        call("Unknown Model", "class", "OpenRouterApiAnnotator"),
+        call("Unknown Model", "class", "PydanticAIWebAPIAnnotator"),
+        call("Unknown Model", "api_model_id", "unknown/some-model"),
         call("Unknown Model", "max_output_tokens", 1800),
     ]
     mock_config_registry.add_default_setting.assert_has_calls(expected_calls, any_order=True)
     assert mock_config_registry.add_default_setting.call_count == len(expected_calls)
 
 
-# --- Tests for _find_annotator_class_by_provider ---
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    "provider_name, expected_class_name",
-    [
-        ("google", "GoogleApiAnnotator"),
-        ("GOOGLE", "GoogleApiAnnotator"),  # Case-insensitive
-        ("openai", "OpenAIApiAnnotator"),
-        ("Anthropic", "AnthropicApiAnnotator"),
-        ("some_other", "OpenRouterApiAnnotator"),
-        ("unknown", "OpenRouterApiAnnotator"),
-        ("router", "OpenRouterApiAnnotator"),
-        ("no_match_provider", "OpenRouterApiAnnotator"),
-    ],
-)
-@patch("image_annotator_lib.core.registry.logger")  # Mock logger to suppress warnings
-def test_find_annotator_class_by_provider(mock_logger, provider_name, expected_class_name):
-    """Test the provider name to class name mapping logic based on corrected spec."""
-    result = registry._find_annotator_class_by_provider(provider_name, MOCK_AVAILABLE_CLASSES)
-    assert result == expected_class_name
-
-
-@pytest.mark.unit
-@patch("image_annotator_lib.core.registry.logger")  # Mock logger
-def test_find_annotator_class_by_provider_no_available_classes(mock_logger):
-    """Test fallback when available_classes is empty."""
-    result = registry._find_annotator_class_by_provider("google", {})  # Pass empty dict
-    assert result == "OpenRouterApiAnnotator"
-    # Check that a warning was logged because the specific provider 'google' was expected
-    # but no classes were available to match against.
-    mock_logger.warning.assert_called_once()
+# --- _find_annotator_class_by_provider tests removed ---
+# PydanticAI統一実装では、この関数は常にPydanticAIWebAPIAnnotatorを返すだけの
+# 単純な関数になったため、テストは不要になりました。
