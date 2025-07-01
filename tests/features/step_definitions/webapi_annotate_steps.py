@@ -14,62 +14,93 @@ logger = logging.getLogger(__name__)
 
 
 # --- Given ---
-@given("PydanticAI テスト環境が設定されている")
-def pydantic_ai_test_environment():
-    """PydanticAI テスト環境を設定: 実APIコールを有効化"""
+@given("アノテーション環境が設定されている")
+def annotation_environment_setup():
+    """アノテーション環境を設定: 実APIコールを有効化"""
     models.ALLOW_MODEL_REQUESTS = True
-    logger.info("PydanticAI E2Eテスト環境設定完了: 実APIリクエストを有効化")
+    logger.info("アノテーション環境設定完了: 実APIリクエストを有効化")
 
 
-@given(parsers.parse("{provider} プロバイダーが利用可能になっている"))
-def provider_available(provider):
-    """指定されたプロバイダーのAPIキーが.envまたは環境変数に設定されていることを確認"""
-    # PydanticAIが.envファイルから自動的にAPIキーを読み込む
-    key_map = {
-        "OpenAI": "OPENAI_API_KEY",
-        "Anthropic": "ANTHROPIC_API_KEY", 
-        "Google": "GOOGLE_API_KEY"
-    }
+@given(parsers.parse("{model_name}が利用可能になっている"))
+def model_available(model_name):
+    """指定されたモデルが利用可能であることを確認"""
+    # モデル名からプロバイダーを推測
+    if model_name.startswith(("gpt-", "o1-", "o3-")):
+        required_key = "OPENAI_API_KEY"
+    elif model_name.startswith("claude-"):
+        required_key = "ANTHROPIC_API_KEY"
+    elif model_name.startswith("gemini-"):
+        required_key = "GOOGLE_API_KEY"
+    else:
+        # その他のモデルの場合はOpenRouterをチェック
+        required_key = "OPENROUTER_API_KEY"
     
-    required_key = key_map.get(provider)
-    if not required_key:
-        raise ValueError(f"サポートされていないプロバイダー: {provider}")
-    
-    # .envファイルまたは環境変数からAPIキーをチェック
+    # APIキーをチェック
     api_key = os.getenv(required_key)
     if not api_key:
-        pytest.skip(f"{provider} APIキー ({required_key}) が設定されていないためスキップします")
+        pytest.skip(f"{model_name} 用のAPIキー ({required_key}) が設定されていないためスキップします")
     
-    logger.info(f"{provider} プロバイダーのAPIキーが確認されました")
+    logger.info(f"{model_name} が利用可能であることを確認しました")
     return True
 
 
-@given("PydanticAI認証が失敗するよう設定されている")
-def pydantic_ai_auth_failure(monkeypatch):
-    """PydanticAI認証エラーをシミュレート"""
-    # 一時的にAPIキーを削除して認証失敗を引き起こす
-    keys_to_remove = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"]
+@given("全てのAPIキーが未設定になっている")
+def all_api_keys_unset(monkeypatch):
+    """全てのAPIキーを未設定にする"""
+    all_keys = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"]
     
-    for key in keys_to_remove:
+    for key in all_keys:
         if os.environ.get(key):
             monkeypatch.delenv(key, raising=False)
     
-    logger.info("PydanticAI認証失敗をシミュレート: APIキーを一時的に削除")
+    logger.info("全てのAPIキーを未設定にしました")
 
 
-@given("PydanticAIモデルが利用不可になっている")
-def pydantic_ai_model_unavailable(monkeypatch):
-    """PydanticAIモデル利用不可をシミュレート"""
-    # 無効なAPIキーを設定して認証エラーを引き起こす
+@given("モデルが利用不可になっている")
+def model_unavailable(monkeypatch):
+    """モデルが利用不可になるよう設定"""
+    # 無効なAPIキーを設定してモデル利用不可を引き起こす
     monkeypatch.setenv("OPENAI_API_KEY", "invalid_key_for_testing")
-    logger.info("PydanticAIモデル利用不可をシミュレート: 無効なAPIキーを設定")
+    logger.info("モデル利用不可をシミュレート: 無効なAPIキーを設定")
 
 
-@given("PydanticAI TestModelが設定されている")
-def pydantic_ai_test_model():
-    """PydanticAI TestModelを設定してモック実行を有効化"""
-    models.ALLOW_MODEL_REQUESTS = False
-    logger.info("PydanticAI TestModelが設定されました: モック実行モード")
+@given("OpenAI、Anthropic、GoogleのAPIキーが未設定になっている")
+def main_providers_api_keys_unset(monkeypatch):
+    """主要プロバイダーのAPIキーを未設定にする"""
+    main_provider_keys = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"]
+    
+    for key in main_provider_keys:
+        if os.environ.get(key):
+            monkeypatch.delenv(key, raising=False)
+    
+    logger.info("主要プロバイダー(OpenAI, Anthropic, Google)のAPIキーを未設定にしました")
+
+
+@given("OpenRouterのAPIキーが設定されている")
+def openrouter_api_key_available():
+    """OpenRouterのAPIキーが利用可能であることを確認"""
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        pytest.skip("OpenRouter APIキー (OPENROUTER_API_KEY) が設定されていないためスキップします")
+    
+    logger.info("OpenRouterのAPIキーが確認されました")
+    return True
+
+
+@given("複数のモデルが利用可能になっている")
+def multiple_models_available():
+    """複数のモデルが利用可能であることを確認"""
+    # 少なくとも1つのAPIキーがあることを確認
+    available_keys = [
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"
+    ]
+    
+    has_key = any(os.getenv(key) for key in available_keys)
+    if not has_key:
+        pytest.skip("利用可能なAPIキーが1つもないためスキップします")
+    
+    logger.info("複数モデルテスト用の環境が確認されました")
+    return True
 
 
 @given("APIがタイムアウトするよう設定されている")
@@ -119,6 +150,16 @@ def run_annotation_expect_error(single_image):
     model_to_use = "gpt-4o-mini"  # PydanticAIが自動でOpenAIプロバイダーを推測
     logger.info(f"エラーシナリオ用のアノテーション実行: モデル={model_to_use}")
     result = annotate(images_list=[single_image], model_name_list=[model_to_use])
+    return result
+
+
+@when("画像を指定して複数モデルでアノテーションを実行する", target_fixture="annotation_result")
+def run_annotation_with_multiple_models(single_image):
+    """複数モデルでのアノテーション実行"""
+    models_to_test = ["gpt-4o-mini", "claude-3-5-haiku", "gemini-1.5-flash"]
+    logger.info(f"複数モデルアノテーション実行: モデル={models_to_test}")
+    result = annotate(images_list=[single_image], model_name_list=models_to_test)
+    logger.info(f"複数モデルアノテーション結果: {result}")
     return result
 
 
@@ -194,17 +235,57 @@ def model_unavailable_error_returned(annotation_result):
     assert found_model_error, "モデル利用不可エラーメッセージが見つかりませんでした"
 
 
-@then("TestModelによるモック結果が返される")
-def test_model_result_returned(annotation_result):
-    """PydanticAI TestModelによるモック結果が返されることを確認"""
+@then("タイムアウトエラーメッセージが返される")
+def timeout_error_returned(annotation_result):
+    """タイムアウトエラーが返されることを確認"""
     assert annotation_result is not None
+    found_timeout_error = False
     
     for image_hash, model_results_dict in annotation_result.items():
         for model_name, model_result in model_results_dict.items():
-            assert model_result.get("error") is None, f"TestModelでエラーが発生: {model_result.get('error')}"
-            tags = model_result.get("tags", [])
-            assert len(tags) > 0, "TestModelからタグが返されませんでした"
-            logger.info(f"TestModelの結果を確認: {tags}")
+            error_message = model_result.get("error")
+            if error_message and ("timeout" in error_message.lower() or "タイムアウト" in error_message):
+                found_timeout_error = True
+                logger.info(f"タイムアウトエラーを確認: {error_message}")
+    
+    assert found_timeout_error, "タイムアウトエラーメッセージが見つかりませんでした"
+
+
+@then("全てのモデルからアノテーション結果が返される")
+def all_models_return_results(annotation_result):
+    """全てのモデルから結果が返されることを確認"""
+    assert annotation_result is not None
+    expected_models = ["gpt-4o-mini", "claude-3-5-haiku", "gemini-1.5-flash"]
+    
+    for image_hash, model_results_dict in annotation_result.items():
+        for model_name in expected_models:
+            assert model_name in model_results_dict, f"モデル '{model_name}' の結果が見つかりません"
+            model_result = model_results_dict[model_name]
+            
+            # エラーがある場合はスキップ条件をチェック
+            error = model_result.get("error")
+            if error:
+                skip_conditions = [
+                    "APIキー",
+                    "api key", 
+                    "authentication",
+                    "利用不可",
+                    "unavailable"
+                ]
+                if any(cond in error.lower() for cond in skip_conditions):
+                    logger.info(f"モデル '{model_name}' はAPIキー未設定によりスキップ: {error}")
+                    continue
+                else:
+                    pytest.fail(f"モデル '{model_name}' で予期しないエラー: {error}")
+            
+            # 成功した場合は内容をチェック
+            assert (
+                model_result.get("tags") is not None
+                or model_result.get("captions") is not None
+                or model_result.get("score") is not None
+            ), f"モデル '{model_name}' の結果に有効な内容が含まれていません"
+            
+            logger.info(f"モデル '{model_name}' から正常な結果を確認")
 
 
 @then("結果のタグリストは空である")
