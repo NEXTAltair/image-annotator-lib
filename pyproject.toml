@@ -128,9 +128,11 @@ python_functions = ["test_*"]
 addopts = [
     "--import-mode=importlib",
     "--strict-markers",
-    "--tb=short", 
+    "--tb=short",
     "--maxfail=5",
-    "-ra"
+    "-ra",
+    "--cov=src",
+    "--cov-report=xml"
 ]
 markers = [
     "unit: ユニットテスト（全体）",
