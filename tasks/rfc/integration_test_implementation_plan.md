@@ -564,6 +564,29 @@ def test_real_api_with_fallback_to_testmodel():
 
 ## 10. 最新状況に基づく即時アクションアイテム
 
+### 10.1 重要更新（2025-07-01 - PydanticAIテストパターン教訓の統合）
+
+**重大な発見**: Memory management統合テストで発生した複数の失敗を通じて、**PydanticAIの正しいテストパターン**と**統合テスト設計の教訓**を獲得。
+
+#### 新たに特定された根本的問題
+1. **PydanticAIテストパターンの誤用**: 内部実装の複雑なモックではなく、TestModel/FunctionModelを使用すべき
+2. **テスト設計の過度な複雑化**: 実装詳細に依存した脆弱なテスト設計
+3. **段階的開発の必要性**: 複雑なE2Eテストではなく、基本機能から始める重要性
+
+#### 修正実装された解決策
+**✅ 設定不備の修正**:
+- 必須パラメータ（`base_model`）の追加によるモデル初期化エラー解決
+- テスト用クラスマッピング（`OpenAIApiChatAnnotator` → `OpenRouterApiAnnotator`）の正確な実装
+
+**✅ PydanticAI公式パターンの適用**:
+- `models.ALLOW_MODEL_REQUESTS=False`による実APIコール防止
+- TestModel/FunctionModelベースのテスト設計への変更
+- Agent.override()を使用した正しいモデル置き換え
+
+**✅ 段階的テスト設計の導入**:
+- `test_memory_management_simple.py`による基本機能テスト
+- 複雑なE2Eテストは基本テスト完了後に段階的に追加
+
 ### 10.2 緊急対応が必要な問題（2025-06-29更新 - 最新実行結果分析）
 
 **統合テスト実行結果**: 段階的修正により成功率が劇的改善（8.3% → **60.3%**）、**23の失敗**まで大幅減少
@@ -928,7 +951,44 @@ except UnexpectedModelBehavior as e:
 - **優先順位設定**: 影響範囲と修正困難度を考慮した戦略的優先順位
 - **進捗追跡**: 具体的な修正内容と効果の詳細記録
 
-### 11.4 次のステップ（PydanticAI統一エラー処理アーキテクチャ移行）
+### 11.4 重要教訓の統合（2025-07-01更新）
+
+**📚 Memory Management Integration Test教訓**:
+
+#### 学んだ重要原則
+1. **PydanticAIテストベストプラクティス**: TestModel/FunctionModelと Agent.override() の正しい使用
+2. **段階的テスト開発**: 複雑なE2Eテストではなく、基本機能から始める重要性
+3. **実装詳細への依存回避**: 公開インターフェースをテストし、内部実装の詳細は避ける
+4. **設定エラーの事前回避**: テスト用設定で必須パラメータを確実に含める
+
+#### 成功パターンの確立
+**✅ 堅牢なテスト設計例**:
+```python
+# 良い例：本質的な機能をテスト
+def test_cache_functionality(self):
+    cache_info = WebApiAgentCache.get_cache_info()
+    assert cache_info["cache_size"] == 0
+
+# 悪い例：実装詳細に依存
+def mock_agent_creation(model_name, api_model_id, api_key, config_data=None):
+    # 複雑な内部状態シミュレーション（脆弱）
+```
+
+**✅ PydanticAI統合テスト基盤**:
+```python
+@pytest.fixture(autouse=True)
+def setup_pydantic_ai_testing(self):
+    models.ALLOW_MODEL_REQUESTS = False  # APIコール防止
+    yield
+```
+
+#### 今後の開発指針
+1. **テストファーストではなく、理解ファースト**: 複雑なシステムでは動作原理を理解してからテストを書く
+2. **段階的複雑化**: 単純なテストから始めて、段階的に複雑さを追加
+3. **フレームワーク固有のベストプラクティスを尊重**: PydanticAIの推奨テストパターンに従う
+4. **エラードキュメント化**: 遭遇したエラーパターンと解決策を記録
+
+### 11.5 次のステップ（PydanticAI統一エラー処理アーキテクチャ移行）
 
 **🔄 新戦略**: **レガシーエラー処理とPydanticAI統一処理の競合**を根本解決
 

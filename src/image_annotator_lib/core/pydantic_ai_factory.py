@@ -79,15 +79,9 @@ class PydanticAIProviderFactory:
         # Check if we're in test environment
         if _is_test_environment():
             # In test environment, use TestModel to avoid API authentication
-            from pydantic_ai.messages import ModelResponse, TextPart
             from pydantic_ai.models.test import TestModel
 
             test_model = TestModel()
-            # Set a default response for tests
-            test_model.response = ModelResponse(
-                parts=[TextPart('{"tags": ["test_tag"], "captions": ["test caption"], "score": 0.95}')]
-            )
-
             # Create Agent with TestModel
             agent = Agent(model=test_model, output_type=AnnotationSchema, system_prompt=BASE_PROMPT)
             logger.debug(f"Created TestModel Agent for test environment: {model_name}")
@@ -140,6 +134,7 @@ class PydanticAIProviderFactory:
             else:
                 return cls.create_agent(model_name, api_model_id, api_key, config_hash)
 
+        # Always cache the agent, even in a test environment
         return cls._agent_cache.get_agent(cache_key, creator_func, config_hash)
 
     @classmethod

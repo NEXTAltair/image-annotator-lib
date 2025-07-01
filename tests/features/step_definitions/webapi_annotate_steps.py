@@ -3,142 +3,122 @@ import os
 
 import pytest
 from pytest_bdd import given, parsers, then, when
+from pydantic_ai import models
+from pydantic_ai.messages import ModelResponse, TextPart
+from pydantic_ai.models.test import TestModel
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 
 from image_annotator_lib.api import annotate
-from image_annotator_lib.core import model_factory
-from image_annotator_lib.core.model_factory import _get_api_key
-from image_annotator_lib.exceptions.errors import ApiAuthenticationError
-from image_annotator_lib.model_class.annotator_webapi import google_api
 
 logger = logging.getLogger(__name__)
 
 
 # --- Given ---
-@given("APIキーが環境変数に設定されている", target_fixture="api_key")
-def api_key_is_set():
-    # 主要APIキーのいずれかがセットされていることを検証し、値を返す
-    key_candidates = [
-        "GOOGLE_API_KEY",
-        "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "OPENROUTER_API_KEY",
-        "DUMMY_API_KEY",
-    ]
-    for key in key_candidates:
-        value = os.environ.get(key)
-        if value:
-            return value
-    raise AssertionError("いずれのAPIキーも環境変数に設定されていません")
+@given("PydanticAI テスト環境が設定されている")
+def pydantic_ai_test_environment():
+    """PydanticAI テスト環境を設定: 実APIコールを有効化"""
+    models.ALLOW_MODEL_REQUESTS = True
+    logger.info("PydanticAI E2Eテスト環境設定完了: 実APIリクエストを有効化")
 
 
-@given(parsers.parse("{provider} APIが利用可能な状態になっている"), target_fixture="api_key")
-def provider_api_available(provider):
-    # プロジェクト実装の_get_api_key関数を使ってAPIキーを取得
-    api_key = _get_api_key(provider, "")
-    assert api_key is not None
-    return api_key
+@given(parsers.parse("{provider} プロバイダーが利用可能になっている"))
+def provider_available(provider):
+    """指定されたプロバイダーのAPIキーが.envまたは環境変数に設定されていることを確認"""
+    # PydanticAIが.envファイルから自動的にAPIキーを読み込む
+    key_map = {
+        "OpenAI": "OPENAI_API_KEY",
+        "Anthropic": "ANTHROPIC_API_KEY", 
+        "Google": "GOOGLE_API_KEY"
+    }
+    
+    required_key = key_map.get(provider)
+    if not required_key:
+        raise ValueError(f"サポートされていないプロバイダー: {provider}")
+    
+    # .envファイルまたは環境変数からAPIキーをチェック
+    api_key = os.getenv(required_key)
+    if not api_key:
+        pytest.skip(f"{provider} APIキー ({required_key}) が設定されていないためスキップします")
+    
+    logger.info(f"{provider} プロバイダーのAPIキーが確認されました")
+    return True
 
 
-@given("APIキーが未設定の状態になっている")
-def api_key_is_unset(monkeypatch):
-    # target_provider = "Google" # 不要なため削除
-    # target_env_var = "GOOGLE_API_KEY" # 不要なため削除
-
-    logger.info(
-        "APIキー未設定をシミュレート: model_factory._get_api_key が ApiAuthenticationError を送出するようにモックします。"
-    )
-
-    # _get_api_key が呼び出されたら、指定されたエラーを送出する関数を定義
-    def mock_get_api_key_error(provider_name: str, api_model_id: str):
-        # 実際の provider_name に基づいてエラーメッセージを作成
-        env_var_map = {
-            "Google": "GOOGLE_API_KEY",
-            "OpenAI": "OPENAI_API_KEY",
-            "Anthropic": "ANTHROPIC_API_KEY",
-            "OpenRouter": "OPENROUTER_API_KEY",
-        }
-        assumed_env_var = env_var_map.get(provider_name, "UNKNOWN_ENV_VAR")
-        error_message = f"環境変数 '{assumed_env_var}' が設定されていないか、空です。 (プロバイダー: {provider_name}) - Mocked Error"
-        raise ApiAuthenticationError(provider_name=provider_name, message=error_message)
-
-    # monkeypatch.setattr を使って model_factory._get_api_key を上記の関数で置き換え
-    monkeypatch.setattr(model_factory, "_get_api_key", mock_get_api_key_error)
-
-    # (オプション) 環境変数も削除しておくことで、より確実に未設定状態を模倣
-    keys_to_unset = [
-        "GOOGLE_API_KEY",
-        "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "OPENROUTER_API_KEY",
-        "DUMMY_API_KEY",
-    ]
-    logger.debug("念のため、関連する環境変数も削除します (monkeypatch使用)。")
-    for key in keys_to_unset:
-        if os.environ.get(key) is not None:
+@given("PydanticAI認証が失敗するよう設定されている")
+def pydantic_ai_auth_failure(monkeypatch):
+    """PydanticAI認証エラーをシミュレート"""
+    # 一時的にAPIキーを削除して認証失敗を引き起こす
+    keys_to_remove = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"]
+    
+    for key in keys_to_remove:
+        if os.environ.get(key):
             monkeypatch.delenv(key, raising=False)
+    
+    logger.info("PydanticAI認証失敗をシミュレート: APIキーを一時的に削除")
 
-    logger.info("monkeypatch適用後の環境変数チェック:")
-    for key in keys_to_unset:
-        logger.info(f"  '{key}': {os.environ.get(key)}")
+
+@given("PydanticAIモデルが利用不可になっている")
+def pydantic_ai_model_unavailable(monkeypatch):
+    """PydanticAIモデル利用不可をシミュレート"""
+    # 無効なAPIキーを設定して認証エラーを引き起こす
+    monkeypatch.setenv("OPENAI_API_KEY", "invalid_key_for_testing")
+    logger.info("PydanticAIモデル利用不可をシミュレート: 無効なAPIキーを設定")
+
+
+@given("PydanticAI TestModelが設定されている")
+def pydantic_ai_test_model():
+    """PydanticAI TestModelを設定してモック実行を有効化"""
+    models.ALLOW_MODEL_REQUESTS = False
+    logger.info("PydanticAI TestModelが設定されました: モック実行モード")
 
 
 @given("APIがタイムアウトするよう設定されている")
 def api_timeout(monkeypatch):
-    # このシナリオでは Gemini (Google API) が使われることを前提として、
-    # GoogleApiAnnotator の _run_inference をモックしてタイムアウトをシミュレートする。
-
-    # original_run_inference = google_api.GoogleApiAnnotator._run_inference # コメントアウトされたまま
-
-    def mock_run_inference_timeout(self, processed_images: list[str] | list[bytes]):
-        logger.info(
-            "タイムアウトをシミュレート: google_api.GoogleApiAnnotator._run_inference で RuntimeError を送出します。"
-        )
-        # 実際の _run_inference が返す型に合わせて、エラー発生時は適切な値を返すか、
-        # 例外を送出する。ここでは RuntimeError を使用。
-        # (メッセージはテストで検証される内容に合わせて調整が必要な場合がある)
-        raise RuntimeError("Simulated API timeout for Google API")  # google_genai_errors.APIError から変更
-
-    monkeypatch.setattr(google_api.GoogleApiAnnotator, "_run_inference", mock_run_inference_timeout)
-    logger.info("google_api.GoogleApiAnnotator._run_inference がタイムアウトするようにモックしました。")
+    """PydanticAI APIタイムアウトをシミュレート"""
+    # E2Eテスト環境では実際のAPIリクエストを有効化する
+    models.ALLOW_MODEL_REQUESTS = True
+    
+    # テスト用の非常に短いタイムアウトを設定
+    monkeypatch.setenv("ANTHROPIC_API_TIMEOUT", "0.001")  # 1msの極短タイムアウト
+    monkeypatch.setenv("OPENAI_API_TIMEOUT", "0.001")
+    monkeypatch.setenv("GOOGLE_API_TIMEOUT", "0.001")
+    
+    logger.info("E2Eテスト用の極短タイムアウト(1ms)を設定してタイムアウトエラーをシミュレート")
 
 
 @given("APIからエラーレスポンスが返されるよう設定されている")
 def api_error_response(monkeypatch):
-    # このシナリオでは Gemini (Google API) が主にテストされると仮定し、
-    # GoogleApiAnnotator の _run_inference をモックして汎用的なAPIエラーをシミュレートする。
-    def mock_run_inference_api_error(self, processed_images: list[str] | list[bytes]):
-        error_message = "Simulated API Processing Error"
-        logger.info(
-            f"汎用APIエラーをシミュレート: google_api.GoogleApiAnnotator._run_inference で RuntimeError('{error_message}') を送出します。"
-        )
-        raise RuntimeError(error_message)
-
-    monkeypatch.setattr(google_api.GoogleApiAnnotator, "_run_inference", mock_run_inference_api_error)
-    logger.info(
-        "google_api.GoogleApiAnnotator._run_inference が汎用APIエラーメッセージを含むエラーを送出するようにモックしました。"
-    )
+    """PydanticAI APIエラーレスポンスをシミュレート"""
+    # E2Eテスト環境では実際のAPIリクエストを有効化
+    models.ALLOW_MODEL_REQUESTS = True
+    
+    # 無効な形式のAPIキーを設定してAPIエラーを発生させる
+    monkeypatch.setenv("OPENAI_API_KEY", "invalid_test_key_format")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "invalid_test_key_format")
+    monkeypatch.setenv("GOOGLE_API_KEY", "invalid_test_key_format")
+    
+    logger.info("E2Eテスト用の無効なAPIキーを設定してAPIエラーをシミュレート")
 
 
 # --- When ---
 @when(
-    parsers.parse("画像を指定して{model_alias}モデルでアノテーションを実行する"),
+    parsers.parse("画像を指定して{model_name}でアノテーションを実行する"),
     target_fixture="annotation_result",
 )
-def run_annotation_with_model(model_alias, single_image):
-    model_name = model_alias if model_alias else "Gemini 2.5 Pro Preview"
-    result = annotate([single_image], [model_name])
+def run_annotation_with_model(model_name, single_image):
+    """指定されたmodel_nameで実際のアノテーションを実行"""
+    logger.info(f"E2Eアノテーション実行: モデル={model_name}")
+    result = annotate(images_list=[single_image], model_name_list=[model_name])
+    logger.info(f"アノテーション結果: {result}")
     return result
 
 
 @when("画像を指定してアノテーションを実行する", target_fixture="annotation_result")
 def run_annotation_expect_error(single_image):
-    # annotate を呼び出し、結果を返す
-    # エラーシナリオでは特定のモデルに固定するか、設定ファイル等から取得するか検討。
-    # ここではフィーチャーファイルでモデル指定がないため、代表的なモデルを使用。
-    # 以前の pytest.raises で指定していたモデルに合わせる。
-    model_to_use = "Gemini 2.5 Pro Preview"
-    logger.info(f"エラーシナリオ用のアノテーション実行(モデル: {model_to_use})")
-    result = annotate([single_image], [model_to_use])
+    """エラーシナリオ用のアノテーション実行"""
+    model_to_use = "gpt-4o-mini"  # PydanticAIが自動でOpenAIプロバイダーを推測
+    logger.info(f"エラーシナリオ用のアノテーション実行: モデル={model_to_use}")
+    result = annotate(images_list=[single_image], model_name_list=[model_to_use])
     return result
 
 
@@ -182,51 +162,49 @@ def no_error_occurred(annotation_result):
             assert res["error"] is None
 
 
-@then(parsers.parse('"{expected_error_type}" のエラーメッセージが返される'))
-def api_specific_error_message_is_returned(annotation_result, expected_error_type):
-    assert annotation_result is not None, "アノテーション結果がNoneであってはなりません。"
-
-    found_at_least_one_model_result = False
-    if not annotation_result:  # 結果自体が空の辞書の場合
-        # found_at_least_one_model_result が False のままなので、最終的なアサーションで失敗する
-        logger.warning("アノテーション結果が空の辞書です。")
-
+@then("認証エラーメッセージが返される")
+def authentication_error_returned(annotation_result):
+    """PydanticAI認証エラーが返されることを確認"""
+    assert annotation_result is not None
+    found_auth_error = False
+    
     for image_hash, model_results_dict in annotation_result.items():
-        assert isinstance(model_results_dict, dict), (
-            f"画像ハッシュ '{image_hash}' の結果 (model_results_dict) が辞書ではありません。"
-        )
-
-        if not model_results_dict:
-            logger.warning(f"画像ハッシュ '{image_hash}' にはモデルごとの結果が含まれていません。")
-            continue
-
         for model_name, model_result in model_results_dict.items():
-            found_at_least_one_model_result = True
             error_message = model_result.get("error")
+            if error_message and ("api key" in error_message.lower() or "authentication" in error_message.lower()):
+                found_auth_error = True
+                logger.info(f"認証エラーを確認: {error_message}")
+    
+    assert found_auth_error, "認証エラーメッセージが見つかりませんでした"
 
-            assert error_message is not None, (
-                f"モデル '{model_name}' (画像ハッシュ: {image_hash}) の結果にエラーメッセージが含まれていません。"
-                f"取得した結果: {model_result}"
-            )
 
-            # エラーメッセージに期待されるエラータイプ名が含まれているかを確認
-            assert expected_error_type in error_message, (
-                f"モデル '{model_name}' (画像ハッシュ: {image_hash}) のエラーメッセージ '{error_message}' に "
-                f"期待されるエラータイプ '{expected_error_type}' が含まれていません。"
-            )
+@then("モデル利用不可エラーメッセージが返される")
+def model_unavailable_error_returned(annotation_result):
+    """PydanticAIモデル利用不可エラーが返されることを確認"""
+    assert annotation_result is not None
+    found_model_error = False
+    
+    for image_hash, model_results_dict in annotation_result.items():
+        for model_name, model_result in model_results_dict.items():
+            error_message = model_result.get("error")
+            if error_message and ("invalid" in error_message.lower() or "unauthorized" in error_message.lower()):
+                found_model_error = True
+                logger.info(f"モデル利用不可エラーを確認: {error_message}")
+    
+    assert found_model_error, "モデル利用不可エラーメッセージが見つかりませんでした"
 
-            # ApiAuthenticationError の場合は、APIキー関連の文言もチェック
-            if expected_error_type == "ApiAuthenticationError":
-                assert (
-                    "APIキー" in error_message or "API key" in error_message or "環境変数" in error_message
-                ), (
-                    f"モデル '{model_name}' (画像ハッシュ: {image_hash}) の ApiAuthenticationError メッセージ '{error_message}' に "
-                    f"APIキー関連のキーワード(APIキー, API key, 環境変数)が含まれていません。"
-                )
 
-    assert found_at_least_one_model_result, (
-        f"アノテーション結果内に、'{expected_error_type}' のエラーメッセージを検証できるモデル結果が1つも見つかりませんでした。"
-    )
+@then("TestModelによるモック結果が返される")
+def test_model_result_returned(annotation_result):
+    """PydanticAI TestModelによるモック結果が返されることを確認"""
+    assert annotation_result is not None
+    
+    for image_hash, model_results_dict in annotation_result.items():
+        for model_name, model_result in model_results_dict.items():
+            assert model_result.get("error") is None, f"TestModelでエラーが発生: {model_result.get('error')}"
+            tags = model_result.get("tags", [])
+            assert len(tags) > 0, "TestModelからタグが返されませんでした"
+            logger.info(f"TestModelの結果を確認: {tags}")
 
 
 @then("結果のタグリストは空である")

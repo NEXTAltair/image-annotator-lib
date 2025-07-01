@@ -82,7 +82,7 @@ def _ensure_test_class_mapping(model_name: str, config: dict):
 
     if class_name and model_name not in registry:
         # For WebAPI models, directly import and register the classes
-        if class_name in ["OpenAIApiAnnotator", "AnthropicApiAnnotator", "GoogleApiAnnotator"]:
+        if class_name in ["OpenAIApiAnnotator", "OpenAIApiChatAnnotator", "AnthropicApiAnnotator", "GoogleApiAnnotator"]:
             try:
                 print(f"IMPORT DEBUG: Attempting to import {class_name}")
                 if class_name == "OpenAIApiAnnotator":
@@ -93,6 +93,14 @@ def _ensure_test_class_mapping(model_name: str, config: dict):
 
                     registry[model_name] = OpenAIApiAnnotator
                     print(f"IMPORT SUCCESS: {model_name} -> OpenAIApiAnnotator")
+                elif class_name == "OpenAIApiChatAnnotator":
+                    # Use the correct OpenAI Chat class from openai_api_chat
+                    from image_annotator_lib.model_class.annotator_webapi.openai_api_chat import (
+                        OpenRouterApiAnnotator,
+                    )
+
+                    registry[model_name] = OpenRouterApiAnnotator
+                    print(f"IMPORT SUCCESS: {model_name} -> OpenRouterApiAnnotator")
                 elif class_name == "AnthropicApiAnnotator":
                     from image_annotator_lib.model_class.annotator_webapi.anthropic_api import (
                         AnthropicApiAnnotator,
@@ -126,6 +134,18 @@ def _ensure_test_class_mapping(model_name: str, config: dict):
                 return
             except ImportError as e:
                 print(f"IMPORT FAILED: WDTagger - {e}")
+                pass
+
+        if class_name == "ImprovedAesthetic":
+            try:
+                print("IMPORT DEBUG: Attempting to import ImprovedAesthetic")
+                from image_annotator_lib.model_class.scorer_onnx import ImprovedAesthetic
+
+                registry[model_name] = ImprovedAesthetic
+                print(f"IMPORT SUCCESS: {model_name} -> ImprovedAesthetic")
+                return
+            except ImportError as e:
+                print(f"IMPORT FAILED: ImprovedAesthetic - {e}")
                 pass
 
         # For local models, try existing registry lookup
