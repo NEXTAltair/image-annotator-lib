@@ -17,6 +17,6 @@ __all__ = [
 
 # 旧クラスとの互換性のためのエイリアス（必要に応じて）
 # GoogleApiAnnotator = PydanticAIWebAPIAnnotator
-# OpenAIApiAnnotator = PydanticAIWebAPIAnnotator  
+# OpenAIApiAnnotator = PydanticAIWebAPIAnnotator
 # AnthropicApiAnnotator = PydanticAIWebAPIAnnotator
 # OpenRouterApiAnnotator = PydanticAIWebAPIAnnotator

@@ -21,6 +21,54 @@ sys.path.insert(0, str(tests_dir))
 # from unit.fixtures.mock_components import *
 # from unit.fixtures.shared_fixtures import *
 
+
+@pytest.fixture(autouse=True)
+def reset_global_state(request):
+    """各テスト前後でグローバル状態をリセット"""
+    # BDDテストの場合はグローバル状態をクリアしない
+    # (BDDテストでは各ステップ間でレジストリの状態を保持する必要がある)
+    is_bdd_test = (
+        hasattr(request, 'node') and 
+        hasattr(request.node, 'name') and 
+        'test_bdd_runner.py' in str(request.node.fspath)
+    )
+    
+    # テスト前のセットアップ
+    yield
+    
+    # BDDテストでない場合のみクリーンアップを実行
+    if not is_bdd_test:
+        # テスト後のクリーンアップ
+        # レジストリとキャッシュをクリア
+        try:
+            from image_annotator_lib.core.registry import _MODEL_CLASS_OBJ_REGISTRY
+            from image_annotator_lib.core.model_factory import ModelLoad
+            from image_annotator_lib.core.config import config_registry
+            from image_annotator_lib.core.provider_manager import ProviderManager
+            
+            # レジストリクリア
+            _MODEL_CLASS_OBJ_REGISTRY.clear()
+            
+            # ModelLoadキャッシュクリア
+            if hasattr(ModelLoad, '_instance_cache'):
+                ModelLoad._instance_cache.clear()
+            if hasattr(ModelLoad, '_model_cache'):
+                ModelLoad._model_cache.clear()
+                
+            # 設定レジストリクリア
+            if hasattr(config_registry, '_config_cache'):
+                config_registry._config_cache.clear()
+                
+            # ProviderManagerキャッシュクリア
+            if hasattr(ProviderManager, '_provider_cache'):
+                ProviderManager._provider_cache.clear()
+            if hasattr(ProviderManager, '_agent_cache'):
+                ProviderManager._agent_cache.clear()
+                
+        except ImportError:
+            # モジュールがまだロードされていない場合はスキップ
+            pass
+
 resources_dir = Path("tests") / "resources"
 
 

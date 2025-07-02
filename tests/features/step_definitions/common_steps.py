@@ -2,12 +2,17 @@ import os
 
 from pytest_bdd import given
 
+from image_annotator_lib.core.registry import initialize_registry
+
 
 @given("モデル設定ファイルが正しく構成されている")
 def model_config_is_valid():
     # 実際の設定ファイルが存在し、内容が正しいことを検証
     config_path = "config/annotator_config.toml"
     assert os.path.exists(config_path)
+    
+    # レジストリを初期化してモデルが利用可能になるようにする
+    initialize_registry()
 
 
 @given("1つの有効な画像ファイルが準備されている", target_fixture="single_image")

@@ -3,7 +3,6 @@ from io import BytesIO
 from typing import override
 
 from PIL import Image
-
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 
 from image_annotator_lib.exceptions.errors import WebApiError
@@ -79,13 +78,13 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
 
             except UnexpectedModelBehavior as e:
                 # PydanticAI統一モデル動作エラー処理
-                error_message = f"OpenRouter API Error: Unexpected model behavior: {str(e)}"
+                error_message = f"OpenRouter API Error: Unexpected model behavior: {e!s}"
                 logger.error(f"OpenRouter API 推論エラー: {error_message}")
                 results.append({"response": None, "error": error_message})
 
             except Exception as e:
                 # その他の予期しないエラー
-                error_message = f"OpenRouter API Error: {str(e)}"
+                error_message = f"OpenRouter API Error: {e!s}"
                 logger.error(f"OpenRouter API 推論エラー: {error_message}")
                 results.append({"response": None, "error": error_message})
 
@@ -116,4 +115,3 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
 
         # デフォルトモデルで実行
         return self.run_with_model(pil_images, self.api_model_id)
-

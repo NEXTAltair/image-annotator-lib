@@ -11,6 +11,7 @@ from PIL import Image
 
 from image_annotator_lib.core.provider_manager import ProviderManager
 from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+
 # Note: No longer importing custom API exceptions - using PydanticAI unified error handling
 from image_annotator_lib.model_class.annotator_webapi.google_api import GoogleApiAnnotator
 
@@ -141,7 +142,7 @@ class TestGoogleApiAnnotatorIntegration:
             with google_annotator as annotator:
                 # Should return error in result instead of raising exception
                 results = annotator.run_with_model(lightweight_test_images[:1], "gemini-1.5-pro")
-            
+
             assert len(results) == 1
             assert results[0]["error"] is not None
             assert "authentication failed" in results[0]["error"]
@@ -160,7 +161,7 @@ class TestGoogleApiAnnotatorIntegration:
             with google_annotator as annotator:
                 # Should return error in result instead of raising exception
                 results = annotator.run_with_model(lightweight_test_images[:1], "gemini-1.5-pro")
-            
+
             assert len(results) == 1
             assert results[0]["error"] is not None
             assert "quota exceeded" in results[0]["error"]
@@ -179,7 +180,7 @@ class TestGoogleApiAnnotatorIntegration:
             with google_annotator as annotator:
                 # Should return error in result instead of raising exception
                 results = annotator.run_with_model(lightweight_test_images[:1], "gemini-1.5-pro")
-            
+
             assert len(results) == 1
             assert results[0]["error"] is not None
             assert "timeout occurred" in results[0]["error"]
@@ -198,7 +199,7 @@ class TestGoogleApiAnnotatorIntegration:
             with google_annotator as annotator:
                 # Should return error in result instead of raising exception
                 results = annotator.run_with_model(lightweight_test_images[:1], "gemini-1.5-pro")
-            
+
             assert len(results) == 1
             assert results[0]["error"] is not None
             assert "500 server error" in results[0]["error"]
@@ -352,13 +353,13 @@ class TestGoogleApiAnnotatorIntegration:
             # ProviderManager returns dict[str, AnnotationResult] not dict[str, dict[str, AnnotationResult]]
             for image_hash, annotation_result in result.items():
                 # annotation_result should be an AnnotationResult object
-                assert hasattr(annotation_result, 'error') or isinstance(annotation_result, dict)
-                
-                if hasattr(annotation_result, 'error'):
+                assert hasattr(annotation_result, "error") or isinstance(annotation_result, dict)
+
+                if hasattr(annotation_result, "error"):
                     # AnnotationResult object
                     assert annotation_result.error is None or annotation_result.error == ""
                     # The mock should return provider_manager_tag from the mock setup
-                    if hasattr(annotation_result, 'tags'):
+                    if hasattr(annotation_result, "tags"):
                         assert len(annotation_result.tags) > 0
                 elif isinstance(annotation_result, dict):
                     # Dict format
@@ -393,7 +394,7 @@ class TestGoogleApiAnnotatorIntegration:
     def test_configuration_validation(self, managed_config_registry):
         """Test configuration validation for Google annotator."""
         from unittest.mock import patch
-        
+
         # Test missing API key
         invalid_config = {
             "class": "GoogleApiAnnotator",

@@ -147,7 +147,7 @@ class TestAnthropicApiAnnotatorIntegration:
             with anthropic_annotator as annotator:
                 # Should return error in result instead of raising exception
                 results = annotator.run_with_model(lightweight_test_images[:1], "claude-3-5-sonnet")
-            
+
             assert len(results) == 1
             assert results[0]["error"] is not None
             assert "authentication failed" in results[0]["error"]
@@ -166,7 +166,7 @@ class TestAnthropicApiAnnotatorIntegration:
             with anthropic_annotator as annotator:
                 # Should return error in result instead of raising exception
                 results = annotator.run_with_model(lightweight_test_images[:1], "claude-3-5-sonnet")
-            
+
             assert len(results) == 1
             assert results[0]["error"] is not None
             assert "rate limit exceeded" in results[0]["error"]
@@ -187,7 +187,7 @@ class TestAnthropicApiAnnotatorIntegration:
             with anthropic_annotator as annotator:
                 # Should return error in result instead of raising exception
                 results = annotator.run_with_model(lightweight_test_images[:1], "claude-invalid-model")
-            
+
             assert len(results) == 1
             assert results[0]["error"] is not None
             assert "モデル未検出エラー: Model not found" in results[0]["error"]
@@ -206,7 +206,7 @@ class TestAnthropicApiAnnotatorIntegration:
             with anthropic_annotator as annotator:
                 # Should return error in result instead of raising exception
                 results = annotator.run_with_model(lightweight_test_images[:1], "claude-3-5-sonnet")
-            
+
             assert len(results) == 1
             assert results[0]["error"] is not None
             assert "timeout occurred" in results[0]["error"]
@@ -225,7 +225,7 @@ class TestAnthropicApiAnnotatorIntegration:
             with anthropic_annotator as annotator:
                 # Should return error in result instead of raising exception
                 results = annotator.run_with_model(lightweight_test_images[:1], "claude-3-5-sonnet")
-            
+
             assert len(results) == 1
             assert results[0]["error"] is not None
             assert "500 server error" in results[0]["error"]

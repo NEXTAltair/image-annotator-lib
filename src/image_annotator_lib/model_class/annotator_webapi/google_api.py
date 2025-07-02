@@ -1,14 +1,12 @@
 from typing import Any, Self, override
 
 from PIL import Image
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 
 from ...core.base import WebApiBaseAnnotator
 from ...core.pydantic_ai_factory import PydanticAIAnnotatorMixin
 from ...core.types import RawOutput
 from ...core.utils import logger
-from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
-
-from ...exceptions.errors import WebApiError
 
 
 class GoogleApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
@@ -76,13 +74,13 @@ class GoogleApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
 
                 except UnexpectedModelBehavior as e:
                     # PydanticAI統一モデル動作エラー処理
-                    error_message = f"Google API Error: Unexpected model behavior: {str(e)}"
+                    error_message = f"Google API Error: Unexpected model behavior: {e!s}"
                     logger.error(f"Google API 推論エラー: {error_message}")
                     results.append({"response": None, "error": error_message})
 
                 except Exception as e:
                     # その他の予期しないエラー
-                    error_message = f"Google API Error: {str(e)}"
+                    error_message = f"Google API Error: {e!s}"
                     logger.error(f"Google API 推論エラー: {error_message}")
                     results.append({"response": None, "error": error_message})
 
@@ -91,9 +89,8 @@ class GoogleApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
         except Exception as e:
             logger.error(f"Google API run_with_model エラー: {e}")
             # 全画像にエラーを返す
-            error_message = f"Google API Error: {str(e)}"
+            error_message = f"Google API Error: {e!s}"
             return [{"response": None, "error": error_message} for _ in images]
-
 
     @override
     def _preprocess_images(self, images: list[Image.Image]) -> list[Image.Image]:

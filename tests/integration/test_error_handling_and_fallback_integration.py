@@ -63,13 +63,13 @@ class TestErrorHandlingAndFallbackIntegration:
     @pytest.mark.fast_integration
     def test_partial_failure_graceful_degradation(self, mixed_model_configs, lightweight_test_images):
         """Test that partial failures in batch processing don't cause complete failure."""
-        from image_annotator_lib.core.types import AnnotationSchema
-        
+
         # Mock both provider manager and local annotator creation
         with patch("image_annotator_lib.api._is_pydantic_ai_webapi_annotator") as mock_is_pydantic:
-            with patch("image_annotator_lib.core.provider_manager.ProviderManager.run_inference_with_model") as mock_provider_run:
+            with patch(
+                "image_annotator_lib.core.provider_manager.ProviderManager.run_inference_with_model"
+            ) as mock_provider_run:
                 with patch("image_annotator_lib.api._create_annotator_instance") as mock_load_model:
-
                     # Configure which models are PydanticAI WebAPI models
                     def mock_is_pydantic_check(annotator_class):
                         return True  # Treat all as PydanticAI for this test
@@ -78,28 +78,27 @@ class TestErrorHandlingAndFallbackIntegration:
                         """Mock provider manager inference"""
                         # Calculate actual pHash for images
                         import imagehash
-                        from PIL import Image
-                        
+
                         results = {}
                         for image in images:
                             # Calculate actual pHash
                             phash = str(imagehash.phash(image))
-                            
+
                             if "failing" in model_name:
-                                # Return error result  
+                                # Return error result
                                 results[phash] = {
                                     "tags": [],
                                     "formatted_output": None,
-                                    "error": f"ModelLoadError: モデルロードエラー: Failed to load model {model_name}"
+                                    "error": f"ModelLoadError: モデルロードエラー: Failed to load model {model_name}",
                                 }
                             else:
                                 # Return success result
                                 results[phash] = {
                                     "tags": ["success_tag"],
                                     "formatted_output": {"tags": ["success_tag"]},
-                                    "error": None
+                                    "error": None,
                                 }
-                        
+
                         return results
 
                     def mock_model_loading(model_name):
@@ -118,7 +117,7 @@ class TestErrorHandlingAndFallbackIntegration:
                                     tags=["local_success_tag"],
                                     formatted_output={"tags": ["local_success_tag"]},
                                     error=None,
-                                )
+                                ),
                             }
                             return mock_annotator
 
@@ -129,7 +128,7 @@ class TestErrorHandlingAndFallbackIntegration:
                     # Test with mixed working and failing models
                     test_models = [
                         "working_openai_model",
-                        "failing_anthropic_model", 
+                        "failing_anthropic_model",
                         "working_local_model",
                         "failing_local_model",
                     ]
@@ -152,7 +151,7 @@ class TestErrorHandlingAndFallbackIntegration:
                                     error_value = result.get("error")
                                 else:
                                     error_value = getattr(result, "error", None)
-                                    
+
                                 if error_value is None:
                                     success_count += 1
                                 else:
@@ -160,7 +159,9 @@ class TestErrorHandlingAndFallbackIntegration:
 
                         # Should have both successes and failures
                         assert success_count > 0, f"No successful annotations found. Results: {results}"
-                        assert error_count > 0, f"No failed annotations found (test setup issue). Results: {results}"
+                        assert error_count > 0, (
+                            f"No failed annotations found (test setup issue). Results: {results}"
+                        )
 
                     except Exception as e:
                         pytest.fail(f"Partial failure test should not raise exceptions: {e!s}")
@@ -180,9 +181,7 @@ class TestErrorHandlingAndFallbackIntegration:
                     phash = f"test_hash_{i}"
                     results[phash] = {
                         model_name: AnnotationResult(
-                            tags=[],
-                            formatted_output={},
-                            error="Request timed out"
+                            tags=[], formatted_output={}, error="Request timed out"
                         )
                     }
                 return results
@@ -225,18 +224,16 @@ class TestErrorHandlingAndFallbackIntegration:
             """Mock provider manager with rate limiting"""
             nonlocal call_count
             call_count += 1
-            
+
             results = {}
             for i, image in enumerate(images):
                 phash = f"test_hash_{i}"
-                
+
                 if call_count <= 2:
                     # First 2 calls hit rate limit
                     results[phash] = {
                         model_name: AnnotationResult(
-                            tags=[],
-                            formatted_output={},
-                            error="Rate limit exceeded"
+                            tags=[], formatted_output={}, error="Rate limit exceeded"
                         )
                     }
                 else:
@@ -245,7 +242,7 @@ class TestErrorHandlingAndFallbackIntegration:
                         model_name: AnnotationResult(
                             tags=["rate_limit_recovery"],
                             formatted_output={"tags": ["rate_limit_recovery"]},
-                            error=None
+                            error=None,
                         )
                     }
             return results
@@ -319,9 +316,7 @@ class TestErrorHandlingAndFallbackIntegration:
                 phash = f"test_hash_{i}"
                 results[phash] = {
                     model_name: AnnotationResult(
-                        tags=[],
-                        formatted_output={},
-                        error="JSON parse error: malformed response"
+                        tags=[], formatted_output={}, error="JSON parse error: malformed response"
                     )
                 }
             return results
@@ -329,7 +324,6 @@ class TestErrorHandlingAndFallbackIntegration:
         with patch(
             "image_annotator_lib.core.provider_manager.ProviderManager.run_inference_with_model"
         ) as mock_provider_run:
-            
             for i, malformed_response in enumerate(malformed_responses):
                 mock_provider_run.side_effect = mock_malformed_inference
 
@@ -347,13 +341,20 @@ class TestErrorHandlingAndFallbackIntegration:
                                     error_msg = annotation_result.get("error", "")
                                 else:
                                     error_msg = getattr(annotation_result, "error", "")
-                                
+
                                 # Should have error for malformed response
                                 assert error_msg is not None
                                 error_msg_lower = error_msg.lower()
                                 assert any(
                                     keyword in error_msg_lower
-                                    for keyword in ["json", "format", "parse", "malformed", "invalid", "error"]
+                                    for keyword in [
+                                        "json",
+                                        "format",
+                                        "parse",
+                                        "malformed",
+                                        "invalid",
+                                        "error",
+                                    ]
                                 )
 
                 except Exception as e:
@@ -403,12 +404,20 @@ class TestErrorHandlingAndFallbackIntegration:
                                         error_value = result.get("error")
                                     else:
                                         error_value = getattr(result, "error", None)
-                                    
+
                                     assert error_value is not None
                                     # Accept both English and Japanese memory error messages
                                     error_lower = error_value.lower()
-                                    memory_keywords = ["memory", "insufficient", "メモリ", "memoryerror", "insufficient memory"]
-                                    assert any(keyword in error_lower for keyword in memory_keywords), f"Expected memory error, got: {error_value}"
+                                    memory_keywords = [
+                                        "memory",
+                                        "insufficient",
+                                        "メモリ",
+                                        "memoryerror",
+                                        "insufficient memory",
+                                    ]
+                                    assert any(keyword in error_lower for keyword in memory_keywords), (
+                                        f"Expected memory error, got: {error_value}"
+                                    )
                     else:
                         # Third attempt should succeed
                         if results:
@@ -419,7 +428,7 @@ class TestErrorHandlingAndFallbackIntegration:
                                         error_value = result.get("error")
                                     else:
                                         error_value = getattr(result, "error", None)
-                                        
+
                                     assert error_value is None
 
                 except Exception as e:
@@ -591,22 +600,19 @@ class TestErrorHandlingAndFallbackIntegration:
             for i, image in enumerate(images):
                 phash = f"test_hash_{i}"
                 results[phash] = {
-                    model_name: AnnotationResult(
-                        tags=[],
-                        formatted_output={},
-                        error=error_message
-                    )
+                    model_name: AnnotationResult(tags=[], formatted_output={}, error=error_message)
                 }
             return results
 
         with patch(
             "image_annotator_lib.core.provider_manager.ProviderManager.run_inference_with_model"
         ) as mock_provider_run:
-
             for scenario_name, error_message, expected_keywords in error_scenarios:
                 # Configure mock to return specific error message
-                mock_provider_run.side_effect = lambda model_name, images, api_model_id=None: mock_error_inference(
-                    model_name, images, api_model_id, error_message
+                mock_provider_run.side_effect = (
+                    lambda model_name, images, api_model_id=None: mock_error_inference(
+                        model_name, images, api_model_id, error_message
+                    )
                 )
 
                 try:
@@ -622,7 +628,7 @@ class TestErrorHandlingAndFallbackIntegration:
                                     error_msg = annotation_result.get("error")
                                 else:
                                     error_msg = getattr(annotation_result, "error", None)
-                                
+
                                 assert error_msg is not None
 
                                 error_msg_lower = error_msg.lower()

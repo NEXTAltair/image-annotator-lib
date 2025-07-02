@@ -11,13 +11,14 @@ def manage_factory_cache():
     """Fixture to automatically clear factory caches before and after each test."""
     import asyncio
     import gc
+
     from image_annotator_lib.core.base.pydantic_ai_annotator import AdvancedAgentFactory
     from image_annotator_lib.core.config import config_registry
-    
+
     # 1. Clear all caches before each test
     PydanticAIProviderFactory.clear_cache()
     AdvancedAgentFactory.clear_cache()
-    
+
     # 2. Close any existing event loops
     try:
         loop = asyncio.get_event_loop()
@@ -25,23 +26,24 @@ def manage_factory_cache():
             loop.close()
     except RuntimeError:
         pass  # No loop to close
-    
+
     # 3. Set new event loop for clean state
     try:
         new_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(new_loop)
     except RuntimeError:
         pass
-    
+
     # 4. Clear any test configurations from config registry
-    test_configs = [key for key in getattr(config_registry, '_config', {}).keys() 
-                   if key.startswith('test_')]
+    test_configs = [
+        key for key in getattr(config_registry, "_config", {}).keys() if key.startswith("test_")
+    ]
     for key in test_configs:
         try:
             config_registry._config.pop(key, None)
         except (AttributeError, KeyError):
             pass
-    
+
     # 5. Force garbage collection
     gc.collect()
 
@@ -51,16 +53,17 @@ def manage_factory_cache():
     # 1. Clear all caches
     PydanticAIProviderFactory.clear_cache()
     AdvancedAgentFactory.clear_cache()
-    
+
     # 2. Clean up test configurations again
-    test_configs = [key for key in getattr(config_registry, '_config', {}).keys() 
-                   if key.startswith('test_')]
+    test_configs = [
+        key for key in getattr(config_registry, "_config", {}).keys() if key.startswith("test_")
+    ]
     for key in test_configs:
         try:
             config_registry._config.pop(key, None)
         except (AttributeError, KeyError):
             pass
-    
+
     # 3. Close event loop if it exists
     try:
         loop = asyncio.get_event_loop()
@@ -68,7 +71,7 @@ def manage_factory_cache():
             loop.close()
     except RuntimeError:
         pass
-    
+
     # 4. Force garbage collection
     gc.collect()
 
@@ -95,7 +98,7 @@ class TestPydanticAIFactoryIntegration:
 
         # Different agents but should share provider configuration
         assert agent1 is not agent2  # Different agents
-        
+
         # Verify provider was created (at least one entry in providers cache)
         assert len(PydanticAIProviderFactory._providers) >= 1
 
@@ -151,7 +154,7 @@ class TestPydanticAIFactoryIntegration:
         assert PydanticAIProviderFactory._extract_provider_name("anthropic:claude-3") == "anthropic"
         assert PydanticAIProviderFactory._extract_provider_name("google:gemini-pro") == "google"
         assert PydanticAIProviderFactory._extract_provider_name("openrouter:mistral/7b") == "openrouter"
-        
+
         # Auto-detection tests
         assert PydanticAIProviderFactory._extract_provider_name("gpt-4") == "openai"
         assert PydanticAIProviderFactory._extract_provider_name("claude-3-sonnet") == "anthropic"
@@ -166,31 +169,31 @@ class TestPydanticAIFactoryIntegration:
         # Add some providers to cache
         PydanticAIProviderFactory.get_provider("openai", api_key="test_key")
         PydanticAIProviderFactory.get_provider("anthropic", api_key="test_key")
-        
+
         # Verify providers are cached
         assert len(PydanticAIProviderFactory._providers) >= 2
-        
+
         # Clear cache
         PydanticAIProviderFactory.clear_cache()
-        
+
         # Verify cache is cleared
         assert len(PydanticAIProviderFactory._providers) == 0
 
     @pytest.mark.integration
-    @pytest.mark.fast_integration 
+    @pytest.mark.fast_integration
     def test_provider_types_support(self):
         """
         Tests that all supported provider types can be created.
         """
         supported_providers = ["openai", "anthropic", "google", "openrouter"]
-        
+
         for provider_name in supported_providers:
             try:
                 provider = PydanticAIProviderFactory.get_provider(provider_name, api_key="test_key")
                 assert provider is not None
             except Exception as e:
                 pytest.fail(f"Failed to create {provider_name} provider: {e}")
-        
+
         # Verify all providers are cached
         assert len(PydanticAIProviderFactory._providers) == len(supported_providers)
 

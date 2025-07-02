@@ -69,9 +69,7 @@ class PydanticAIProviderFactory:
         return cls._providers[provider_key]
 
     @classmethod
-    def create_agent(
-        cls, model_name: str, api_model_id: str, api_key: str
-    ) -> Agent:
+    def create_agent(cls, model_name: str, api_model_id: str, api_key: str) -> Agent:
         """Create PydanticAI Agent with provider reuse and caching"""
 
         # Check if we're in test environment
@@ -239,7 +237,6 @@ class PydanticAIAnnotatorMixin:
             return PydanticAIProviderFactory._extract_provider_name(self.api_model_id)
         return "Unknown"
 
-
     def _setup_agent(self):
         """Setup PydanticAI Agent with provider sharing"""
         self._load_configuration()
@@ -276,7 +273,7 @@ class PydanticAIAnnotatorMixin:
             temp_agent = PydanticAIProviderFactory.create_agent(
                 model_name=f"{self.model_name}_temp",
                 api_model_id=override_model_id,
-                api_key=self.api_key.get_secret_value()
+                api_key=self.api_key.get_secret_value(),
             )
             agent_to_use = temp_agent
             logger.debug(f"Using temporary agent with model: {override_model_id}")

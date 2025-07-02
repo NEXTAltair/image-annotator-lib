@@ -11,7 +11,6 @@ from PIL import Image
 
 from image_annotator_lib.core.provider_manager import ProviderManager
 from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
-from image_annotator_lib.core.types import AnnotationResult
 
 
 class TestProviderManagerCrossProviderIntegration:
@@ -70,7 +69,7 @@ class TestProviderManagerCrossProviderIntegration:
 
                 # Use AsyncMock for async run method and simulate different responses
                 mock_agent.run = AsyncMock()
-                
+
                 if "openai" in model_name or "gpt" in api_model_id:
                     mock_agent.run.return_value = MagicMock(
                         data={"tags": ["openai_tag"], "provider": "openai"}
@@ -109,7 +108,7 @@ class TestProviderManagerCrossProviderIntegration:
                     # Verify the result structure (handle both dict and AnnotationResult)
                     for image_hash, annotation_result in result.items():
                         # AnnotationResult is TypedDict, so check attributes instead of isinstance
-                        if hasattr(annotation_result, 'error'):
+                        if hasattr(annotation_result, "error"):
                             assert annotation_result.error is None
                         elif isinstance(annotation_result, dict):
                             assert annotation_result.get("error") is None
@@ -134,7 +133,7 @@ class TestProviderManagerCrossProviderIntegration:
                         "tags": [f"tag_{model_name}"],
                         "formatted_output": {"tags": [f"tag_{model_name}"]},
                         "error": None,
-                        "phash": f"test_phash_{model_name}"
+                        "phash": f"test_phash_{model_name}",
                     }
                 }
 
@@ -173,7 +172,7 @@ class TestProviderManagerCrossProviderIntegration:
         ) as mock_run_inference:
             # Track provider manager calls
             provider_calls = []
-            
+
             def mock_provider_response(model_name, images_list, api_model_id=None):
                 provider_calls.append((model_name, api_model_id))
                 return {
@@ -181,7 +180,7 @@ class TestProviderManagerCrossProviderIntegration:
                         "tags": ["shared_tag"],
                         "formatted_output": {"tags": ["shared_tag"]},
                         "error": None,
-                        "phash": f"shared_phash_{len(provider_calls)}"
+                        "phash": f"shared_phash_{len(provider_calls)}",
                     }
                 }
 
@@ -239,9 +238,12 @@ class TestProviderManagerCrossProviderIntegration:
                 return {
                     f"switch_phash_{len(provider_switches)}": {
                         "tags": [f"{new_provider}_tag"],
-                        "formatted_output": {"provider": new_provider, "switch_count": len(provider_switches)},
+                        "formatted_output": {
+                            "provider": new_provider,
+                            "switch_count": len(provider_switches),
+                        },
                         "error": None,
-                        "phash": f"switch_phash_{len(provider_switches)}"
+                        "phash": f"switch_phash_{len(provider_switches)}",
                     }
                 }
 
@@ -288,7 +290,7 @@ class TestProviderManagerCrossProviderIntegration:
                             "tags": [],
                             "formatted_output": None,
                             "error": "Anthropic API Error",
-                            "phash": "error_phash"
+                            "phash": "error_phash",
                         }
                     }
                 else:
@@ -297,7 +299,7 @@ class TestProviderManagerCrossProviderIntegration:
                             "tags": ["success_tag"],
                             "formatted_output": {"tags": ["success_tag"], "provider": model_name},
                             "error": None,
-                            "phash": f"success_phash_{model_name}"
+                            "phash": f"success_phash_{model_name}",
                         }
                     }
 
@@ -322,8 +324,11 @@ class TestProviderManagerCrossProviderIntegration:
                         # Verify successful result structure
                         for image_hash, annotation_result in result.items():
                             if isinstance(annotation_result, dict):
-                                assert annotation_result.get("error") is None or annotation_result.get("error") == ""
-                            elif hasattr(annotation_result, 'error'):
+                                assert (
+                                    annotation_result.get("error") is None
+                                    or annotation_result.get("error") == ""
+                                )
+                            elif hasattr(annotation_result, "error"):
                                 assert annotation_result.error is None or annotation_result.error == ""
                     else:
                         # Failing provider should return error in result, not raise exception
@@ -331,7 +336,7 @@ class TestProviderManagerCrossProviderIntegration:
                             for image_hash, annotation_result in result.items():
                                 if isinstance(annotation_result, dict):
                                     assert annotation_result.get("error") is not None
-                                elif hasattr(annotation_result, 'error'):
+                                elif hasattr(annotation_result, "error"):
                                     assert annotation_result.error is not None
 
                 except Exception as e:
@@ -370,7 +375,7 @@ class TestProviderManagerCrossProviderIntegration:
                 # Verify result structure (handle both dict and AnnotationResult)
                 for image_hash, annotation_result in result.items():
                     # AnnotationResult is TypedDict, so check attributes instead of isinstance
-                    if hasattr(annotation_result, 'error'):
+                    if hasattr(annotation_result, "error"):
                         assert annotation_result.error is None
                     elif isinstance(annotation_result, dict):
                         assert annotation_result.get("error") is None
@@ -410,9 +415,12 @@ class TestProviderManagerCrossProviderIntegration:
                 return {
                     f"resource_phash_{provider}": {
                         "tags": [f"{provider}_tag"],
-                        "formatted_output": {"provider": provider, "concurrent_count": len(active_providers)},
+                        "formatted_output": {
+                            "provider": provider,
+                            "concurrent_count": len(active_providers),
+                        },
                         "error": None,
-                        "phash": f"resource_phash_{provider}"
+                        "phash": f"resource_phash_{provider}",
                     }
                 }
 
@@ -486,7 +494,7 @@ class TestProviderManagerCrossProviderIntegration:
                     if result:
                         for image_hash, annotation_result in result.items():
                             # AnnotationResult is TypedDict, so check attributes instead of isinstance
-                            if hasattr(annotation_result, 'error'):
+                            if hasattr(annotation_result, "error"):
                                 assert annotation_result.error is not None
                             elif isinstance(annotation_result, dict):
                                 assert annotation_result.get("error") is not None

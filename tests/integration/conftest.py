@@ -82,7 +82,12 @@ def _ensure_test_class_mapping(model_name: str, config: dict):
 
     if class_name and model_name not in registry:
         # For WebAPI models, directly import and register the classes
-        if class_name in ["OpenAIApiAnnotator", "OpenAIApiChatAnnotator", "AnthropicApiAnnotator", "GoogleApiAnnotator"]:
+        if class_name in [
+            "OpenAIApiAnnotator",
+            "OpenAIApiChatAnnotator",
+            "AnthropicApiAnnotator",
+            "GoogleApiAnnotator",
+        ]:
             try:
                 print(f"IMPORT DEBUG: Attempting to import {class_name}")
                 if class_name == "OpenAIApiAnnotator":

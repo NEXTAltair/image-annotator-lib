@@ -8,7 +8,7 @@ from typing import Any, Self, override
 from PIL import Image
 
 # --- ローカルインポート ---
-from ...exceptions.errors import ConfigurationError, ApiAuthenticationError
+from ...exceptions.errors import ApiAuthenticationError, ConfigurationError
 from ..config import config_registry
 from ..model_factory import prepare_web_api_components
 from ..types import AnnotationSchema, RawOutput, WebApiComponents, WebApiFormattedOutput
@@ -170,7 +170,6 @@ class WebApiBaseAnnotator(BaseAnnotator):
             logger.debug(f"レート制限のため {wait_time:.2f} 秒待機します。")
             time.sleep(wait_time)
         self.last_request_time = time.time()
-
 
     def _parse_common_json_response(self, text_content: str | dict[str, Any]) -> WebApiFormattedOutput:
         """共通のJSONレスポンス文字列を解析し、WebApiFormattedOutputを生成するヘルパー。

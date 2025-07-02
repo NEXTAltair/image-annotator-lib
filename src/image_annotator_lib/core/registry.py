@@ -152,7 +152,7 @@ def _register_models(
         pydantic_ai_class = available_classes.get("PydanticAIWebAPIAnnotator")
         if pydantic_ai_class:
             logger.debug("PydanticAI統一WebAPIアノテーターを強制登録します")
-        
+
         # 設定ファイルに基づいてモデルを登録
         for model_name, model_config in config.items():
             logger.debug(
@@ -256,7 +256,7 @@ def list_available_annotators() -> list[str]:
 
 def _find_annotator_class_by_provider(provider: str, available_classes: dict[str, ModelClass]) -> str:
     """プロバイダー名に基づいてアノテータークラス名を決定する。
-    
+
     PydanticAI統一実装により、すべてのWebAPIプロバイダーは
     PydanticAIWebAPIAnnotatorを使用します。
     """

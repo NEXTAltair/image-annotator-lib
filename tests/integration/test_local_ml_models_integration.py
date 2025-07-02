@@ -11,17 +11,17 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from image_annotator_lib.api import annotate, list_available_annotators, _MODEL_INSTANCE_REGISTRY
+from image_annotator_lib.api import _MODEL_INSTANCE_REGISTRY, annotate, list_available_annotators
 from image_annotator_lib.core.model_factory import ModelLoad
-from image_annotator_lib.core.types import AnnotationResult
 from image_annotator_lib.core.provider_manager import ProviderManager
 from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
 from image_annotator_lib.core.registry import get_cls_obj_registry
+from image_annotator_lib.core.types import AnnotationResult
 
 
 class TestLocalMLModelsIntegration:
     """Integration tests for ONNX, TensorFlow, and CLIP models."""
-    
+
     @pytest.fixture(autouse=True)
     def comprehensive_cleanup(self):
         """Comprehensive cleanup of all global state between tests"""
@@ -29,9 +29,9 @@ class TestLocalMLModelsIntegration:
         _MODEL_INSTANCE_REGISTRY.clear()
         PydanticAIProviderFactory.clear_cache()
         ProviderManager._provider_instances.clear()
-        
+
         yield
-        
+
         # Clear after test
         _MODEL_INSTANCE_REGISTRY.clear()
         PydanticAIProviderFactory.clear_cache()
@@ -111,17 +111,39 @@ class TestLocalMLModelsIntegration:
         test_model = onnx_models[0] if onnx_models else "wd14_vit_v1_vit_large_p14_336_e1_tagger"
 
         try:
-            # Test model loading
-            with patch("image_annotator_lib.api._create_annotator_instance") as mock_load:
+            # Test model loading through the annotate API
+            with patch("image_annotator_lib.api._create_annotator_instance") as mock_create:
                 mock_annotator = MagicMock()
+                # Mock context manager support
+                mock_annotator.__enter__ = MagicMock(return_value=mock_annotator)
+                mock_annotator.__exit__ = MagicMock(return_value=None)
+                
+                # Mock predict method
+                def mock_predict(images, phash_list):
+                    from image_annotator_lib.core.types import AnnotationResult
+                    results = []
+                    for i, (image, phash) in enumerate(zip(images, phash_list, strict=False)):
+                        results.append(
+                            AnnotationResult(
+                                phash=phash,
+                                tags=["test_onnx_tag"],
+                                formatted_output={"tags": ["test_onnx_tag"]},
+                                error=None,
+                            )
+                        )
+                    return results
+                
+                mock_annotator.predict.side_effect = mock_predict
                 mock_create.return_value = mock_annotator
 
-                # This should not raise exceptions related to model loading
-                model_load = ModelLoad()
-                model = model_load.load_model(test_model)
+                # Test through the annotate API
+                from PIL import Image
+                test_image = Image.new('RGB', (224, 224), color='red')
+                results = annotate(images_list=[test_image], model_name_list=[test_model])
 
-                assert model is not None
-                mock_load.assert_called_once_with(test_model)
+                assert isinstance(results, dict)
+                assert len(results) > 0
+                mock_create.assert_called_once_with(test_model)
 
         except Exception as e:
             pytest.fail(f"ONNX model loading failed for {test_model}: {e!s}")
@@ -146,15 +168,39 @@ class TestLocalMLModelsIntegration:
         test_model = tf_models[0] if tf_models else "deepdanbooru_tagger"
 
         try:
-            with patch("image_annotator_lib.api._create_annotator_instance") as mock_load:
+            # Test model loading through the annotate API
+            with patch("image_annotator_lib.api._create_annotator_instance") as mock_create:
                 mock_annotator = MagicMock()
+                # Mock context manager support
+                mock_annotator.__enter__ = MagicMock(return_value=mock_annotator)
+                mock_annotator.__exit__ = MagicMock(return_value=None)
+                
+                # Mock predict method
+                def mock_predict(images, phash_list):
+                    from image_annotator_lib.core.types import AnnotationResult
+                    results = []
+                    for i, (image, phash) in enumerate(zip(images, phash_list, strict=False)):
+                        results.append(
+                            AnnotationResult(
+                                phash=phash,
+                                tags=["test_tensorflow_tag"],
+                                formatted_output={"tags": ["test_tensorflow_tag"]},
+                                error=None,
+                            )
+                        )
+                    return results
+                
+                mock_annotator.predict.side_effect = mock_predict
                 mock_create.return_value = mock_annotator
 
-                model_load = ModelLoad()
-                model = model_load.load_model(test_model)
+                # Test through the annotate API
+                from PIL import Image
+                test_image = Image.new('RGB', (224, 224), color='red')
+                results = annotate(images_list=[test_image], model_name_list=[test_model])
 
-                assert model is not None
-                mock_load.assert_called_once_with(test_model)
+                assert isinstance(results, dict)
+                assert len(results) > 0
+                mock_create.assert_called_once_with(test_model)
 
         except Exception as e:
             pytest.fail(f"TensorFlow model loading failed for {test_model}: {e!s}")
@@ -183,9 +229,9 @@ class TestLocalMLModelsIntegration:
         managed_config_registry.set(test_model, test_config)
 
         try:
-            # Mock the CLIP components loading
+            # Mock the CLIP components loading - need to patch where it's actually used
             with patch(
-                "image_annotator_lib.core.model_factory.ModelLoad.load_clip_components"
+                "image_annotator_lib.core.base.clip.ModelLoad.load_clip_components"
             ) as mock_load_clip:
                 # Mock CLIP components structure
                 mock_clip_model = MagicMock()
@@ -277,15 +323,17 @@ class TestLocalMLModelsIntegration:
                 def mock_predict(images, phash_list):
                     """Mock predict that returns results for actual image hashes"""
                     results = []
-                    for i, (image, phash) in enumerate(zip(images, phash_list)):
-                        results.append(AnnotationResult(
-                            phash=phash,
-                            tags=mock_result.get("tags", []), 
-                            formatted_output=mock_result, 
-                            error=None
-                        ))
+                    for i, (image, phash) in enumerate(zip(images, phash_list, strict=False)):
+                        results.append(
+                            AnnotationResult(
+                                phash=phash,
+                                tags=mock_result.get("tags", []),
+                                formatted_output=mock_result,
+                                error=None,
+                            )
+                        )
                     return results
-                
+
                 mock_annotator.predict.side_effect = mock_predict
                 mock_create.return_value = mock_annotator
 
@@ -354,19 +402,21 @@ class TestLocalMLModelsIntegration:
                 # Mock context manager support
                 mock_annotator.__enter__ = MagicMock(return_value=mock_annotator)
                 mock_annotator.__exit__ = MagicMock(return_value=None)
-                
+
                 def mock_predict(images, phash_list):
                     """Mock predict that returns results for actual image hashes"""
                     results = []
-                    for i, (image, phash) in enumerate(zip(images, phash_list)):
-                        results.append(AnnotationResult(
-                            phash=phash,
-                            tags=[f"memory_tag_{model_name}"], 
-                            formatted_output={"tags": [f"memory_tag_{model_name}"]}, 
-                            error=None
-                        ))
+                    for i, (image, phash) in enumerate(zip(images, phash_list, strict=False)):
+                        results.append(
+                            AnnotationResult(
+                                phash=phash,
+                                tags=[f"memory_tag_{model_name}"],
+                                formatted_output={"tags": [f"memory_tag_{model_name}"]},
+                                error=None,
+                            )
+                        )
                     return results
-                
+
                 mock_annotator.predict.side_effect = mock_predict
                 created_annotators[model_name] = mock_annotator
                 return mock_annotator
@@ -376,7 +426,7 @@ class TestLocalMLModelsIntegration:
             # Test loading multiple local models
             test_models = [
                 "wd14_vit_v1_vit_large_p14_336_e1_tagger",
-                "deepdanbooru_tagger", 
+                "deepdanbooru_tagger",
                 "improved_aesthetic_predictor",
             ]
 
@@ -415,13 +465,15 @@ class TestLocalMLModelsIntegration:
                     assert isinstance(img, (Image.Image, np.ndarray)) or hasattr(img, "save")
 
                 results = []
-                for i, (image, phash) in enumerate(zip(images, phash_list)):
-                    results.append(AnnotationResult(
-                        phash=phash,
-                        tags=["preprocessing_test"],
-                        formatted_output={"tags": ["preprocessing_test"]},
-                        error=None,
-                    ))
+                for i, (image, phash) in enumerate(zip(images, phash_list, strict=False)):
+                    results.append(
+                        AnnotationResult(
+                            phash=phash,
+                            tags=["preprocessing_test"],
+                            formatted_output={"tags": ["preprocessing_test"]},
+                            error=None,
+                        )
+                    )
                 return results
 
             mock_annotator.predict.side_effect = mock_predict
@@ -431,7 +483,7 @@ class TestLocalMLModelsIntegration:
             test_cases = [
                 ("PIL Image", lightweight_test_images[0]),
             ]
-            
+
             # For bytes test, convert bytes back to PIL Image first since API expects PIL Images
             image_bytes = self._image_to_bytes(lightweight_test_images[0])
             bytes_as_pil = Image.open(io.BytesIO(image_bytes))
@@ -461,18 +513,20 @@ class TestLocalMLModelsIntegration:
                 # Mock context manager support
                 mock_annotator.__enter__ = MagicMock(return_value=mock_annotator)
                 mock_annotator.__exit__ = MagicMock(return_value=None)
-                
+
                 def mock_predict(images, phash_list):
                     results = []
-                    for i, (image, phash) in enumerate(zip(images, phash_list)):
-                        results.append(AnnotationResult(
-                            phash=phash,
-                            tags=[f"tag_{load_call_count}"],
-                            formatted_output={"tags": [f"tag_{load_call_count}"]},
-                            error=None,
-                        ))
+                    for i, (image, phash) in enumerate(zip(images, phash_list, strict=False)):
+                        results.append(
+                            AnnotationResult(
+                                phash=phash,
+                                tags=[f"tag_{load_call_count}"],
+                                formatted_output={"tags": [f"tag_{load_call_count}"]},
+                                error=None,
+                            )
+                        )
                     return results
-                
+
                 mock_annotator.predict.side_effect = mock_predict
                 return mock_annotator
 
@@ -491,7 +545,7 @@ class TestLocalMLModelsIntegration:
                 # Due to caching, not all models may be loaded fresh
                 # So we check for results rather than strict call counts
                 assert isinstance(results, dict)
-                
+
                 # If we got results, that shows the system is working
                 if len(results) > 0:
                     assert True
@@ -575,7 +629,7 @@ class TestLocalMLModelsIntegration:
             loaded_class = managed_config_registry.get(model_name, "class")
             loaded_device = managed_config_registry.get(model_name, "device")
             loaded_size = managed_config_registry.get(model_name, "estimated_size_gb")
-            
+
             assert loaded_class == config["class"]
             assert loaded_device == config["device"]
             assert loaded_size == config["estimated_size_gb"]

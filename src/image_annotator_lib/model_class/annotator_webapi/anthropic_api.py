@@ -3,14 +3,12 @@ from io import BytesIO
 from typing import override
 
 from PIL import Image
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 
 from ...core.base import WebApiBaseAnnotator
 from ...core.pydantic_ai_factory import PydanticAIAnnotatorMixin, _is_test_environment
 from ...core.types import RawOutput
 from ...core.utils import logger
-from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
-
-from ...core.types import AnnotationResult
 from ...exceptions.errors import WebApiError
 
 
@@ -69,13 +67,13 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
 
             except UnexpectedModelBehavior as e:
                 # PydanticAI統一モデル動作エラー処理
-                error_message = f"Anthropic API Error: Unexpected model behavior: {str(e)}"
+                error_message = f"Anthropic API Error: Unexpected model behavior: {e!s}"
                 logger.error(f"Anthropic API 推論エラー: {error_message}")
                 results.append({"response": None, "error": error_message})
 
             except Exception as e:
                 # その他の予期しないエラー
-                error_message = f"Anthropic API Error: {str(e)}"
+                error_message = f"Anthropic API Error: {e!s}"
                 logger.error(f"Anthropic API 推論エラー: {error_message}")
                 results.append({"response": None, "error": error_message})
 
@@ -106,4 +104,3 @@ class AnthropicApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
 
         # デフォルトモデルで実行
         return self.run_with_model(pil_images, self.api_model_id)
-

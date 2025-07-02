@@ -61,6 +61,7 @@ dependencies = [
     "pyyaml>=6.0.2",
     "polars>=1.31.0",
     "pytest-xdist>=3.7.0",
+    "pytest-bdd>=8.1.0",
 ]
 
 [dependency-groups]
@@ -148,6 +149,7 @@ markers = [
     "real_api: 実API検証テスト",
     "system_integration: エンドツーエンドシナリオ",
     "provider_specific: プロバイダー固有テスト",
+    "bdd: BDD（Behavior-Driven Development）テスト",
 ]
 
 [tool.coverage.run]

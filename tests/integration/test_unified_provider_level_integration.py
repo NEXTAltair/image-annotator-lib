@@ -208,7 +208,8 @@ class TestUnifiedErrorHandling:
 
     def test_unified_error_handling(self, managed_config_registry, api_key_manager, test_image):
         """統一エラーハンドリングテスト - PydanticAI統一実装版"""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
+
         from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 
         # エラーハンドリング対象プロバイダー(OpenRouterは同一実装なのでOpenAIと同じ)
@@ -251,16 +252,18 @@ class TestUnifiedErrorHandling:
             )
 
             # PydanticAI統一実装では、エラーハンドリングはrun_with_modelメソッド内で実行される
-            with patch.object(annotator_class, '_run_inference_with_model') as mock_inference:
+            with patch.object(annotator_class, "_run_inference_with_model") as mock_inference:
                 annotator = annotator_class(test_model_name)
-                
+
                 # 各エラータイプのテスト
                 for test_error, expected_error_content in error_test_cases:
                     mock_inference.side_effect = test_error
-                    
+
                     with annotator:
-                        results = annotator.run_with_model([test_image], f"{provider_name.lower()}-test-model")
-                        
+                        results = annotator.run_with_model(
+                            [test_image], f"{provider_name.lower()}-test-model"
+                        )
+
                         # エラーが適切にハンドリングされていることを確認
                         assert len(results) == 1
                         assert results[0]["response"] is None
