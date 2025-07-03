@@ -10,6 +10,7 @@ from PIL import Image
 from .core.base.annotator import BaseAnnotator
 from .core.provider_manager import ProviderManager
 from .core.registry import get_cls_obj_registry, find_model_class_case_insensitive
+from .core.simplified_agent_factory import get_agent_factory, get_available_models
 from .core.types import AnnotationResult
 from .core.utils import calculate_phash, logger
 
@@ -53,10 +54,10 @@ class PHashAnnotationResults(dict[str, dict[str, ModelResultDict]]):
 def _create_annotator_instance(model_name: str) -> BaseAnnotator:
     """
     モデル名に対応するクラスを取得し、インスタンスを生成します。
-    PydanticAI WebAPIモデルの場合はProvider-level管理を使用します。
+    PydanticAI WebAPIモデルの場合は簡素化されたAgent factoryを使用します。
 
     Args:
-        model_name (str): モデルの名前 (Web APIの場合は model_name_short)。
+        model_name (str): モデルの名前または model_id。
 
     Returns:
         BaseAnnotator: アノテーターのインスタンス。
@@ -66,20 +67,33 @@ def _create_annotator_instance(model_name: str) -> BaseAnnotator:
     """
     logger.debug(f"Creating annotator instance for model: '{model_name}'")
     
-    # 大文字・小文字を区別しないモデル検索
+    # Check if it's a direct model_id (e.g., "google/gemini-2.5-pro-preview-03-25")
+    agent_factory = get_agent_factory()
+    if agent_factory.is_model_available(model_name):
+        logger.debug(f"Using simplified Agent factory for model: {model_name}")
+        # Create a simplified wrapper for PydanticAI agents
+        from .core.simplified_agent_wrapper import SimplifiedAgentWrapper
+        return SimplifiedAgentWrapper(model_name)
+    
+    # Fallback to traditional registry-based approach
     model_result = find_model_class_case_insensitive(model_name)
     if model_result is None:
         registry = get_cls_obj_registry()
         available_models = list(registry.keys())
+        available_direct_models = agent_factory.get_available_models()
+        
         error_details = {
             "requested_model": model_name,
-            "available_models_count": len(available_models),
-            "available_models_sample": available_models[:10],
-            "registry_size": len(registry)
+            "registry_models_count": len(available_models),
+            "direct_models_count": len(available_direct_models),
+            "registry_sample": available_models[:5],
+            "direct_models_sample": available_direct_models[:5]
         }
-        logger.error(f"Model resolution failed: requested={model_name}, available_count={len(available_models)}, registry_size={len(registry)}")
-        logger.error(f"要求されたモデル名 '{model_name}' はクラスレジストリに見つかりません。利用可能なモデル: {available_models[:5]}...")
-        raise KeyError(f"Model '{model_name}' not found in class registry.")
+        logger.error(f"Model resolution failed: {error_details}")
+        logger.error(f"要求されたモデル名 '{model_name}' が見つかりません。")
+        logger.error(f"レジストリモデル例: {available_models[:3]}")
+        logger.error(f"直接利用可能モデル例: {available_direct_models[:3]}")
+        raise KeyError(f"Model '{model_name}' not found in registry or available models.")
 
     actual_model_name, Annotator_class = model_result
     

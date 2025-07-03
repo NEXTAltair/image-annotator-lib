@@ -8,6 +8,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 from .api import PHashAnnotationResults
 from .core.api_model_discovery import discover_available_vision_models
+from .core.simplified_agent_factory import get_available_models, create_agent
 from .core.config import config_registry
 from .core.constants import (
     AVAILABLE_API_MODELS_CONFIG_PATH,
@@ -37,6 +38,8 @@ __all__ = [
     "annotate",
     "config_registry",
     "discover_available_vision_models",
+    "get_available_models",
+    "create_agent",
     "list_available_annotators",
 ]
 
