@@ -1,6 +1,8 @@
 # アクティブコンテキスト
 
 ## 1. 現作業焦点 (Current Focus)
+- **PydanticAI統合の堅牢性強化 (2025-07-02完了)**: Event loop管理、テスト環境検出、エラーハンドリングの改善が完了。
+- **BDDテスト修正 (2025-07-02完了)**: ステップ定義の追加、期待値の統一、スキップ条件の強化が完了。
 - **統合テスト実装**: RFC 005に基づく包括的統合テストスイートの構築。Provider-level PydanticAIアーキテクチャの信頼性と安定性を保証する3段階ハイブリッド戦略を実装中。
     - **Phase 1 (第1週)**: Provider Manager、PydanticAI Factory、Cross-Provider統合テストの実装
     - **Phase 2 (第2週)**: メモリ管理・設定統合テストの実装
@@ -13,9 +15,12 @@
 - **リスク管理戦略**: API仕様変更、リソース競合、テスト不安定性への対策
 
 ## 3. 最近の主要な変更点 (Recent Key Changes)
-- **RFC 005策定完了**: 統合テスト実装計画の詳細化と承認
-- **TodoList更新**: 統合テスト実装の具体的タスク分解
-- **プランニングルール適用**: `.cursor/rules/plan.mdc`に従った体系的計画立案
+- **PydanticAI Event loop管理改善**: `_run_agent_safely()` メソッドによる堅牢な非同期処理制御を実装
+- **テスト環境検出強化**: BDDテスト、スタックフレーム検査による確実なテスト環境認識を追加
+- **BDDテストステップ定義完備**: `"モデルクラスレジストリが初期化されている"` 等の不足ステップ定義を追加
+- **統合テストmockパターン修正**: `ProviderManager.get_provider_instance` mockによる実装フロー準拠テストに変更
+- **TypedDict対応統一**: 全テストで `AnnotationResult` への辞書アクセス（`.get()`）を統一
+- **アーキテクチャドキュメント更新**: エラーハンドリング、堅牢性改善の詳細を追記
 
 ## 4. 次のステップ (Next Steps)
 1. **Phase 1実装開始**: Provider Manager統合テスト (`test_provider_manager_integration.py`) の作成

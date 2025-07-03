@@ -11,14 +11,14 @@ import pytest
 from pytest_bdd import scenarios
 
 # PydanticAI統一実装対応のステップ定義をインポート
-from .features.step_definitions.common_steps import *  # noqa: F403
-from .features.step_definitions.webapi_annotate_steps import *  # noqa: F403
-from .features.step_definitions.pydantic_ai_provider_level_steps import *  # noqa: F403
+from tests.features.step_definitions.common_steps import *  # noqa: F403
+from tests.features.step_definitions.pydantic_ai_provider_level_steps import *  # noqa: F403
+from tests.features.step_definitions.webapi_annotate_steps import *  # noqa: F403
 
 # WebAPI アノテーション E2E テストのメインシナリオ
 scenarios("features/webapi_annotate.feature")
 
-# 共通アノテーション機能の基本的なテストシナリオ  
+# 共通アノテーション機能の基本的なテストシナリオ
 scenarios("features/annotation_common.feature")
 
 # マークを追加してBDDテストとして識別

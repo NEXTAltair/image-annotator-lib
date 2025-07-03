@@ -107,14 +107,8 @@ class TestProviderManagerCrossProviderIntegration:
 
                     # Verify the result structure (handle both dict and AnnotationResult)
                     for image_hash, annotation_result in result.items():
-                        # AnnotationResult is TypedDict, so check attributes instead of isinstance
-                        if hasattr(annotation_result, "error"):
-                            assert annotation_result.error is None
-                        elif isinstance(annotation_result, dict):
-                            assert annotation_result.get("error") is None
-                        else:
-                            # For other types, ensure no error occurred
-                            pass
+                        # AnnotationResult is TypedDict, so always use dictionary access
+                        assert annotation_result.get("error") is None
 
                 except Exception as e:
                     pytest.fail(f"Sequential multi-provider test failed for {model_name}: {e!s}")
@@ -372,16 +366,10 @@ class TestProviderManagerCrossProviderIntegration:
                 # Verify OpenRouter-specific handling was called
                 mock_create_openrouter.assert_called_once()
 
-                # Verify result structure (handle both dict and AnnotationResult)
+                # Verify result structure (AnnotationResult is TypedDict)
                 for image_hash, annotation_result in result.items():
-                    # AnnotationResult is TypedDict, so check attributes instead of isinstance
-                    if hasattr(annotation_result, "error"):
-                        assert annotation_result.error is None
-                    elif isinstance(annotation_result, dict):
-                        assert annotation_result.get("error") is None
-                    else:
-                        # For other types, ensure no error occurred
-                        pass
+                    # AnnotationResult is TypedDict, so always use dictionary access
+                    assert annotation_result.get("error") is None
 
             except Exception as e:
                 pytest.fail(f"OpenRouter provider integration failed: {e!s}")

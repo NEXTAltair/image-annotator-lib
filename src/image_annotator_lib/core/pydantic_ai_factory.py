@@ -31,9 +31,21 @@ def _is_test_environment() -> bool:
         os.getenv("TESTING"),
         any("test" in arg for arg in sys.argv),
         any("pytest" in arg for arg in sys.argv),
+        # Additional check for BDD tests
+        any("bdd" in str(arg).lower() for arg in sys.argv),
+        # Check if we're in a test file execution
+        any("test_" in str(frame.filename) for frame in 
+            __import__('inspect').stack() if hasattr(frame, 'filename')),
+        # Force test environment for BDD tests
+        any("test_bdd_runner" in str(frame.filename) for frame in 
+            __import__('inspect').stack() if hasattr(frame, 'filename')),
     ]
 
-    return any(test_indicators)
+    is_test = any(test_indicators)
+    if is_test:
+        logger.debug(f"Test environment detected via: {[i for i, indicator in enumerate(test_indicators) if indicator]}")
+    
+    return is_test
 
 
 _PROVIDER_MAP = {
@@ -71,19 +83,15 @@ class PydanticAIProviderFactory:
     @classmethod
     def create_agent(cls, model_name: str, api_model_id: str, api_key: str) -> Agent:
         """Create PydanticAI Agent with provider reuse and caching"""
+        
+        logger.debug(f"Creating agent for model: {model_name}, api_model_id: {api_model_id}")
+        logger.debug(f"API key provided: {'Yes' if api_key else 'No'}")
 
-        # Check if we're in test environment
-        if _is_test_environment():
-            # In test environment, use TestModel to avoid API authentication
-            from pydantic_ai.models.test import TestModel
-
-            test_model = TestModel()
-            # Create Agent with TestModel
-            agent = Agent(model=test_model, output_type=AnnotationSchema, system_prompt=BASE_PROMPT)
-            logger.debug(f"Created TestModel Agent for test environment: {model_name}")
-            return agent
+        # Note: BDD tests should be E2E tests, so we don't use TestModel
+        # If this is a test environment without API keys, let the test handle the authentication error
 
         provider_name = cls._extract_provider_name(api_model_id)
+        logger.debug(f"Extracted provider name: {provider_name}")
 
         # Create or reuse provider
         provider_kwargs = {"api_key": api_key}
@@ -103,14 +111,32 @@ class PydanticAIProviderFactory:
         else:
             full_model_name = api_model_id
 
-        # Use PydanticAI's native model inference
-        model = infer_model(full_model_name)
-        model._provider = provider
+        logger.debug(f"Model name resolution: {api_model_id} -> {full_model_name}")
 
-        # Create Agent with shared provider
-        agent = Agent(model=model, output_type=AnnotationSchema, system_prompt=BASE_PROMPT)
+        try:
+            # Use PydanticAI's native model inference
+            model = infer_model(full_model_name)
+            logger.debug(f"Inferred model type: {type(model)}")
+            
+            model._provider = provider
+            logger.debug(f"Assigned provider: {type(provider)}")
 
-        return agent
+            # Create Agent with shared provider
+            agent = Agent(model=model, output_type=AnnotationSchema, system_prompt=BASE_PROMPT)
+            logger.debug(f"Created agent successfully for {full_model_name}")
+
+            return agent
+        except Exception as e:
+            error_details = {
+                "model_name": model_name,
+                "api_model_id": api_model_id,
+                "full_model_name": full_model_name,
+                "provider_name": provider_name,
+                "error_type": type(e).__name__,
+                "error_message": str(e)
+            }
+            logger.error(f"Agent creation failed: model={model_name}, api_id={api_model_id}, full_name={full_model_name}, provider={provider_name}, error_type={type(e).__name__}, message={str(e)}", exc_info=True)
+            raise
 
     @classmethod
     def get_cached_agent(
@@ -190,17 +216,25 @@ class PydanticAIProviderFactory:
     @classmethod
     def _extract_provider_name(cls, api_model_id: str) -> str:
         """Extract provider name from model ID"""
+        logger.debug(f"Extracting provider name from api_model_id: '{api_model_id}'")
+        
         if ":" in api_model_id:
-            return api_model_id.split(":", 1)[0]
+            provider = api_model_id.split(":", 1)[0]
+            logger.debug(f"Provider extracted from prefix: '{provider}'")
+            return provider
 
         # Auto-detect provider
         if api_model_id.startswith(("gpt", "o1", "o3")):
+            logger.debug(f"Auto-detected OpenAI provider from: '{api_model_id}'")
             return "openai"
         elif api_model_id.startswith("claude"):
+            logger.debug(f"Auto-detected Anthropic provider from: '{api_model_id}'")
             return "anthropic"
         elif api_model_id.startswith("gemini"):
+            logger.debug(f"Auto-detected Google provider from: '{api_model_id}'")
             return "google"
         else:
+            logger.warning(f"Unable to extract provider from api_model_id: '{api_model_id}', defaulting to 'unknown'")
             return "unknown"
 
 

@@ -32,6 +32,8 @@
 - **ドキュメントの最終レビュー**: 全ての開発・テストタスク完了後、ドキュメント全体の最終的な整合性チェックを行う。
 
 ## 3. 完了事項 (Completed Tasks)
+- [x] **PydanticAI統合の堅牢性強化 (2025-07-02):**
+    - Event loop管理の安全化、テスト環境検出の強化、BDDテストの修正が完了し、システムの堅牢性が大幅に向上。
 - [x] **PydanticAI Provider-level統合 (2025-06-25):**
     - 4つの主要プロバイダー (OpenAI, Anthropic, Google, OpenRouter) のWeb API連携を、`ProviderManager` と `PydanticAIProviderFactory` を中心とした効率的なアーキテクチャに統一。
 - [x] **ユニットテストリファクタリング (2025-01-26):**

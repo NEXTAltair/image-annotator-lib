@@ -76,6 +76,9 @@ def test_initialize_registry_api_models_file_not_exists_calls_fetch_and_update(
     mock_register,
 ):
     """Test initialize_registry calls API fetch and config update when file not exists."""
+    # Reset singleton state before test
+    registry._REGISTRY_INITIALIZED = False
+    
     mock_config_path.exists.return_value = False
 
     registry.initialize_registry()
@@ -101,6 +104,9 @@ def test_initialize_registry_api_models_file_exists_skips_fetch(
     mock_register,
 ):
     """Test initialize_registry skips API fetch but calls config update when file exists."""
+    # Reset singleton state before test
+    registry._REGISTRY_INITIALIZED = False
+    
     mock_config_path.exists.return_value = True
 
     registry.initialize_registry()
@@ -126,6 +132,9 @@ def test_initialize_registry_continues_if_fetch_api_fails(
     mock_register,
 ):
     """Test initialize_registry continues process even if API fetch fails."""
+    # Reset singleton state before test
+    registry._REGISTRY_INITIALIZED = False
+    
     mock_config_path.exists.return_value = False
     mock_fetch_api_models.side_effect = Exception("API Error")
 
@@ -234,3 +243,56 @@ def test_update_config_with_api_models_no_classes(
 # --- _find_annotator_class_by_provider tests removed ---
 # PydanticAI統一実装では、この関数は常にPydanticAIWebAPIAnnotatorを返すだけの
 # 単純な関数になったため、テストは不要になりました。
+
+
+# --- Test for singleton pattern ---
+
+
+@pytest.mark.unit
+@patch("image_annotator_lib.core.registry.register_annotators")
+@patch("image_annotator_lib.core.registry._update_config_with_api_models")
+@patch("image_annotator_lib.core.api_model_discovery._fetch_and_update_vision_models")
+@patch("image_annotator_lib.core.registry.AVAILABLE_API_MODELS_CONFIG_PATH")
+@patch("image_annotator_lib.core.utils.init_logger")
+def test_initialize_registry_singleton_pattern(
+    mock_init_logger,
+    mock_config_path,
+    mock_fetch_api_models,
+    mock_update_config,
+    mock_register,
+):
+    """Test initialize_registry uses singleton pattern and only initializes once."""
+    # Reset singleton state before test
+    registry._REGISTRY_INITIALIZED = False
+    
+    mock_config_path.exists.return_value = True
+
+    # First call should execute all initialization steps
+    registry.initialize_registry()
+    
+    # Verify first call executed all steps
+    assert mock_init_logger.call_count == 1
+    assert mock_config_path.exists.call_count == 1
+    assert mock_fetch_api_models.call_count == 0  # Should skip when file exists
+    assert mock_update_config.call_count == 1
+    assert mock_register.call_count == 1
+    
+    # Second call should skip all initialization due to singleton pattern
+    registry.initialize_registry()
+    
+    # Verify second call did NOT execute any additional steps
+    assert mock_init_logger.call_count == 2  # init_logger always runs
+    assert mock_config_path.exists.call_count == 1  # Should not check again
+    assert mock_fetch_api_models.call_count == 0  # Still 0
+    assert mock_update_config.call_count == 1  # Still 1
+    assert mock_register.call_count == 1  # Still 1
+    
+    # Third call should also skip
+    registry.initialize_registry()
+    
+    # Verify third call also skipped
+    assert mock_init_logger.call_count == 3  # Only this increases
+    assert mock_config_path.exists.call_count == 1  # Still 1
+    assert mock_fetch_api_models.call_count == 0  # Still 0
+    assert mock_update_config.call_count == 1  # Still 1
+    assert mock_register.call_count == 1  # Still 1

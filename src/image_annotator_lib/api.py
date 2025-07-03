@@ -9,7 +9,7 @@ from PIL import Image
 
 from .core.base.annotator import BaseAnnotator
 from .core.provider_manager import ProviderManager
-from .core.registry import get_cls_obj_registry
+from .core.registry import get_cls_obj_registry, find_model_class_case_insensitive
 from .core.types import AnnotationResult
 from .core.utils import calculate_phash, logger
 
@@ -64,22 +64,37 @@ def _create_annotator_instance(model_name: str) -> BaseAnnotator:
     Raises:
         KeyError: 指定された model_name がレジストリに存在しない場合。
     """
-    registry = get_cls_obj_registry()
-    if model_name not in registry:
-        logger.error(f"要求されたモデル名 '{model_name}' はクラスレジストリに見つかりません。")
+    logger.debug(f"Creating annotator instance for model: '{model_name}'")
+    
+    # 大文字・小文字を区別しないモデル検索
+    model_result = find_model_class_case_insensitive(model_name)
+    if model_result is None:
+        registry = get_cls_obj_registry()
+        available_models = list(registry.keys())
+        error_details = {
+            "requested_model": model_name,
+            "available_models_count": len(available_models),
+            "available_models_sample": available_models[:10],
+            "registry_size": len(registry)
+        }
+        logger.error(f"Model resolution failed: requested={model_name}, available_count={len(available_models)}, registry_size={len(registry)}")
+        logger.error(f"要求されたモデル名 '{model_name}' はクラスレジストリに見つかりません。利用可能なモデル: {available_models[:5]}...")
         raise KeyError(f"Model '{model_name}' not found in class registry.")
 
-    Annotator_class = registry[model_name]
+    actual_model_name, Annotator_class = model_result
+    
+    # 実際のモデル名を使用（大文字・小文字が正規化されている場合）
+    effective_model_name = actual_model_name
 
     # PydanticAI WebAPIアノテーターの場合はProvider-level管理を使用
     if _is_pydantic_ai_webapi_annotator(Annotator_class):
-        # Provider-levelラッパーを返す
-        return PydanticAIWebAPIWrapper(model_name, Annotator_class)
+        # Provider-levelラッパーを返す（正規化されたモデル名を使用）
+        return PydanticAIWebAPIWrapper(effective_model_name, Annotator_class)
     else:
-        # 従来通りのインスタンス作成
-        instance = Annotator_class(model_name=model_name)
+        # 従来通りのインスタンス作成（正規化されたモデル名を使用）
+        instance = Annotator_class(model_name=effective_model_name)
         logger.debug(
-            f"モデル '{model_name}' の新しいインスタンスを作成しました (クラス: {Annotator_class.__name__})"
+            f"モデル '{model_name}' -> '{effective_model_name}' の新しいインスタンスを作成しました (クラス: {Annotator_class.__name__})"
         )
         return instance
 
@@ -126,8 +141,8 @@ class PydanticAIWebAPIWrapper(BaseAnnotator):
             raise ValueError(f"Model {self.model_name} has no api_model_id configured")
 
         try:
-            # Provider Managerを通して実行
-            raw_outputs = ProviderManager.run_inference_with_model(
+            # Provider Managerを通して実行（辞書形式の戻り値）
+            results_by_phash = ProviderManager.run_inference_with_model(
                 model_name=self.model_name, images_list=images, api_model_id=self._api_model_id
             )
         except Exception as e:
@@ -144,38 +159,27 @@ class PydanticAIWebAPIWrapper(BaseAnnotator):
                 for i in range(len(images))
             ]
 
-        # 結果をAnnotationResult形式に変換
+        # 辞書形式の結果をリスト形式に変換
         results = []
-        for i, raw_output in enumerate(raw_outputs):
+        for i, image in enumerate(images):
             phash = phash_list[i] if i < len(phash_list) else None
-
-            # raw_outputが文字列の場合(エラーメッセージ)、辞書に変換
-            if isinstance(raw_output, str):
-                raw_output = {"error": raw_output}
-
-            if raw_output.get("error"):
-                result = AnnotationResult(
-                    phash=phash, tags=[], formatted_output=None, error=raw_output["error"]
-                )
+            
+            # phashに対応する結果を検索
+            annotation_result = None
+            for result_phash, result in results_by_phash.items():
+                if result_phash == phash:
+                    annotation_result = result
+                    break
+            
+            if annotation_result:
+                # ProviderManagerから返された結果をそのまま使用
+                results.append(annotation_result)
             else:
-                annotation = raw_output.get("response")
-                if annotation:
-                    if hasattr(annotation, "tags"):
-                        tags = annotation.tags
-                    elif isinstance(annotation, dict) and "tags" in annotation:
-                        tags = annotation["tags"]
-                    else:
-                        tags = []
-
-                    result = AnnotationResult(
-                        phash=phash, tags=tags, formatted_output=annotation, error=None
-                    )
-                else:
-                    result = AnnotationResult(
-                        phash=phash, tags=[], formatted_output=None, error="No response from model"
-                    )
-
-            results.append(result)
+                # 対応する結果が見つからない場合
+                logger.warning(f"画像 {i} (phash: {phash}) の結果が見つかりません")
+                results.append(AnnotationResult(
+                    phash=phash, tags=[], formatted_output=None, error="No result found for image"
+                ))
 
         return results
 
@@ -341,7 +345,18 @@ def annotate(
         }
         エラーが発生した場合、対応するモデル名のエントリにはエラー情報が含まれます。
     """
+    # レジストリが初期化されていることを確認
+    from .core.registry import initialize_registry, get_cls_obj_registry
+    
+    registry = get_cls_obj_registry()
+    if not registry:
+        logger.info("レジストリが空のため初期化を実行します...")
+        initialize_registry()
+        registry = get_cls_obj_registry()
+        logger.info(f"レジストリ初期化完了。登録済みモデル数: {len(registry)}")
+    
     logger.info(f"{len(images_list)} 枚の画像を {len(model_name_list)} 個のモデルで評価開始...")
+    logger.debug(f"利用可能なモデル: {list(registry.keys())[:10]}...")
 
     phash_map: dict[int, str] = {}
 
@@ -400,6 +415,14 @@ def annotate(
 
         except Exception as e:
             # エラーハンドリング: このモデルでの処理は失敗とみなし、全画像にエラーを記録
+            error_details = {
+                "model_name": model_name,
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "images_count": len(images_list),
+                "phase": "model_processing"
+            }
+            logger.error(f"Model processing fatal error: model={model_name}, error_type={type(e).__name__}, message={str(e)}, images_count={len(images_list)}", exc_info=True)
             logger.error(f"モデル '{model_name}' の処理中に致命的なエラー: {e}", exc_info=True)
             error_message = f"{type(e).__name__}: {e}"
             # predictが例外を投げた場合に備え、全画像にエラー結果を作成

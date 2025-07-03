@@ -13,6 +13,7 @@ T = TypeVar("T", bound=BaseAnnotator)
 ModelClass = type[BaseAnnotator]
 
 _MODEL_CLASS_OBJ_REGISTRY: dict[str, ModelClass] = {}
+_REGISTRY_INITIALIZED: bool = False
 
 
 # --- プライベートヘルパー関数 ---
@@ -82,6 +83,12 @@ def _gather_available_classes(directory: str) -> dict[str, ModelClass]:
         if module is None:
             continue
         for name, obj in inspect.getmembers(module, inspect.isclass):
+            # 古いプロバイダー固有のクラスは除外（PydanticAI統一後は不要）
+            obsolete_classes = ["AnthropicApiAnnotator", "GoogleApiAnnotator", "OpenAIApiChatAnnotator", "OpenAIApiResponseAnnotator"]
+            if name in obsolete_classes:
+                logger.debug(f"古いプロバイダー固有クラス '{name}' をスキップします（PydanticAI統一後は不要）")
+                continue
+                
             # BaseAnnotator のサブクラスか、または predict メソッドを持つ場合 (ユーザー変更を反映)
             # objがtypeであることを確認 (Mypy対策)
             if isinstance(obj, type) and (
@@ -92,7 +99,9 @@ def _gather_available_classes(directory: str) -> dict[str, ModelClass]:
                     available[name] = obj
                     # 再帰的サブクラス収集 (ユーザー変更を反映)
                     for subcls in _recursive_subclasses(obj):
-                        available[subcls.__name__] = subcls
+                        # 古いクラスは再帰的サブクラスからも除外
+                        if subcls.__name__ not in obsolete_classes:
+                            available[subcls.__name__] = subcls
                 elif hasattr(
                     obj, "predict"
                 ):  # predictを持つがBaseAnnotatorサブクラスでない場合も登録 (元のロジック踏襲)
@@ -148,10 +157,10 @@ def _register_models(
             f"{len(available_classes)} 個の利用可能な {model_type_name} クラスが見つかりました: {list(available_classes.keys())}"
         )
 
-        # PydanticAI統一WebAPIアノテーターを強制登録
+        # PydanticAI統一WebAPIアノテーターを取得
         pydantic_ai_class = available_classes.get("PydanticAIWebAPIAnnotator")
-        if pydantic_ai_class:
-            logger.debug("PydanticAI統一WebAPIアノテーターを強制登録します")
+        if not pydantic_ai_class:
+            logger.error("PydanticAIWebAPIAnnotator クラスが見つかりません。WebAPIモデルは登録できません。")
 
         # 設定ファイルに基づいてモデルを登録
         for model_name, model_config in config.items():
@@ -167,14 +176,21 @@ def _register_models(
                 continue
             logger.debug(f"[DEBUG _register_models] 期待されるクラス名: '{desired_class_name}'")
 
-            # WebAPIクラスの場合は強制的にPydanticAI統一実装を使用
-            if desired_class_name.endswith("ApiAnnotator") and pydantic_ai_class:
+            # WebAPIクラス（PydanticAIWebAPIAnnotator）の場合は統一実装を使用
+            if desired_class_name == "PydanticAIWebAPIAnnotator" and pydantic_ai_class:
                 model_cls = pydantic_ai_class
                 logger.debug(
-                    f"[DEBUG _register_models] WebAPIモデル '{model_name}' にPydanticAI統一実装を適用: {desired_class_name} → PydanticAIWebAPIAnnotator"
+                    f"[DEBUG _register_models] WebAPIモデル '{model_name}' にPydanticAI統一実装を使用"
                 )
+            elif desired_class_name.endswith("ApiAnnotator"):
+                # 古いプロバイダー固有のクラス名が設定されている場合の警告とスキップ
+                logger.warning(
+                    f"モデル '{model_name}' で古いプロバイダー固有クラス '{desired_class_name}' が指定されています。"
+                    f"PydanticAI統合後はすべてのWebAPIモデルで 'PydanticAIWebAPIAnnotator' を使用してください。スキップします。"
+                )
+                continue
             else:
-                # 非WebAPIクラスは従来通りの処理
+                # 非WebAPIクラス（ローカルMLモデルなど）は従来通りの処理
                 model_cls = available_classes.get(desired_class_name)
                 logger.debug(
                     f"[DEBUG _register_models] 利用可能なクラスから '{desired_class_name}' を検索した結果: {model_cls}"
@@ -248,10 +264,60 @@ def get_cls_obj_registry() -> dict[str, ModelClass]:
     return _MODEL_CLASS_OBJ_REGISTRY
 
 
+def find_model_class_case_insensitive(model_name: str) -> tuple[str, ModelClass] | None:
+    """大文字・小文字を区別しないモデルクラス検索
+    
+    Args:
+        model_name: 検索するモデル名
+        
+    Returns:
+        tuple[str, ModelClass] | None: (実際のキー名, モデルクラス) のタプル。見つからない場合はNone
+    """
+    # デバッグ情報を追加
+    logger.debug(f"モデル検索: '{model_name}' を {len(_MODEL_CLASS_OBJ_REGISTRY)} 個のモデルから検索")
+    logger.debug(f"利用可能なモデル: {list(_MODEL_CLASS_OBJ_REGISTRY.keys())[:10]}...")
+    
+    # 最初に正確なマッチを試す
+    if model_name in _MODEL_CLASS_OBJ_REGISTRY:
+        logger.debug(f"正確なマッチ: '{model_name}'")
+        return (model_name, _MODEL_CLASS_OBJ_REGISTRY[model_name])
+    
+    # 大文字・小文字を区別しない検索
+    model_name_lower = model_name.lower()
+    for key, value in _MODEL_CLASS_OBJ_REGISTRY.items():
+        if key.lower() == model_name_lower:
+            logger.debug(f"モデル名を正規化: '{model_name}' -> '{key}'")
+            return (key, value)
+    
+    # 部分マッチを試す（ハイフンやスペースを無視）
+    normalized_search = model_name.lower().replace("-", "").replace(" ", "")
+    for key, value in _MODEL_CLASS_OBJ_REGISTRY.items():
+        normalized_key = key.lower().replace("-", "").replace(" ", "")
+        if normalized_search in normalized_key or normalized_key in normalized_search:
+            logger.debug(f"部分マッチでモデル名を正規化: '{model_name}' -> '{key}'")
+            return (key, value)
+    
+    logger.warning(f"モデル '{model_name}' が見つかりません。利用可能なモデル: {list(_MODEL_CLASS_OBJ_REGISTRY.keys())[:5]}")
+    return None
+
+
 # list_available_annotators のような統合されたリスト関数に変更 (あるいは既存を維持)
 def list_available_annotators() -> list[str]:
     """利用可能なアノテータモデルの名前のリストを返します。"""
     return list(_MODEL_CLASS_OBJ_REGISTRY.keys())
+
+
+def normalize_model_name(model_name: str) -> str | None:
+    """モデル名を正規化（大文字・小文字を区別しない検索で実際のキー名を返す）
+    
+    Args:
+        model_name: 正規化するモデル名
+        
+    Returns:
+        str | None: 実際のレジストリキー名。見つからない場合はNone
+    """
+    result = find_model_class_case_insensitive(model_name)
+    return result[0] if result else None
 
 
 def _find_annotator_class_by_provider(provider: str, available_classes: dict[str, ModelClass]) -> str:
@@ -325,9 +391,17 @@ def initialize_registry() -> None:
     必ずlogger初期化後に呼び出すこと。
     Web API モデル情報の取得と設定ファイルの自動更新も行う。
     """
+    global _REGISTRY_INITIALIZED
+    
     from .utils import init_logger  # init_logger はここでインポート
 
     init_logger()
+    
+    # 既に初期化済みの場合はスキップ
+    if _REGISTRY_INITIALIZED:
+        logger.debug(f"レジストリは既に初期化済みです。登録済みモデル数: {len(_MODEL_CLASS_OBJ_REGISTRY)}")
+        return
+    
     logger.debug("レジストリ初期化プロセスを開始します...")
 
     # --- Web API モデル情報の取得と設定ファイルの自動更新 --- #
@@ -361,4 +435,5 @@ def initialize_registry() -> None:
 
     logger.debug("アノテータ登録を開始します...")
     register_annotators()
+    _REGISTRY_INITIALIZED = True
     logger.debug(f"レジストリの初期化が完了しました。登録済みアノテータ: {len(_MODEL_CLASS_OBJ_REGISTRY)}")

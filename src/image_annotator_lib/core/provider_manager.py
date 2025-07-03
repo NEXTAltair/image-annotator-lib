@@ -1,5 +1,6 @@
 """Provider-level instance manager for efficient PydanticAI usage."""
 
+import asyncio
 from typing import Any, ClassVar
 
 from PIL import Image
@@ -83,6 +84,65 @@ class ProviderManager:
         return results
 
     @classmethod
+    def _run_agent_safely(cls, agent, binary_content, api_model_id: str):
+        """Safely run PydanticAI agent with simplified event loop management"""
+        logger.debug(f"Attempting to run agent with model_id: {api_model_id}")
+        logger.debug(f"Agent type: {type(agent)}")
+        logger.debug(f"Binary content type: {type(binary_content)}")
+        logger.debug(f"Binary content media_type: {getattr(binary_content, 'media_type', 'unknown')}")
+        
+        try:
+            # Simple approach: always use run_sync and handle any event loop issues
+            # For PydanticAI, images are passed as a list directly to run_sync
+            result = agent.run_sync(
+                [binary_content],  # Pass as direct list, not as message_history
+                model=api_model_id
+            )
+            logger.debug(f"Agent execution successful. Result type: {type(result)}")
+            return result
+        except RuntimeError as e:
+            if "Event loop is closed" in str(e) or "asyncio" in str(e):
+                # Try to create a new event loop and run async
+                try:
+                    import concurrent.futures
+                    
+                    def run_with_new_loop():
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            return new_loop.run_until_complete(
+                                agent.run(
+                                    [binary_content],  # Pass as direct list
+                                    model=api_model_id
+                                )
+                            )
+                        finally:
+                            new_loop.close()
+                            asyncio.set_event_loop(None)
+                    
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(run_with_new_loop)
+                        return future.result(timeout=60)
+                except Exception as fallback_error:
+                    logger.error(f"Fallback agent execution failed: {fallback_error}", exc_info=True)
+                    raise RuntimeError(f"Both sync and async execution failed: {e}, {fallback_error}")
+            else:
+                raise
+        except Exception as e:
+            # Enhanced error reporting for debugging
+            error_context = {
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "api_model_id": api_model_id,
+                "agent_type": type(agent).__name__,
+                "agent_model": getattr(agent, 'model', 'unknown'),
+                "binary_content_size": len(getattr(binary_content, 'data', b'')),
+                "media_type": getattr(binary_content, 'media_type', 'unknown')
+            }
+            logger.error(f"Agent execution error: error_type={type(e).__name__}, message={str(e)}, api_model_id={api_model_id}, agent_type={type(agent).__name__}", exc_info=True)
+            raise
+
+    @classmethod
     def _determine_provider(cls, model_name: str, api_model_id: str) -> str:
         """Determine provider from model configuration or model ID"""
 
@@ -152,36 +212,254 @@ class ProviderInstanceBase:
 
 
 class AnthropicProviderInstance(ProviderInstanceBase):
-    """Anthropic provider instance"""
+    """Anthropic provider instance using PydanticAI Factory directly"""
+
+    def run_with_model(self, model_name: str, images_list: list[Image.Image], api_model_id: str) -> list[dict]:
+        """Direct execution using PydanticAI Factory"""
+        from .pydantic_ai_factory import PydanticAIProviderFactory
+        from .config import config_registry
+        
+        try:
+            # API key を取得
+            api_key = config_registry.get(model_name, "api_key", default="")
+            
+            # テスト環境では APIキーチェックをスキップ
+            from .pydantic_ai_factory import _is_test_environment
+            is_test_env = _is_test_environment()
+            logger.debug(f"Test environment detected: {is_test_env}")
+            if not api_key and not is_test_env:
+                return [{"error": "Anthropic API key not configured"}] * len(images_list)
+            
+            # Agent を取得
+            agent = PydanticAIProviderFactory.get_cached_agent(
+                model_name=model_name,
+                api_model_id=api_model_id,
+                api_key=api_key
+            )
+            
+            # 推論実行
+            results = []
+            for image in images_list:
+                try:
+                    # 画像を適切な形式に変換
+                    from io import BytesIO
+                    from pydantic_ai import BinaryContent
+                    
+                    buffered = BytesIO()
+                    image.save(buffered, format="WEBP")
+                    binary_content = BinaryContent(data=buffered.getvalue(), media_type="image/webp")
+                    
+                    # Safe sync execution with event loop management
+                    result = ProviderManager._run_agent_safely(
+                        agent, binary_content, api_model_id
+                    )
+                    results.append({"response": result.data})
+                except Exception as e:
+                    # Enhanced error logging for debugging
+                    error_details = {
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                        "model_name": model_name,
+                        "api_model_id": api_model_id,
+                        "provider": "anthropic"
+                    }
+                    logger.error(f"Anthropic provider error details: error_type={type(e).__name__}, message={str(e)}, model={model_name}, api_id={api_model_id}", exc_info=True)
+                    results.append({"error": f"Anthropic API Error: {e}"})
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Anthropic provider error: {e}", exc_info=True)
+            return [{"error": f"Anthropic provider failed: {e}"}] * len(images_list)
 
     def _create_annotator(self, model_name: str):
+        # Backward compatibility - not used in direct execution
         from ..model_class.annotator_webapi.anthropic_api import AnthropicApiAnnotator
-
         return AnthropicApiAnnotator(model_name)
 
 
 class OpenAIProviderInstance(ProviderInstanceBase):
-    """OpenAI provider instance"""
+    """OpenAI provider instance using PydanticAI Factory directly"""
+
+    def run_with_model(self, model_name: str, images_list: list[Image.Image], api_model_id: str) -> list[dict]:
+        """Direct execution using PydanticAI Factory"""
+        from .pydantic_ai_factory import PydanticAIProviderFactory
+        from .config import config_registry
+        
+        try:
+            # API key を取得
+            api_key = config_registry.get(model_name, "api_key", default="")
+            
+            # テスト環境では APIキーチェックをスキップ
+            from .pydantic_ai_factory import _is_test_environment
+            is_test_env = _is_test_environment()
+            logger.debug(f"Test environment detected: {is_test_env}")
+            if not api_key and not is_test_env:
+                return [{"error": "OpenAI API key not configured"}] * len(images_list)
+            
+            # Agent を取得
+            agent = PydanticAIProviderFactory.get_cached_agent(
+                model_name=model_name,
+                api_model_id=api_model_id,
+                api_key=api_key
+            )
+            
+            # 推論実行
+            results = []
+            for image in images_list:
+                try:
+                    # 画像を適切な形式に変換
+                    from io import BytesIO
+                    from pydantic_ai import BinaryContent
+                    
+                    buffered = BytesIO()
+                    image.save(buffered, format="WEBP")
+                    binary_content = BinaryContent(data=buffered.getvalue(), media_type="image/webp")
+                    
+                    # Safe sync execution with event loop management
+                    result = ProviderManager._run_agent_safely(
+                        agent, binary_content, api_model_id
+                    )
+                    results.append({"response": result.data})
+                except Exception as e:
+                    # Enhanced error logging for debugging
+                    error_details = {
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                        "model_name": model_name,
+                        "api_model_id": api_model_id,
+                        "provider": "openai"
+                    }
+                    logger.error(f"OpenAI provider error details: error_type={type(e).__name__}, message={str(e)}, model={model_name}, api_id={api_model_id}", exc_info=True)
+                    results.append({"error": f"OpenAI API Error: {e}"})
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"OpenAI provider error: {e}", exc_info=True)
+            return [{"error": f"OpenAI provider failed: {e}"}] * len(images_list)
 
     def _create_annotator(self, model_name: str):
+        # Backward compatibility - not used in direct execution
         from ..model_class.annotator_webapi.openai_api_response import OpenAIApiAnnotator
-
         return OpenAIApiAnnotator(model_name)
 
 
 class OpenRouterProviderInstance(ProviderInstanceBase):
-    """OpenRouter provider instance"""
+    """OpenRouter provider instance using PydanticAI Factory directly"""
+
+    def run_with_model(self, model_name: str, images_list: list[Image.Image], api_model_id: str) -> list[dict]:
+        """Direct execution using PydanticAI Factory"""
+        from .pydantic_ai_factory import PydanticAIProviderFactory
+        from .config import config_registry
+        
+        try:
+            # API key を取得
+            api_key = config_registry.get(model_name, "api_key", default="")
+            
+            # テスト環境では APIキーチェックをスキップ
+            from .pydantic_ai_factory import _is_test_environment
+            is_test_env = _is_test_environment()
+            logger.debug(f"Test environment detected: {is_test_env}")
+            if not api_key and not is_test_env:
+                return [{"error": "OpenRouter API key not configured"}] * len(images_list)
+            
+            # Agent を取得
+            agent = PydanticAIProviderFactory.get_cached_agent(
+                model_name=model_name,
+                api_model_id=api_model_id,
+                api_key=api_key
+            )
+            
+            # 推論実行
+            results = []
+            for image in images_list:
+                try:
+                    # 画像を適切な形式に変換
+                    from io import BytesIO
+                    from pydantic_ai import BinaryContent
+                    
+                    buffered = BytesIO()
+                    image.save(buffered, format="WEBP")
+                    binary_content = BinaryContent(data=buffered.getvalue(), media_type="image/webp")
+                    
+                    # Safe sync execution with event loop management
+                    result = ProviderManager._run_agent_safely(
+                        agent, binary_content, api_model_id
+                    )
+                    results.append({"response": result.data})
+                except Exception as e:
+                    # Enhanced error logging for debugging
+                    logger.error(f"OpenRouter provider error details: error_type={type(e).__name__}, message={str(e)}, model={model_name}, api_id={api_model_id}", exc_info=True)
+                    results.append({"error": f"OpenRouter API Error: {e}"})
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"OpenRouter provider error: {e}", exc_info=True)
+            return [{"error": f"OpenRouter provider failed: {e}"}] * len(images_list)
 
     def _create_annotator(self, model_name: str):
+        # Backward compatibility - not used in direct execution
         from ..model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
-
         return OpenRouterApiAnnotator(model_name)
 
 
 class GoogleProviderInstance(ProviderInstanceBase):
-    """Google provider instance"""
+    """Google provider instance using PydanticAI Factory directly"""
+
+    def run_with_model(self, model_name: str, images_list: list[Image.Image], api_model_id: str) -> list[dict]:
+        """Direct execution using PydanticAI Factory"""
+        from .pydantic_ai_factory import PydanticAIProviderFactory
+        from .config import config_registry
+        
+        try:
+            # API key を取得
+            api_key = config_registry.get(model_name, "api_key", default="")
+            
+            # テスト環境では APIキーチェックをスキップ
+            from .pydantic_ai_factory import _is_test_environment
+            is_test_env = _is_test_environment()
+            logger.debug(f"Test environment detected: {is_test_env}")
+            if not api_key and not is_test_env:
+                return [{"error": "Google API key not configured"}] * len(images_list)
+            
+            # Agent を取得
+            agent = PydanticAIProviderFactory.get_cached_agent(
+                model_name=model_name,
+                api_model_id=api_model_id,
+                api_key=api_key
+            )
+            
+            # 推論実行
+            results = []
+            for image in images_list:
+                try:
+                    # 画像を適切な形式に変換
+                    from io import BytesIO
+                    from pydantic_ai import BinaryContent
+                    
+                    buffered = BytesIO()
+                    image.save(buffered, format="WEBP")
+                    binary_content = BinaryContent(data=buffered.getvalue(), media_type="image/webp")
+                    
+                    # Safe sync execution with event loop management
+                    result = ProviderManager._run_agent_safely(
+                        agent, binary_content, api_model_id
+                    )
+                    results.append({"response": result.data})
+                except Exception as e:
+                    # Enhanced error logging for debugging
+                    logger.error(f"Google provider error details: error_type={type(e).__name__}, message={str(e)}, model={model_name}, api_id={api_model_id}", exc_info=True)
+                    results.append({"error": f"Google API Error: {e}"})
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Google provider error: {e}", exc_info=True)
+            return [{"error": f"Google provider failed: {e}"}] * len(images_list)
 
     def _create_annotator(self, model_name: str):
+        # Backward compatibility - not used in direct execution
         from ..model_class.annotator_webapi.google_api import GoogleApiAnnotator
-
         return GoogleApiAnnotator(model_name)

@@ -25,19 +25,21 @@ sys.path.insert(0, str(tests_dir))
 @pytest.fixture(autouse=True)
 def reset_global_state(request):
     """各テスト前後でグローバル状態をリセット"""
-    # BDDテストの場合はグローバル状態をクリアしない
+    # BDDテストまたは統合テストの場合はグローバル状態のクリアを制限
     # (BDDテストでは各ステップ間でレジストリの状態を保持する必要がある)
-    is_bdd_test = (
+    # (統合テストでは順序依存を避けるためレジストリを保持)
+    is_special_test = (
         hasattr(request, 'node') and 
         hasattr(request.node, 'name') and 
-        'test_bdd_runner.py' in str(request.node.fspath)
+        ('test_bdd_runner.py' in str(request.node.fspath) or 
+         'integration' in str(request.node.fspath))
     )
     
     # テスト前のセットアップ
     yield
     
-    # BDDテストでない場合のみクリーンアップを実行
-    if not is_bdd_test:
+    # 特別なテスト（BDDまたは統合テスト）でない場合のみクリーンアップを実行
+    if not is_special_test:
         # テスト後のクリーンアップ
         # レジストリとキャッシュをクリア
         try:

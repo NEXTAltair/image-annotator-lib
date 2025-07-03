@@ -40,6 +40,10 @@ class TestLocalMLModelsIntegration:
     @pytest.fixture(scope="class")
     def model_categories(self):
         """Categorize available models by type."""
+        # Ensure registry is initialized before trying to list models
+        from image_annotator_lib.core.registry import initialize_registry
+        initialize_registry()
+        
         try:
             available_models = list_available_annotators()
         except Exception:
@@ -96,6 +100,9 @@ class TestLocalMLModelsIntegration:
     @patch("onnxruntime.InferenceSession")
     def test_onnx_model_loading_integration(self, mock_onnx_session, model_categories):
         """Test ONNX model loading and basic structure validation."""
+        # Ensure registry is initialized
+        from image_annotator_lib.core.registry import initialize_registry
+        initialize_registry()
         # Mock ONNX session
         mock_session = MagicMock()
         mock_session.get_inputs.return_value = [MagicMock(name="input", shape=[1, 3, 224, 224])]
@@ -153,6 +160,9 @@ class TestLocalMLModelsIntegration:
     @patch("tensorflow.keras.models.load_model")
     def test_tensorflow_model_loading_integration(self, mock_tf_load, model_categories):
         """Test TensorFlow model loading and basic structure validation."""
+        # Ensure registry is initialized
+        from image_annotator_lib.core.registry import initialize_registry
+        initialize_registry()
         # Mock TensorFlow model
         mock_model = MagicMock()
         mock_model.input_shape = (None, 224, 224, 3)
@@ -211,6 +221,10 @@ class TestLocalMLModelsIntegration:
         self, model_categories, managed_config_registry, lightweight_test_images
     ):
         """Test CLIP model loading and inference integration."""
+        # Ensure registry is initialized
+        from image_annotator_lib.core.registry import initialize_registry
+        initialize_registry()
+        
         clip_models = model_categories.get("clip", [])
 
         if not clip_models:
@@ -227,6 +241,9 @@ class TestLocalMLModelsIntegration:
             "base_model": "openai/clip-vit-base-patch32",
         }
         managed_config_registry.set(test_model, test_config)
+        
+        # Re-initialize registry to ensure the test model is registered
+        initialize_registry()
 
         try:
             # Mock the CLIP components loading - need to patch where it's actually used
@@ -560,6 +577,10 @@ class TestLocalMLModelsIntegration:
     @pytest.mark.fast_integration
     def test_model_registry_integration_with_local_models(self):
         """Test that local ML models are properly registered and discoverable."""
+        # Ensure registry is initialized
+        from image_annotator_lib.core.registry import initialize_registry
+        initialize_registry()
+        
         try:
             # This tests the model registry integration
             available_annotators = list_available_annotators()

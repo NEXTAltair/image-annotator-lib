@@ -353,31 +353,45 @@ class TestAnthropicApiAnnotatorIntegration:
     def test_provider_manager_integration(self, anthropic_annotator_config, lightweight_test_images):
         """Test integration with Provider Manager."""
 
-        # Mock the underlying run_with_model method
-        mock_response = {
-            "response": {"tags": ["test_model_tag"], "caption": "A test caption."},
-            "error": None,
-        }
+        # Test environment detection should work, and we mock the provider instance
+        from unittest.mock import MagicMock
+        from image_annotator_lib.core.types import AnnotationSchema
+
+        # Create mock response matching the expected structure
+        mock_response_data = AnnotationSchema(
+            tags=["test_model_tag"],
+            captions=["A test caption."],
+            score=0.95
+        )
+
+        # Mock the entire provider instance to avoid PydanticAI complexity
+        mock_provider_instance = MagicMock()
+        mock_provider_instance.run_with_model.return_value = [
+            {"response": mock_response_data, "error": None}
+        ]
 
         with patch.object(
-            AnthropicApiAnnotator, "run_with_model", return_value=[mock_response]
-        ) as mock_run:
+            ProviderManager, "get_provider_instance", return_value=mock_provider_instance
+        ) as mock_get_provider:
             # Test through Provider Manager
             result = ProviderManager.run_inference_with_model(
                 "anthropic_test_model", lightweight_test_images[:1], api_model_id="claude-3-5-sonnet"
             )
 
-            # Verify that run_with_model was called
-            mock_run.assert_called_once()
+            # Verify that get_provider_instance was called
+            mock_get_provider.assert_called_once_with("anthropic")
+            # Verify that the provider's run_with_model was called
+            mock_provider_instance.run_with_model.assert_called_once()
 
         assert result is not None
         assert len(result) > 0
 
         # Verify ProviderManager properly handled the request
         for image_hash, annotation_result in result.items():
-            assert annotation_result["error"] is None
-            assert "tags" in annotation_result["formatted_output"]
-            assert annotation_result["formatted_output"]["tags"] == ["test_model_tag"]
+            # AnnotationResult is a TypedDict, so access like a dictionary
+            assert annotation_result.get("error") is None
+            assert annotation_result.get("tags") == ["test_model_tag"]
+            assert annotation_result.get("formatted_output") == mock_response_data
 
     @pytest.mark.integration
     @pytest.mark.fast_integration

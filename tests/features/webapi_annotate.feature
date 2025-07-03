@@ -15,14 +15,14 @@ Feature: WebAPIアノテーターによる画像アノテーション
         And エラーは発生していない
 
         Examples:
-            | model_name      |
-            | gpt-4o-mini     |
-            | claude-3-5-haiku |
-            | gemini-1.5-flash |
+            | model_name               |
+            | GPT-4o-mini              |
+            | Gemini 2.5 Flash Preview |
+            | Claude 3.5 Sonnet (2024-06-20) |
 
     Scenario: APIキーが未設定の場合は適切なエラーを返す
         Given 全てのAPIキーが未設定になっている
-        When 画像を指定してgpt-4o-miniでアノテーションを実行する
+        When 画像を指定してGPT-4o-miniでアノテーションを実行する
         Then 認証エラーメッセージが返される
         And 結果のタグリストは空である
 
@@ -34,14 +34,14 @@ Feature: WebAPIアノテーターによる画像アノテーション
 
     Scenario: APIがタイムアウトした場合は適切なエラーを返す
         Given APIがタイムアウトするよう設定されている
-        When 画像を指定してgpt-4o-miniでアノテーションを実行する
+        When 画像を指定してGPT-4o-miniでアノテーションを実行する
         Then タイムアウトエラーメッセージが返される
         And 結果のタグリストは空である
 
     Scenario: 主要プロバイダーのAPIキーがない場合はOpenRouterにフォールバックする
         Given OpenAI、Anthropic、GoogleのAPIキーが未設定になっている
         And OpenRouterのAPIキーが設定されている
-        When 画像を指定してgpt-4o-miniでアノテーションを実行する
+        When 画像を指定してGPT-4o-miniでアノテーションを実行する
         Then アノテーション結果に期待通りの内容が含まれる
         And エラーは発生していない
 
