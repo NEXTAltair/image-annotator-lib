@@ -407,7 +407,9 @@ def _get_api_key(provider_name: str, api_model_id: str) -> str:
         ApiAuthenticationError: 対応する環境変数が見つからない場合。
         ConfigurationError: サポートされていないプロバイダー名の場合。
     """
-    dotenv.load_dotenv()  # .env ファイルをロード
+    # .env ファイルから直接読み込み（環境変数に設定しない）
+    import dotenv
+    env_values = dotenv.dotenv_values(".env")
 
     env_var_map = {
         "Google": "GOOGLE_API_KEY",
@@ -423,11 +425,12 @@ def _get_api_key(provider_name: str, api_model_id: str) -> str:
         )
         env_var_name = "OPENROUTER_API_KEY"
 
-    api_key = os.getenv(env_var_name)
+    # まず.envファイルから取得を試行、次に環境変数
+    api_key = env_values.get(env_var_name) or os.getenv(env_var_name)
     if not api_key:
         raise ApiAuthenticationError(
             provider_name=provider_name,
-            message=f"環境変数 '{env_var_name}' が設定されていないか、空です。 (プロバイダー: {provider_name})",
+            message=f"APIキー '{env_var_name}' が.envファイルまたは環境変数に設定されていません。 (プロバイダー: {provider_name})",
         )
 
     return api_key
@@ -494,7 +497,10 @@ def _initialize_api_client(
 
     elif provider_lower == "google":
         if not api_key_str:
-            api_key_str = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            # .envファイルから直接読み込み（環境変数に設定しない）
+            import dotenv
+            env_values = dotenv.dotenv_values(".env")
+            api_key_str = env_values.get("GOOGLE_API_KEY") or env_values.get("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if not api_key_str:
             raise ApiAuthenticationError(
                 provider_name="Google",
