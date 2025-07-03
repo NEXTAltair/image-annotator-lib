@@ -90,12 +90,19 @@ class PydanticAIProviderFactory:
         # Note: BDD tests should be E2E tests, so we don't use TestModel
         # If this is a test environment without API keys, let the test handle the authentication error
 
-        provider_name = cls._extract_provider_name(api_model_id)
-        logger.debug(f"Extracted provider name: {provider_name}")
-
-        # Create or reuse provider
-        provider_kwargs = {"api_key": api_key}
-        provider = cls.get_provider(provider_name, **provider_kwargs)
+        # Set API key in environment for PydanticAI to use
+        if api_key:
+            provider_name = cls._extract_provider_name(api_model_id)
+            logger.debug(f"Extracted provider name: {provider_name}")
+            
+            # Set environment variable for the appropriate provider
+            import os
+            if provider_name == "openai":
+                os.environ["OPENAI_API_KEY"] = api_key
+            elif provider_name == "anthropic":
+                os.environ["ANTHROPIC_API_KEY"] = api_key
+            elif provider_name == "google":
+                os.environ["GOOGLE_API_KEY"] = api_key
 
         # Use PydanticAI's built-in model inference
         if ":" not in api_model_id:
@@ -105,7 +112,8 @@ class PydanticAIProviderFactory:
             elif api_model_id.startswith("claude"):
                 full_model_name = f"anthropic:{api_model_id}"
             elif api_model_id.startswith("gemini"):
-                full_model_name = f"google:{api_model_id}"
+                # Google models don't use provider prefix in PydanticAI
+                full_model_name = api_model_id
             else:
                 full_model_name = api_model_id
         else:
@@ -114,15 +122,8 @@ class PydanticAIProviderFactory:
         logger.debug(f"Model name resolution: {api_model_id} -> {full_model_name}")
 
         try:
-            # Use PydanticAI's native model inference
-            model = infer_model(full_model_name)
-            logger.debug(f"Inferred model type: {type(model)}")
-            
-            model._provider = provider
-            logger.debug(f"Assigned provider: {type(provider)}")
-
-            # Create Agent with shared provider
-            agent = Agent(model=model, output_type=AnnotationSchema, system_prompt=BASE_PROMPT)
+            # Create Agent directly with model string and let PydanticAI handle provider initialization
+            agent = Agent(model=full_model_name, output_type=AnnotationSchema, system_prompt=BASE_PROMPT)
             logger.debug(f"Created agent successfully for {full_model_name}")
 
             return agent
