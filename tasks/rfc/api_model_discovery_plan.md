@@ -2,15 +2,23 @@
 
 ## 1. 目的
 
+*   **PydanticAI統合アーキテクチャ対応**: Provider-level管理とAgent共有に最適化されたモデル発見機能の提供。
 *   `annotator_config.toml` で静的に定義されているAPIベースのアノテーター (Google, OpenAI, Anthropic, OpenRouter) が使用するモデル名を、各APIプロバイダーへの問い合わせによって動的に取得するように変更する。
 *   特に画像を入力とするVisionタスクが実行可能であり、かつ構造化出力 (`structured_outputs`) およびツール利用 (`tools`) に対応したモデルに限定して取得する。
-*   このモデル取得機能を外部から利用可能な関数として提供する。
+*   このモデル取得機能を外部から利用可能な関数として提供し、**PydanticAI Agent作成時の自動モデル選択**をサポートする。
 
 ## 2. 背景 / 現状の課題
 
-*   現在、`annotator_config.toml` にAPIモデル名をハードコーディングしているため、プロバイダー側で新しいモデルが追加されたり、古いモデルが非推奨になっても自動で追従できない。
-*   利用可能なモデルを手動で更新する必要があり、メンテナンスの手間がかかる。
-*   ユーザーが利用したい最新のモデルが設定ファイルにないと、すぐには利用できない。
+### **✅ 解決済みの従来課題:**
+*   ~~現在、`annotator_config.toml` にAPIモデル名をハードコーディングしているため、プロバイダー側で新しいモデルが追加されたり、古いモデルが非推奨になっても自動で追従できない。~~ → **解決済み**: `api_model_discovery.py`による動的取得機能実装済み
+*   ~~利用可能なモデルを手動で更新する必要があり、メンテナンスの手間がかかる。~~ → **解決済み**: `available_api_models.toml`の自動更新機能実装済み
+*   ~~ユーザーが利用したい最新のモデルが設定ファイルにないと、すぐには利用できない。~~ → **解決済み**: `discover_available_vision_models()`による最新モデル取得機能実装済み
+
+### **PydanticAI統合による新しい要件:**
+*   **Provider-level共有**: 同一プロバイダーの複数モデルで効率的にリソース共有する必要がある。
+*   **Agent自動作成**: `Agent('<provider>:<model>')` 形式での動的モデル選択をサポート。
+*   **構造化出力対応**: PydanticAI Agentで必須の構造化出力機能を持つモデルのみを対象とする。
+*   **メモリ効率**: Provider-level管理によるAgent共有とキャッシュ最適化。
 
 【追記】
 ---
@@ -26,12 +34,21 @@
 - そのため、従来の Vision タスク対応に加え、これらの条件も満たすモデルのみを動的に取得するようにフィルタリング条件を強化した。
 ---
 
-## 3. 方針
+## 3. 実装状況と方針
 
-1.  **API仕様調査:** 各プロバイダー (Google Generative AI API, OpenAI API, Anthropic API, OpenRouter API) の公式ドキュメントやSDKを調査し、利用可能なモデル一覧を取得するAPIエンドポイント/メソッドとその仕様(認証方法、レスポンス形式など)を確認する。特に、Visionタスクが実行可能であり、かつ構造化出力とツール利用に対応しているモデルをどのように識別･フィルタリングできるか重点的に調査する。
-2.  **実装場所:** モデル一覧取得ロジックを `src/image_annotator_lib/core/api_model_discovery.py` 内に実装する。(新規作成)
-3.  **処理実装:** 上記ファイル内に、OpenRouter API を呼び出してモデル一覧を取得し、Vision 対応、構造化出力対応、ツール利用対応のモデルをフィルタリングする関数を実装する。適切なエラーハンドリング(ネットワークエラー、API エラー、レスポンス形式変更など)も行う。**エラーハンドリングには `src/image_annotator_lib/exceptions/errors.py` で定義された適切な例外クラス (`WebApiError` のサブクラスなど) を使用すること。**
-4.  **外部公開関数の実装:** 引数を取らず、モデル取得を試みる公開関数 `discover_available_vision_models() -> dict[str, list[str] | str]` を実装する。戻り値は辞書で、キーは成功時は `"models"` (値はモデルIDのリスト)、失敗時は `"error"` (値はエラーメッセージ文字列) とする。この関数を `src/image_annotator_lib/__init__.py` 等で公開する。
+### **✅ 実装完了済み基盤機能:**
+1.  **API仕様調査:** OpenRouter API経由での全プロバイダーモデル取得機能完成
+2.  **実装場所:** `src/image_annotator_lib/core/api_model_discovery.py` 実装完了
+3.  **処理実装:** Vision + 構造化出力 + ツール対応モデルのフィルタリング機能完成
+4.  **外部公開関数:** `discover_available_vision_models()` 実装・公開完了
+5.  **動的更新機能:** `available_api_models.toml`の自動更新とキャッシュ機能完成
+6.  **エラーハンドリング:** 包括的なエラー処理とログ機能完成
+
+### **🔄 PydanticAI統合対応の次期要件:**
+1.  **Provider Manager統合:** `ProviderManager`クラスとのシームレス連携
+2.  **Agent自動作成サポート:** PydanticAI Agent動的作成機能との統合
+3.  **モデルID正規化:** `<provider>:<model>` 形式での統一的なID管理
+4.  **実行時検証:** PydanticAI Agentでの実際の利用可能性検証機能
 5.  **キャッシュ/更新戦略 & TOML 保存:**
     *   **関数呼び出し時:** `discover_available_vision_models` 呼び出し時、`force_refresh=False` の場合は、まず `available_api_models.toml` ファイルを `load_available_api_models` で読み込む。ファイルが存在し内容があれば、その情報を基に結果を返す。
     *   **API 取得 (`force_refresh=True` 時):** `force_refresh=True` が指定された場合は、ローカルの `available_api_models.toml` ファイルの存在や内容に関わらず、**常に** OpenRouter API から最新のモデルリストを取得する。
@@ -78,7 +95,7 @@
         *   **全てのプロバイダー共通:** OpenRouter API からモデルリストを取得後、`architecture.input_modalities` リストに `"image"` が含まれ、かつ `supported_parameters` リストに `'structured_outputs'` と `'tools'` が含まれているモデルを抽出する。
     *   [X] `discover_available_vision_models` 関数の詳細設計 (エラーハンドリング詳細、戻り値の型確定)。
     *   [X] `available_api_models.toml` の扱い方針最終決定 (動的取得･更新用の新規ファイルとしてプロジェクトルート下の `config` ディレクトリに作成･管理する)。
-*   **フェーズ 2: 実装**
+*   **✅ フェーズ 2: 基盤実装 (完了)**
     *   [X] `constants.py` で `SYSTEM_CONFIG_PATH` もプロジェクトルート下の `config/` を指すように変更。
     *   [X] `constants.py` にプロジェクトルート下の `config/available_api_models.toml` へのパス定義を追加。
     *   [X] `config.py` の `ModelConfigRegistry.load` に、`SYSTEM_CONFIG_PATH` が存在しない場合にテンプレートから自動コピーする機能を追加 (`importlib.resources` を一時的に使用)。
@@ -95,6 +112,12 @@
     *   [X] `api_model_discovery.py` の Linter エラー修正 (型エラー、未定義変数など)。
     *   [X] 外部公開関数 `discover_available_vision_models` の実装と公開設定 (`__init__.py`)。
     *   [X] メモリキャッシュロジックを削除。
+
+*   **🔄 フェーズ 2.5: PydanticAI統合対応 (新規)**
+    *   [ ] `PydanticAIProviderFactory`との統合による効率的なAgent作成機能
+    *   [ ] `ProviderManager`との連携によるProvider-level統合
+    *   [ ] モデルID正規化機能 (`<provider>:<model>` 形式対応)
+    *   [ ] PydanticAI Agent実行時検証機能
 *   **フェーズ 3: テスト**
     *   [ ] `config.py` の `ModelConfigRegistry.load` の初回ファイルコピー機能のユニットテスト。
     *   [X] API 呼び出しとフィルタリングのユニットテスト (モックAPI使用)

@@ -3,18 +3,21 @@ model_path = "shadowlilac/aesthetic-shadow"
 device = "cuda"
 class = "AestheticShadow"
 estimated_size_gb = 4.065
+type = "scorer"
 
 [aesthetic_shadow_v2]
 model_path = "NEXTAltair/cache_aestheic-shadow-v2"
 device = "cuda"
 class = "AestheticShadow"
 estimated_size_gb = 4.065
+type = "scorer"
 
 [cafe_aesthetic]
 model_path = "cafeai/cafe_aesthetic"
 device = "cuda"
 class = "CafePredictor"
 estimated_size_gb = 0.32
+type = "scorer"
 
 [ImprovedAesthetic]
 model_path = "https://github.com/christophschuhmann/improved-aesthetic-predictor/raw/main/sac+logos+ava1-l14-linearMSE.pth"
@@ -22,6 +25,7 @@ base_model = "openai/clip-vit-large-patch14"
 device = "cuda"
 class = "ImprovedAesthetic"
 estimated_size_gb = 0.003
+type = "scorer"
 
 [WaifuAesthetic]
 model_path = "https://huggingface.co/hakurei/waifu-diffusion-v1-4/resolve/main/models/aes-B32-v0.pth"
@@ -31,146 +35,174 @@ class = "WaifuAesthetic"
 activation_type = "ReLU"
 final_activation_type = "Sigmoid"
 estimated_size_gb = 0.002
+type = "scorer"
 
 [idolsankaku-eva02-large-tagger-v1]
 model_path = "deepghs/idolsankaku-eva02-large-tagger-v1"
 class = "WDTagger"
 estimated_size_gb = 1.695
+type = "tagger"
 
 [idolsankaku-swinv2-tagger-v1]
 model_path = "deepghs/idolsankaku-swinv2-tagger-v1"
 class = "WDTagger"
 estimated_size_gb = 0.587
+type = "tagger"
 
 [Z3D-E621-Convnext]
 model_path = "toynya/Z3D-E621-Convnext"
 class = "Z3D_E621Tagger"
 estimated_size_gb = 0.544
+type = "tagger"
 
 [wd-v1-4-convnext-tagger-v2]
 model_path = "SmilingWolf/wd-v1-4-convnext-tagger-v2"
 class = "WDTagger"
 estimated_size_gb = 0.542
+type = "tagger"
 
 [wd-v1-4-convnextv2-tagger-v2]
 model_path = "SmilingWolf/wd-v1-4-convnextv2-tagger-v2"
 class = "WDTagger"
 estimated_size_gb = 0.543
+type = "tagger"
 
 [wd-v1-4-moat-tagger-v2]
 model_path = "SmilingWolf/wd-v1-4-moat-tagger-v2"
 class = "WDTagger"
 estimated_size_gb = 0.456
+type = "tagger"
 
 [wd-v1-4-swinv2-tagger-v2]
 model_path = "SmilingWolf/wd-v1-4-swinv2-tagger-v2"
 class = "WDTagger"
 estimated_size_gb = 0.636
+type = "tagger"
 
 [wd-vit-tagger-v3]
 model_path = "SmilingWolf/wd-vit-tagger-v3"
 class = "WDTagger"
 estimated_size_gb = 0.529
+type = "tagger"
 
 [wd-convnext-tagger-v3]
 model_path = "SmilingWolf/wd-convnext-tagger-v3"
 class = "WDTagger"
 estimated_size_gb = 0.552
+type = "tagger"
 
 [wd-swinv2-tagger-v3]
 model_path = "SmilingWolf/wd-swinv2-tagger-v3"
 class = "WDTagger"
 estimated_size_gb = 0.653
+type = "tagger"
 
 [wd-vit-large-tagger-v3]
 model_path = "SmilingWolf/wd-vit-large-tagger-v3"
 class = "WDTagger"
 estimated_size_gb = 1.761
+type = "tagger"
 
 [wd-eva02-large-tagger-v3]
 model_path = "SmilingWolf/wd-eva02-large-tagger-v3"
 class = "WDTagger"
 estimated_size_gb = 1.761
+type = "tagger"
 
 [BLIPLargeCaptioning]
 model_path = "Salesforce/blip-image-captioning-large"
 class = "BLIPTagger"
 estimated_size_gb = 1.75
+type = "captioner"
 
 ["blip2-opt-2.7b"]
 model_path = "Salesforce/blip2-opt-2.7b"
 class = "BLIP2Tagger"
 device = "cpu"
 estimated_size_gb = 16.74
+type = "tagger"
 
 ["blip2-opt-2.7b-coco"]
 model_path = "Salesforce/blip2-opt-2.7b-coco"
 class = "BLIP2Tagger"
 device = "cpu"
 estimated_size_gb = 16.743
+type = "tagger"
 
 ["blip2-opt-6.7b"]
 model_path = "Salesforce/blip2-opt-6.7b"
 class = "BLIP2Tagger"
 device = "cpu"
 estimated_size_gb = 34.658
+type = "tagger"
 
 ["blip2-opt-6.7b-coco"]
 model_path = "Salesforce/blip2-opt-6.7b-coco"
 class = "BLIP2Tagger"
 device = "cpu"
 estimated_size_gb = 34.661
+type = "tagger"
 
 [blip2-flan-t5-xl]
 model_path = "Salesforce/blip2-flan-t5-xl"
 class = "BLIP2Tagger"
 device = "cpu"
 estimated_size_gb = 17.624
+type = "tagger"
 
 [blip2-flan-t5-xl-coco]
 model_path = "Salesforce/blip2-flan-t5-xl-coco"
 class = "BLIP2Tagger"
 device = "cpu"
 estimated_size_gb = 17.627
+type = "tagger"
 
 [blip2-flan-t5-xxl]
 model_path = "Salesforce/blip2-flan-t5-xxl"
 class = "BLIP2Tagger"
 device = "cpu"
+type = "tagger"
 
 [GITLargeCaptioning]
 model_path = "microsoft/git-large-coco"
 class = "GITTagger"
 estimated_size_gb = 1.762
 device = "cpu"
+type = "captioner"
 
 ["ToriiGate-v0.3"]
 model_path = "Minthy/ToriiGate-v0.3"
 class = "ToriiGateTagger"
 device = "cpu"
 estimated_size_gb = 37.828
+type = "tagger"
 
 [deepdanbooru-v3-20211112-sgd-e28]
 model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v3-20211112-sgd-e28/deepdanbooru-v3-20211112-sgd-e28.zip"
 class = "DeepDanbooruTagger"
 estimated_size_gb = 0.723
+type = "tagger"
 
 [deepdanbooru-v4-20200814-sgd-e30]
 model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v4-20200814-sgd-e30/deepdanbooru-v4-20200814-sgd-e30.zip"
 class = "DeepDanbooruTagger"
 estimated_size_gb = 0.327
+type = "tagger"
 
 [deepdanbooru-v3-20200915-sgd-e30]
 model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v3-20200915-sgd-e30/deepdanbooru-v3-20200915-sgd-e30.zip"
 class = "DeepDanbooruTagger"
 estimated_size_gb = 0.698
+type = "tagger"
 
 [deepdanbooru-v3-20200101-sgd-e30]
 model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v3-20200101-sgd-e30/deepdanbooru-v3-20200101-sgd-e30.zip"
 class = "DeepDanbooruTagger"
 estimated_size_gb = 0.687
+type = "tagger"
 
 [deepdanbooru-v1-20191108-sgd-e30]
 model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v1-20191108-sgd-e30/deepdanbooru-v1-20191108-sgd-e30.zip"
 class = "DeepDanbooruTagger"
 estimated_size_gb = 0.66
+type = "tagger"
