@@ -29,47 +29,47 @@ def reset_global_state(request):
     # (BDDテストでは各ステップ間でレジストリの状態を保持する必要がある)
     # (統合テストでは順序依存を避けるためレジストリを保持)
     is_special_test = (
-        hasattr(request, 'node') and 
-        hasattr(request.node, 'name') and 
-        ('test_bdd_runner.py' in str(request.node.fspath) or 
-         'integration' in str(request.node.fspath))
+        hasattr(request, "node")
+        and hasattr(request.node, "name")
+        and ("test_bdd_runner.py" in str(request.node.fspath) or "integration" in str(request.node.fspath))
     )
-    
+
     # テスト前のセットアップ
     yield
-    
+
     # 特別なテスト（BDDまたは統合テスト）でない場合のみクリーンアップを実行
     if not is_special_test:
         # テスト後のクリーンアップ
         # レジストリとキャッシュをクリア
         try:
-            from image_annotator_lib.core.registry import _MODEL_CLASS_OBJ_REGISTRY
-            from image_annotator_lib.core.model_factory import ModelLoad
             from image_annotator_lib.core.config import config_registry
+            from image_annotator_lib.core.model_factory import ModelLoad
             from image_annotator_lib.core.provider_manager import ProviderManager
-            
+            from image_annotator_lib.core.registry import _MODEL_CLASS_OBJ_REGISTRY
+
             # レジストリクリア
             _MODEL_CLASS_OBJ_REGISTRY.clear()
-            
+
             # ModelLoadキャッシュクリア
-            if hasattr(ModelLoad, '_instance_cache'):
+            if hasattr(ModelLoad, "_instance_cache"):
                 ModelLoad._instance_cache.clear()
-            if hasattr(ModelLoad, '_model_cache'):
+            if hasattr(ModelLoad, "_model_cache"):
                 ModelLoad._model_cache.clear()
-                
+
             # 設定レジストリクリア
-            if hasattr(config_registry, '_config_cache'):
+            if hasattr(config_registry, "_config_cache"):
                 config_registry._config_cache.clear()
-                
+
             # ProviderManagerキャッシュクリア
-            if hasattr(ProviderManager, '_provider_cache'):
+            if hasattr(ProviderManager, "_provider_cache"):
                 ProviderManager._provider_cache.clear()
-            if hasattr(ProviderManager, '_agent_cache'):
+            if hasattr(ProviderManager, "_agent_cache"):
                 ProviderManager._agent_cache.clear()
-                
+
         except ImportError:
             # モジュールがまだロードされていない場合はスキップ
             pass
+
 
 resources_dir = Path("tests") / "resources"
 

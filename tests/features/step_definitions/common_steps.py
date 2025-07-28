@@ -16,7 +16,7 @@ def model_config_is_valid():
     # 実際の設定ファイルが存在し、内容が正しいことを検証
     config_path = "config/annotator_config.toml"
     assert os.path.exists(config_path)
-    
+
     # レジストリを初期化してモデルが利用可能になるようにする
     initialize_registry()
 

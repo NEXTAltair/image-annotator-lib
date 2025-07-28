@@ -12,7 +12,6 @@ import pytest
 from PIL import Image
 
 from image_annotator_lib.api import _MODEL_INSTANCE_REGISTRY, annotate, list_available_annotators
-from image_annotator_lib.core.model_factory import ModelLoad
 from image_annotator_lib.core.provider_manager import ProviderManager
 from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
 from image_annotator_lib.core.registry import get_cls_obj_registry
@@ -42,8 +41,9 @@ class TestLocalMLModelsIntegration:
         """Categorize available models by type."""
         # Ensure registry is initialized before trying to list models
         from image_annotator_lib.core.registry import initialize_registry
+
         initialize_registry()
-        
+
         try:
             available_models = list_available_annotators()
         except Exception:
@@ -102,6 +102,7 @@ class TestLocalMLModelsIntegration:
         """Test ONNX model loading and basic structure validation."""
         # Ensure registry is initialized
         from image_annotator_lib.core.registry import initialize_registry
+
         initialize_registry()
         # Mock ONNX session
         mock_session = MagicMock()
@@ -124,10 +125,11 @@ class TestLocalMLModelsIntegration:
                 # Mock context manager support
                 mock_annotator.__enter__ = MagicMock(return_value=mock_annotator)
                 mock_annotator.__exit__ = MagicMock(return_value=None)
-                
+
                 # Mock predict method
                 def mock_predict(images, phash_list):
                     from image_annotator_lib.core.types import AnnotationResult
+
                     results = []
                     for i, (image, phash) in enumerate(zip(images, phash_list, strict=False)):
                         results.append(
@@ -139,13 +141,14 @@ class TestLocalMLModelsIntegration:
                             )
                         )
                     return results
-                
+
                 mock_annotator.predict.side_effect = mock_predict
                 mock_create.return_value = mock_annotator
 
                 # Test through the annotate API
                 from PIL import Image
-                test_image = Image.new('RGB', (224, 224), color='red')
+
+                test_image = Image.new("RGB", (224, 224), color="red")
                 results = annotate(images_list=[test_image], model_name_list=[test_model])
 
                 assert isinstance(results, dict)
@@ -162,6 +165,7 @@ class TestLocalMLModelsIntegration:
         """Test TensorFlow model loading and basic structure validation."""
         # Ensure registry is initialized
         from image_annotator_lib.core.registry import initialize_registry
+
         initialize_registry()
         # Mock TensorFlow model
         mock_model = MagicMock()
@@ -184,10 +188,11 @@ class TestLocalMLModelsIntegration:
                 # Mock context manager support
                 mock_annotator.__enter__ = MagicMock(return_value=mock_annotator)
                 mock_annotator.__exit__ = MagicMock(return_value=None)
-                
+
                 # Mock predict method
                 def mock_predict(images, phash_list):
                     from image_annotator_lib.core.types import AnnotationResult
+
                     results = []
                     for i, (image, phash) in enumerate(zip(images, phash_list, strict=False)):
                         results.append(
@@ -199,13 +204,14 @@ class TestLocalMLModelsIntegration:
                             )
                         )
                     return results
-                
+
                 mock_annotator.predict.side_effect = mock_predict
                 mock_create.return_value = mock_annotator
 
                 # Test through the annotate API
                 from PIL import Image
-                test_image = Image.new('RGB', (224, 224), color='red')
+
+                test_image = Image.new("RGB", (224, 224), color="red")
                 results = annotate(images_list=[test_image], model_name_list=[test_model])
 
                 assert isinstance(results, dict)
@@ -223,8 +229,9 @@ class TestLocalMLModelsIntegration:
         """Test CLIP model loading and inference integration."""
         # Ensure registry is initialized
         from image_annotator_lib.core.registry import initialize_registry
+
         initialize_registry()
-        
+
         clip_models = model_categories.get("clip", [])
 
         if not clip_models:
@@ -241,7 +248,7 @@ class TestLocalMLModelsIntegration:
             "base_model": "openai/clip-vit-base-patch32",
         }
         managed_config_registry.set(test_model, test_config)
-        
+
         # Re-initialize registry to ensure the test model is registered
         initialize_registry()
 
@@ -579,8 +586,9 @@ class TestLocalMLModelsIntegration:
         """Test that local ML models are properly registered and discoverable."""
         # Ensure registry is initialized
         from image_annotator_lib.core.registry import initialize_registry
+
         initialize_registry()
-        
+
         try:
             # This tests the model registry integration
             available_annotators = list_available_annotators()

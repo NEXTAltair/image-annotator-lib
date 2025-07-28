@@ -39,6 +39,7 @@ class TestAnthropicApiAnnotatorIntegration:
             "timeout": 30,
             "max_retries": 3,
             "rate_limit_requests_per_minute": 40,
+            "capabilities": ["tags", "captions", "scores"],  # マルチモーダルLLM対応
         }
         managed_config_registry.set("anthropic_test_model", config)
         return config
@@ -79,8 +80,8 @@ class TestAnthropicApiAnnotatorIntegration:
     def test_run_with_model_success(
         self, anthropic_annotator, lightweight_test_images, pydantic_ai_test_model
     ):
-        """Test successful inference with Anthropic API using TestModel."""
-        from image_annotator_lib.core.types import AnnotationSchema
+        """Test successful inference with Anthropic API using UnifiedAnnotationResult."""
+        from image_annotator_lib.core.types import AnnotationSchema, UnifiedAnnotationResult
 
         with patch.object(
             anthropic_annotator, "_run_inference_async", new_callable=AsyncMock
@@ -94,14 +95,16 @@ class TestAnthropicApiAnnotatorIntegration:
             with anthropic_annotator as annotator:
                 results = annotator.run_with_model(lightweight_test_images[:2], "claude-3-5-sonnet")
 
-        # Verify results
+        # Verify results structure - should now only be UnifiedAnnotationResult format
         assert len(results) == 2
         for result in results:
-            assert result["error"] is None
-            response = result["response"]
-            assert response.tags == ["test_model_tag"]
-            assert response.captions == ["A test caption."]
-            assert response.score == 0.95
+
+            assert isinstance(result, UnifiedAnnotationResult)
+            assert result.error is None
+            assert result.tags == ["test_model_tag"]
+            assert result.captions == ["A test caption."]
+            if result.scores:
+                assert result.scores.get("score") == 0.95
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -355,13 +358,12 @@ class TestAnthropicApiAnnotatorIntegration:
 
         # Test environment detection should work, and we mock the provider instance
         from unittest.mock import MagicMock
+
         from image_annotator_lib.core.types import AnnotationSchema
 
         # Create mock response matching the expected structure
         mock_response_data = AnnotationSchema(
-            tags=["test_model_tag"],
-            captions=["A test caption."],
-            score=0.95
+            tags=["test_model_tag"], captions=["A test caption."], score=0.95
         )
 
         # Mock the entire provider instance to avoid PydanticAI complexity
@@ -436,8 +438,11 @@ class TestAnthropicApiAnnotatorIntegration:
             # Should handle preprocessing errors gracefully
             assert len(results) == len(invalid_data)
             for result in results:
-                assert result["error"] is not None
-                assert "画像前処理エラー" in result["error"]
+                from image_annotator_lib.core.types import UnifiedAnnotationResult
+
+                assert isinstance(result, UnifiedAnnotationResult)
+                assert result.error is not None
+                assert "画像前処理エラー" in result.error
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -492,18 +497,20 @@ class TestAnthropicApiAnnotatorIntegration:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_concurrent_claude_requests(self, anthropic_annotator, lightweight_test_images):
-        """Test handling of concurrent requests to Claude."""
+    def test_sequential_claude_requests(self, anthropic_annotator, lightweight_test_images):
+        """Test handling of sequential requests to Claude (per specification)."""
         with patch(
             "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
         ) as mock_get_agent:
-            concurrent_calls = []
+            sequential_calls = []
 
             def mock_run(*args, **kwargs):
-                call_id = len(concurrent_calls) + 1
-                concurrent_calls.append(call_id)
+                call_id = len(sequential_calls) + 1
+                sequential_calls.append(call_id)
                 mock_response = MagicMock()
-                mock_response.tags = [f"concurrent_claude_{call_id}"]
+                mock_response.tags = [f"sequential_claude_{call_id}"]
+                mock_response.captions = [f"Sequential caption {call_id}"]
+                mock_response.score = 0.85
                 return MagicMock(data=mock_response)
 
             mock_agent = MagicMock()
@@ -512,16 +519,21 @@ class TestAnthropicApiAnnotatorIntegration:
 
             anthropic_annotator._setup_agent()
 
-            # Simulate concurrent processing
+            # Test sequential processing (per specification)
             results = anthropic_annotator.run_with_model(lightweight_test_images, "claude-3-5-sonnet")
 
-            # Verify all requests were processed
+            # Verify all requests were processed sequentially
             assert len(results) == len(lightweight_test_images)
-            assert len(concurrent_calls) == len(lightweight_test_images)
+            assert len(sequential_calls) == len(lightweight_test_images)
 
-            # Verify all successful
+            # Verify all successful with UnifiedAnnotationResult format
             for result in results:
-                assert result["error"] is None
+                from image_annotator_lib.core.types import UnifiedAnnotationResult
+
+                assert isinstance(result, UnifiedAnnotationResult)
+                assert result.error is None
+                assert result.tags is not None
+                assert result.captions is not None
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
