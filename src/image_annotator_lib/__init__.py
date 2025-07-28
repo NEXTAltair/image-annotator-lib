@@ -8,7 +8,6 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 from .api import PHashAnnotationResults
 from .core.api_model_discovery import discover_available_vision_models
-from .core.simplified_agent_factory import get_available_models, create_agent
 from .core.config import config_registry
 from .core.constants import (
     AVAILABLE_API_MODELS_CONFIG_PATH,
@@ -17,7 +16,12 @@ from .core.constants import (
     USER_CONFIG_PATH,
 )
 from .core.model_factory import ModelLoad
-from .core.registry import initialize_registry, list_available_annotators
+from .core.registry import (
+    initialize_registry,
+    list_available_annotators,
+    list_available_annotators_with_metadata,
+)
+from .core.simplified_agent_factory import create_agent, get_available_models
 from .core.types import AnnotationResult
 from .core.utils import init_logger
 from .exceptions import *
@@ -37,10 +41,11 @@ __all__ = [
     "OutOfMemoryError",
     "annotate",
     "config_registry",
+    "create_agent",
     "discover_available_vision_models",
     "get_available_models",
-    "create_agent",
     "list_available_annotators",
+    "list_available_annotators_with_metadata",
 ]
 
 # モジュールレベルのキャッシュ
