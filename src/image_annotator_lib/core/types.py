@@ -3,7 +3,7 @@
 """
 
 from pathlib import Path
-from typing import Any, Protocol, TypedDict
+from typing import Any, Literal, Protocol, TypedDict, Union
 
 import onnxruntime as ort
 from pydantic import BaseModel, Field, SecretStr, ValidationInfo, field_validator
@@ -198,3 +198,164 @@ class AnthropicApiDependencies(CommonApiDependencies):
         default=1800, description="生成されるトークンの最大数 (APIパラメータ名は max_tokens)"
     )
     # tools や tool_choice など、AnthropicのTool Use関連の設定を将来的に追加する可能性あり
+
+
+# --- 新バリデーションスキーマ (Pydantic V2) ---
+
+
+class BaseAnnotationResult(BaseModel):
+    """全モデルタイプ共通の基底クラス
+
+    型安全なバリデーションスキーマの基底となるクラス。
+    各モデルタイプに共通する最小限のフィールドのみを定義。
+    """
+
+    error: str | None = None
+    model_name: str
+    model_type: str
+
+
+class WebApiAnnotationResult(BaseAnnotationResult):
+    """Web APIモデル用（PydanticAIベース）
+
+    OpenAI、Anthropic、Google等のWeb APIからの結果を格納。
+    AI生成タグ、キャプション、信頼度スコア等を含む。
+    """
+
+    model_type: Literal["webapi"] = "webapi"
+    tags: list[str] = Field(default_factory=list)  # AI生成タグ
+    captions: list[str] = Field(default_factory=list)
+    confidence_score: float | None = None
+    provider_name: str  # "anthropic", "openai", "google"
+    api_response: dict[str, Any] | None = None  # 生データ保持
+
+
+class TaggerAnnotationResult(BaseAnnotationResult):
+    """ローカルMLタガー用（ONNX/Transformers）
+
+    WD-Tagger、DeepDanbooru等のローカルMLモデルからの結果を格納。
+    カテゴリ別のスコア、閾値情報、フレームワーク情報等を含む。
+    """
+
+    model_type: Literal["tagger"] = "tagger"
+    tags: list[str] = Field(default_factory=list)  # 閾値フィルタ後のタグ
+    category_scores: dict[str, dict[str, float]]  # {"general": {"tag1": 0.85}}
+    confidence_threshold: float
+    total_tags_count: int
+    framework: str  # "onnx", "transformers", "tensorflow"
+    raw_predictions: list[float] | None = None  # 元のnumpy配列データ
+
+
+class ScorerAnnotationResult(BaseAnnotationResult):
+    """スコアラー用（CLIPベース）
+
+    美的スコア、品質スコア等の数値評価モデルからの結果を格納。
+    数値スコアがメインデータで、tagsフィールドは持たない。
+    """
+
+    model_type: Literal["scorer"] = "scorer"
+    score_values: list[float]  # メインの数値スコア
+    score_range: tuple[float, float] = (0.0, 10.0)
+    score_format: str = "numeric"  # "numeric" | "tag_based"
+    base_model: str  # "clip-vit-large-patch14"
+    raw_scores: list[float] | None = None  # 元のテンソルデータ
+    # tagsフィールドなし（数値スコアがメインデータ）
+
+
+class CaptionerAnnotationResult(BaseAnnotationResult):
+    """キャプション生成用（BLIP、CLIP-Caption等）
+
+    BLIP、GIT等のキャプション生成モデルからの結果を格納。
+    生成キャプションがメインデータで、tagsフィールドは持たない。
+    """
+
+    model_type: Literal["captioner"] = "captioner"
+    captions: list[str]  # メインの生成キャプション
+    confidence_scores: list[float] | None = None  # キャプションの信頼度
+    generation_params: dict[str, Any] | None = None  # beam_size, temperature等
+    base_model: str  # "blip-large", "clip-interrogator"
+    raw_output: Any | None = None  # 元の生成結果
+    # tagsフィールドなし（キャプションがメインデータ）
+
+
+# Union型で型安全性確保
+AnnotationResultV2 = Union[
+    WebApiAnnotationResult,
+    TaggerAnnotationResult,
+    ScorerAnnotationResult,
+    CaptionerAnnotationResult,
+]
+
+
+# --- capability-based統一バリデーションスキーマ (Plan対応) ---
+
+from enum import Enum
+
+
+class TaskCapability(str, Enum):
+    """サポートするタスク能力（3つに限定）"""
+
+    TAGS = "tags"
+    CAPTIONS = "captions"
+    SCORES = "scores"
+
+
+class UnifiedAnnotationResult(BaseModel):
+    """統一アノテーション結果（capability-based validation対応）
+
+    マルチモーダルLLM対応のcapability-based統一スキーマ。
+    1つのモデルが複数タスク（tags, captions, scores）を実行可能。
+    """
+
+    model_name: str
+    capabilities: set[TaskCapability]
+    error: str | None = None
+
+    # マルチタスク対応フィールド（capabilityに応じて使用）
+    tags: list[str] | None = None
+    captions: list[str] | None = None
+    scores: dict[str, float] | None = None
+
+    # メタデータ（Optional）
+    provider_name: str | None = None
+    framework: str | None = None
+    raw_output: dict[str, Any] | None = None
+
+    # === 厳密なcapabilityバリデーション ===
+    @field_validator("tags")
+    @classmethod
+    def validate_tags_capability(cls, v, info: ValidationInfo):
+        if v is not None:
+            capabilities = info.data.get("capabilities", set())
+            if TaskCapability.TAGS not in capabilities:
+                raise ValueError(f"tags provided but TAGS not in capabilities: {capabilities}")
+        return v
+
+    @field_validator("captions")
+    @classmethod
+    def validate_captions_capability(cls, v, info: ValidationInfo):
+        if v is not None:
+            capabilities = info.data.get("capabilities", set())
+            if TaskCapability.CAPTIONS not in capabilities:
+                raise ValueError(f"captions provided but CAPTIONS not in capabilities: {capabilities}")
+        return v
+
+    @field_validator("scores")
+    @classmethod
+    def validate_scores_capability(cls, v, info: ValidationInfo):
+        if v is not None:
+            capabilities = info.data.get("capabilities", set())
+            if TaskCapability.SCORES not in capabilities:
+                raise ValueError(f"scores provided but SCORES not in capabilities: {capabilities}")
+        return v
+
+    @field_validator("capabilities")
+    @classmethod
+    def validate_capabilities_not_empty(cls, v):
+        if not v:
+            raise ValueError("capabilities cannot be empty")
+        return v
+
+
+# === 新しい統一型システム ===
+UnifiedPHashAnnotationResults = dict[str, dict[str, UnifiedAnnotationResult]]
