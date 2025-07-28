@@ -84,11 +84,18 @@ def _gather_available_classes(directory: str) -> dict[str, ModelClass]:
             continue
         for name, obj in inspect.getmembers(module, inspect.isclass):
             # 古いプロバイダー固有のクラスは除外（PydanticAI統一後は不要）
-            obsolete_classes = ["AnthropicApiAnnotator", "GoogleApiAnnotator", "OpenAIApiChatAnnotator", "OpenAIApiResponseAnnotator"]
+            obsolete_classes = [
+                "AnthropicApiAnnotator",
+                "GoogleApiAnnotator",
+                "OpenAIApiChatAnnotator",
+                "OpenAIApiResponseAnnotator",
+            ]
             if name in obsolete_classes:
-                logger.debug(f"古いプロバイダー固有クラス '{name}' をスキップします（PydanticAI統一後は不要）")
+                logger.debug(
+                    f"古いプロバイダー固有クラス '{name}' をスキップします（PydanticAI統一後は不要）"
+                )
                 continue
-                
+
             # BaseAnnotator のサブクラスか、または predict メソッドを持つ場合 (ユーザー変更を反映)
             # objがtypeであることを確認 (Mypy対策)
             if isinstance(obj, type) and (
@@ -196,7 +203,7 @@ def _register_models(
                     f"[DEBUG _register_models] 利用可能なクラスから '{desired_class_name}' を検索した結果: {model_cls}"
                 )
 
-            if model_cls:
+            if model_cls is not None:
                 # 期待されるbase_classのサブクラスであるか、または predict を持つかを確認 (元のロジック踏襲)
                 if issubclass(model_cls, base_class) or hasattr(model_cls, "predict"):
                     if model_name in registry:
@@ -266,29 +273,29 @@ def get_cls_obj_registry() -> dict[str, ModelClass]:
 
 def find_model_class_case_insensitive(model_name: str) -> tuple[str, ModelClass] | None:
     """大文字・小文字を区別しないモデルクラス検索
-    
+
     Args:
         model_name: 検索するモデル名
-        
+
     Returns:
         tuple[str, ModelClass] | None: (実際のキー名, モデルクラス) のタプル。見つからない場合はNone
     """
     # デバッグ情報を追加
     logger.debug(f"モデル検索: '{model_name}' を {len(_MODEL_CLASS_OBJ_REGISTRY)} 個のモデルから検索")
     logger.debug(f"利用可能なモデル: {list(_MODEL_CLASS_OBJ_REGISTRY.keys())[:10]}...")
-    
+
     # 最初に正確なマッチを試す
     if model_name in _MODEL_CLASS_OBJ_REGISTRY:
         logger.debug(f"正確なマッチ: '{model_name}'")
         return (model_name, _MODEL_CLASS_OBJ_REGISTRY[model_name])
-    
+
     # 大文字・小文字を区別しない検索
     model_name_lower = model_name.lower()
     for key, value in _MODEL_CLASS_OBJ_REGISTRY.items():
         if key.lower() == model_name_lower:
             logger.debug(f"モデル名を正規化: '{model_name}' -> '{key}'")
             return (key, value)
-    
+
     # 部分マッチを試す（ハイフンやスペースを無視）
     normalized_search = model_name.lower().replace("-", "").replace(" ", "")
     for key, value in _MODEL_CLASS_OBJ_REGISTRY.items():
@@ -296,8 +303,10 @@ def find_model_class_case_insensitive(model_name: str) -> tuple[str, ModelClass]
         if normalized_search in normalized_key or normalized_key in normalized_search:
             logger.debug(f"部分マッチでモデル名を正規化: '{model_name}' -> '{key}'")
             return (key, value)
-    
-    logger.warning(f"モデル '{model_name}' が見つかりません。利用可能なモデル: {list(_MODEL_CLASS_OBJ_REGISTRY.keys())[:5]}")
+
+    logger.warning(
+        f"モデル '{model_name}' が見つかりません。利用可能なモデル: {list(_MODEL_CLASS_OBJ_REGISTRY.keys())[:5]}"
+    )
     return None
 
 
@@ -307,12 +316,154 @@ def list_available_annotators() -> list[str]:
     return list(_MODEL_CLASS_OBJ_REGISTRY.keys())
 
 
+def list_available_annotators_with_metadata() -> dict[str, dict[str, any]]:
+    """利用可能なアノテータモデルとそのメタデータを返します。
+
+    LoRAIro統合用の拡張API。各モデルの詳細情報（プロバイダー、APIモデルID、
+    サイズ、APIキー要件等）を含む辞書を返します。
+
+    Returns:
+        dict[str, dict[str, any]]: モデル名をキーとし、メタデータ辞書を値とする辞書
+            メタデータには以下が含まれます:
+            - class: モデルクラス名
+            - provider: プロバイダー名（API系の場合）
+            - api_model_id: APIモデルID（API系の場合）
+            - model_type: モデルタイプ（"vision", "score", "tagger"）
+            - estimated_size_gb: 推定サイズ（GB、ローカルモデルの場合）
+            - requires_api_key: APIキーが必要かどうか
+            - max_output_tokens: 最大出力トークン数（API系の場合）
+            - discontinued_at: 廃止日時（該当する場合のみ）
+    """
+    logger.debug("メタデータ付きアノテーターリストの生成を開始します")
+
+    # レジストリが初期化されていない場合は初期化
+    if not _REGISTRY_INITIALIZED:
+        initialize_registry()
+
+    result = {}
+
+    try:
+        # 全設定を取得
+        all_config = config_registry.get_all_config()
+        logger.debug(f"設定から{len(all_config)}件のモデル設定を取得しました")
+
+        # レジストリに登録されているモデルのみを対象とする
+        for model_name in _MODEL_CLASS_OBJ_REGISTRY.keys():
+            model_config = all_config.get(model_name, {})
+            model_class = _MODEL_CLASS_OBJ_REGISTRY[model_name]
+
+            # メタデータ構築
+            metadata = {
+                "class": model_class.__name__,
+                "provider": model_config.get("provider"),
+                "api_model_id": model_config.get("api_model_id"),
+                "model_type": _determine_model_type(model_name, model_class, model_config),
+                "estimated_size_gb": model_config.get("estimated_size_gb"),
+                "requires_api_key": _requires_api_key(model_class, model_config),
+                "max_output_tokens": model_config.get("max_output_tokens"),
+                "discontinued_at": model_config.get("discontinued_at"),
+            }
+
+            # None値をクリーンアップ（必要に応じて）
+            # metadata = {k: v for k, v in metadata.items() if v is not None}
+
+            result[model_name] = metadata
+            logger.debug(f"モデル '{model_name}' のメタデータを生成しました")
+
+    except Exception as e:
+        logger.error(f"メタデータ付きアノテーターリスト生成中にエラー: {e}", exc_info=True)
+        # エラーが発生しても、基本的なリストは返す
+        for model_name in _MODEL_CLASS_OBJ_REGISTRY.keys():
+            result[model_name] = {
+                "class": _MODEL_CLASS_OBJ_REGISTRY[model_name].__name__,
+                "provider": None,
+                "api_model_id": None,
+                "model_type": "unknown",
+                "estimated_size_gb": None,
+                "requires_api_key": False,
+                "max_output_tokens": None,
+                "discontinued_at": None,
+            }
+
+    logger.info(f"メタデータ付きアノテーターリスト生成完了: {len(result)}件")
+    return result
+
+
+def _determine_model_type(model_name: str, model_class: ModelClass, model_config: dict) -> str:
+    """モデルタイプを判定する
+
+    Args:
+        model_name: モデル名
+        model_class: モデルクラス
+        model_config: モデル設定
+
+    Returns:
+        str: モデルタイプ（"vision", "score", "tagger"）
+    """
+    # 設定から直接取得できる場合
+    if "model_type" in model_config:
+        return model_config["model_type"]
+
+    # モデル名やクラス名から推定
+    model_name_lower = model_name.lower()
+    class_name_lower = model_class.__name__.lower()
+
+    # スコア系モデルの判定
+    if any(keyword in model_name_lower for keyword in ["aesthetic", "score", "rating", "quality"]):
+        return "score"
+    if any(keyword in class_name_lower for keyword in ["aesthetic", "score", "rating", "quality"]):
+        return "score"
+
+    # タガー系モデルの判定
+    if any(keyword in model_name_lower for keyword in ["tagger", "tag", "wd", "deepdanbooru"]):
+        return "tagger"
+    if any(keyword in class_name_lower for keyword in ["tagger", "tag", "wd", "deepdanbooru"]):
+        return "tagger"
+
+    # ビジョン系モデル（デフォルト）
+    # API系、キャプション系、汎用画像解析は全てvisionとする
+    return "vision"
+
+
+def _requires_api_key(model_class: ModelClass, model_config: dict) -> bool:
+    """APIキーが必要かどうかを判定する
+
+    Args:
+        model_class: モデルクラス
+        model_config: モデル設定
+
+    Returns:
+        bool: APIキーが必要かどうか
+    """
+    # 設定から直接取得できる場合
+    if "requires_api_key" in model_config:
+        return bool(model_config["requires_api_key"])
+
+    # クラス名から判定
+    class_name = model_class.__name__
+
+    # PydanticAI WebAPIアノテーターは全てAPIキー必要
+    if class_name == "PydanticAIWebAPIAnnotator":
+        return True
+
+    # 古いAPI系クラス名の判定
+    if "api" in class_name.lower() or "webapi" in class_name.lower():
+        return True
+
+    # api_model_id が設定されている場合はAPI系
+    if model_config.get("api_model_id"):
+        return True
+
+    # デフォルトはローカルモデル（APIキー不要）
+    return False
+
+
 def normalize_model_name(model_name: str) -> str | None:
     """モデル名を正規化（大文字・小文字を区別しない検索で実際のキー名を返す）
-    
+
     Args:
         model_name: 正規化するモデル名
-        
+
     Returns:
         str | None: 実際のレジストリキー名。見つからない場合はNone
     """
@@ -392,16 +543,16 @@ def initialize_registry() -> None:
     Web API モデル情報の取得と設定ファイルの自動更新も行う。
     """
     global _REGISTRY_INITIALIZED
-    
+
     from .utils import init_logger  # init_logger はここでインポート
 
     init_logger()
-    
+
     # 既に初期化済みの場合はスキップ
     if _REGISTRY_INITIALIZED:
         logger.debug(f"レジストリは既に初期化済みです。登録済みモデル数: {len(_MODEL_CLASS_OBJ_REGISTRY)}")
         return
-    
+
     logger.debug("レジストリ初期化プロセスを開始します...")
 
     # --- Web API モデル情報の取得と設定ファイルの自動更新 --- #

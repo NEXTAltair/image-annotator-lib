@@ -9,7 +9,7 @@ from PIL import Image
 # --- ローカルインポート ---
 from ...exceptions.errors import OutOfMemoryError
 from ..model_factory import ModelLoad
-from ..types import ONNXComponents
+from ..types import ONNXComponents, TaskCapability, UnifiedAnnotationResult
 from ..utils import logger
 from .annotator import BaseAnnotator
 
@@ -80,18 +80,32 @@ class ONNXBaseAnnotator(BaseAnnotator):
 
     def _format_predictions_single(
         self, raw_output: np.ndarray[Any, np.dtype[Any]]
-    ) -> dict[str, dict[str, float]]:
-        """単一の生出力をカテゴリ別にフォーマットします (ONNX タガー用)。"""
-        result: dict[str, dict[str, float]] = {}
+    ) -> UnifiedAnnotationResult:
+        """ONNX生出力を統一UnifiedAnnotationResultにフォーマット"""
+        from ..utils import get_model_capabilities
+
+        capabilities = get_model_capabilities(self.model_name)
         all_tags_list = getattr(self, "all_tags", [])
+        threshold = getattr(self, "tag_threshold", 0.35)
+
         if not all_tags_list:
-            logger.warning("タグ候補リスト (all_tags) がロードされていません。フォーマットできません。")
-            return {"error": {}}  # エラーを示す辞書を返す
+            logger.warning("タグ候補リスト (all_tags) がロードされていません。")
+            return UnifiedAnnotationResult(
+                model_name=self.model_name,
+                capabilities=capabilities,
+                error="タグ候補リストが未ロード",
+                framework="onnx",
+            )
 
         # 出力が NumPy 配列であることを確認
         if not isinstance(raw_output, np.ndarray):
             logger.error(f"予期しない生出力型: {type(raw_output)}")
-            return {"error": {}}
+            return UnifiedAnnotationResult(
+                model_name=self.model_name,
+                capabilities=capabilities,
+                error=f"予期しない生出力型: {type(raw_output)}",
+                framework="onnx",
+            )
 
         # 予測値の次元をチェックして調整
         if raw_output.ndim == 2 and raw_output.shape[0] == 1:
@@ -100,16 +114,27 @@ class ONNXBaseAnnotator(BaseAnnotator):
             predictions = raw_output.astype(float)
         else:
             logger.error(f"予期しない生出力形状: {raw_output.shape}")
-            return {"error": {}}
+            return UnifiedAnnotationResult(
+                model_name=self.model_name,
+                capabilities=capabilities,
+                error=f"予期しない生出力形状: {raw_output.shape}",
+                framework="onnx",
+            )
 
         # タグ数と予測数が一致するか確認
         if len(all_tags_list) != len(predictions):
             logger.error(
                 f"タグ候補リスト数 ({len(all_tags_list)}) と予測数 ({len(predictions)}) が一致しません。"
             )
-            return {"error": {}}
+            return UnifiedAnnotationResult(
+                model_name=self.model_name,
+                capabilities=capabilities,
+                error=f"タグ数と予測数の不一致: {len(all_tags_list)} != {len(predictions)}",
+                framework="onnx",
+            )
 
         tags_with_probs = list(zip(all_tags_list, predictions, strict=True))
+        category_scores: dict[str, dict[str, float]] = {}
 
         # _category_attr_map はサブクラス (e.g., WDTagger) で定義される
         category_map = getattr(self, "_category_attr_map", None)
@@ -117,20 +142,44 @@ class ONNXBaseAnnotator(BaseAnnotator):
             logger.warning(
                 "_category_attr_map がサブクラスで定義されていません。カテゴリ分類なしでフォーマットします。"
             )
-            result["general"] = {tag: float(prob) for tag, prob in tags_with_probs}
-            return result
+            category_scores["general"] = {tag: float(prob) for tag, prob in tags_with_probs}
+        else:
+            # カテゴリごとにタグを抽出
+            for category_key, attr_name in category_map.items():
+                category_tags = self._extract_category_tags(attr_name, tags_with_probs)
+                if category_tags:
+                    category_scores[category_key] = category_tags
 
-        # カテゴリごとにタグを抽出
-        for category_key, attr_name in category_map.items():
-            category_tags = self._extract_category_tags(attr_name, tags_with_probs)
-            if category_tags:
-                result[category_key] = category_tags
+            # rating キーを ratings にリネーム (後方互換性のため)
+            if "rating" in category_scores and "ratings" not in category_scores:
+                category_scores["ratings"] = category_scores.pop("rating")
 
-        # rating キーを ratings にリネーム (後方互換性のため)
-        if "rating" in result and "ratings" not in result:
-            result["ratings"] = result.pop("rating")
+        # 閾値を超えるタグを抽出
+        filtered_tags = []
+        for category, tag_dict in category_scores.items():
+            for tag, confidence in tag_dict.items():
+                if confidence >= threshold:
+                    filtered_tags.append((tag, confidence))
 
-        return result
+        # 信頼度順でソートしてタグ名のみ抽出
+        filtered_tags.sort(key=lambda x: x[1], reverse=True)
+        final_tags = [tag for tag, _ in filtered_tags]
+
+        # capabilityに応じてフィールドを設定
+        return UnifiedAnnotationResult(
+            model_name=self.model_name,
+            capabilities=capabilities,
+            tags=final_tags if TaskCapability.TAGS in capabilities else None,
+            captions=None,  # ONNXタガーはキャプション生成なし
+            scores=None,  # ONNXタガーは直接的なスコアなし
+            framework="onnx",
+            raw_output={
+                "predictions": predictions.tolist(),
+                "category_scores": category_scores,
+                "threshold": threshold,
+                "total_tags_count": len(all_tags_list),
+            },
+        )
 
     def _generate_tags_single(self, formatted_output: dict[str, dict[str, float]]) -> list[str]:
         """フォーマットされた単一出力からタグリストを生成します (ONNX タガー用)。"""
@@ -266,14 +315,18 @@ class ONNXBaseAnnotator(BaseAnnotator):
                     raise
         return results
 
-    def _format_predictions(self, raw_outputs: list[np.ndarray[Any, np.dtype[Any]]]) -> list[Any]:
-        """バッチ出力結果のナマの値をカテゴリ別にフォーマットします。"""
+    def _format_predictions(
+        self, raw_outputs: list[np.ndarray[Any, np.dtype[Any]]]
+    ) -> list[UnifiedAnnotationResult]:
+        """バッチ出力結果を統一バリデーションスキーマでフォーマット"""
         result_list = []
         for raw_output in raw_outputs:
             formatted = self._format_predictions_single(raw_output)
             result_list.append(formatted)
         return result_list
 
-    def _generate_tags(self, formatted_output: dict[str, dict[str, float]]) -> list[str]:
-        """フォーマットされた単一出力からタグリストを生成します (ONNX/TF タガー用)。"""
-        return self._generate_tags_single(formatted_output)
+    def _generate_tags(self, formatted_output: UnifiedAnnotationResult) -> list[str]:
+        """統一バリデーションスキーマからタグリストを生成"""
+        if isinstance(formatted_output, UnifiedAnnotationResult):
+            return formatted_output.tags or []
+        return []

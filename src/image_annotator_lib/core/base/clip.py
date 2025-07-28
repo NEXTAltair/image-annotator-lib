@@ -10,7 +10,7 @@ from PIL import Image
 from ...exceptions.errors import ModelLoadError, OutOfMemoryError
 from ..config import config_registry
 from ..model_factory import ModelLoad
-from ..types import CLIPComponents
+from ..types import CLIPComponents, ScorerAnnotationResult, TaskCapability, UnifiedAnnotationResult
 from ..utils import logger
 from .annotator import BaseAnnotator
 
@@ -118,24 +118,69 @@ class ClipBaseAnnotator(BaseAnnotator):
             logger.exception(f"CLIP Scorer '{self.model_name}' 推論中にエラー: {e}")
             raise RuntimeError(f"CLIP Scorer 推論エラー: {e}") from e
 
-    def _format_predictions(self, raw_outputs: torch.Tensor) -> list[float]:
-        """生のスコアテンソルを float のリストに変換します。"""
+    def _format_predictions(self, raw_outputs: torch.Tensor) -> list[UnifiedAnnotationResult]:
+        """CLIP生出力を統一UnifiedAnnotationResultにフォーマット"""
+        from ..utils import get_model_capabilities
+
+        capabilities = get_model_capabilities(self.model_name)
+
         try:
             scores = raw_outputs.cpu().numpy().tolist()
-            return [float(s) for s in scores]
+            score_list = [float(s) for s in scores]
+
+            results = []
+            for score in score_list:
+                results.append(
+                    UnifiedAnnotationResult(
+                        model_name=self.model_name,
+                        capabilities=capabilities,
+                        tags=None,  # CLIPスコアラーはタグ生成なし
+                        captions=None,  # CLIPスコアラーはキャプション生成なし
+                        scores={"aesthetic": score} if TaskCapability.SCORES in capabilities else None,
+                        framework="pytorch",
+                        raw_output={
+                            "tensor_shape": list(raw_outputs.shape),
+                            "raw_score": score,
+                            "base_model": self.base_model or "unknown",
+                        },
+                    )
+                )
+            return results
+
         except Exception as e:
             logger.exception(f"スコアテンソルのフォーマット中にエラー: {e}")
             try:
                 batch_size = raw_outputs.shape[0]
-                return [0.0] * batch_size
+                # エラーの場合でもUnifiedAnnotationResultを返す
+                return [
+                    UnifiedAnnotationResult(
+                        model_name=self.model_name,
+                        capabilities=capabilities,
+                        error=f"スコアテンソルのフォーマットエラー: {e}",
+                        framework="pytorch",
+                    )
+                    for _ in range(batch_size)
+                ]
             except Exception:
-                return []
+                return [
+                    UnifiedAnnotationResult(
+                        model_name=self.model_name,
+                        capabilities=capabilities,
+                        error=f"スコアテンソルのフォーマットエラー: {e}",
+                        framework="pytorch",
+                    )
+                ]
 
     @abstractmethod
     def _get_score_tag(self, score: float) -> str:
         """スコア値に基づいてスコアタグ文字列を生成します (サブクラスで実装)。"""
         raise NotImplementedError("サブクラスは _get_score_tag を実装する必要があります。")
 
-    def _generate_tags(self, formatted_output: float) -> list[str]:
-        """スコア値からスコアタグを生成します。"""
-        return [self._get_score_tag(formatted_output)]
+    def _generate_tags(self, formatted_output: ScorerAnnotationResult) -> list[str]:
+        """新バリデーションスキーマからタグを生成（Scorerはタグではなくスコアがメイン）"""
+        if isinstance(formatted_output, ScorerAnnotationResult) and formatted_output.score_values:
+            # スコアラーの場合、主要データは数値スコアなのでタグ生成は基本的に空
+            # ただし、スコアベースのタグ（例：'high_quality', 'low_quality'）が必要な場合は
+            # サブクラスでオーバーライドする
+            return []
+        return []

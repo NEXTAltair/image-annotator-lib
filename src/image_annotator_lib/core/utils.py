@@ -283,6 +283,35 @@ def determine_effective_device(requested_device: str, model_name: str | None = N
     return actual_device
 
 
+def get_model_capabilities(model_name: str) -> set:
+    """モデル名からcapabilitiesを取得
+
+    Args:
+        model_name: モデル名
+
+    Returns:
+        set: TaskCapabilityのセット
+    """
+    from .config import config_registry
+    from .types import TaskCapability
+
+    # 設定ファイルからcapabilitiesを取得
+    capabilities_config = config_registry.get(model_name, "capabilities", [])
+    if not capabilities_config:
+        logger.warning(f"モデル '{model_name}' のcapabilitiesが設定されていません")
+        return set()
+
+    # 文字列リストをTaskCapabilityに変換
+    capabilities = set()
+    for cap in capabilities_config:
+        try:
+            capabilities.add(TaskCapability(cap))
+        except ValueError:
+            logger.error(f"無効なcapability '{cap}' (model: {model_name})")
+
+    return capabilities
+
+
 def convert_unix_to_iso8601(timestamp: int | float | None, model_id_for_log: str | None = None) -> str:
     """Unixタイムスタンプを ISO 8601 形式の UTC 文字列に変換する。
 

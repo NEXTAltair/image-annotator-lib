@@ -11,7 +11,14 @@ from PIL import Image
 from ...exceptions.errors import ApiAuthenticationError, ConfigurationError
 from ..config import config_registry
 from ..model_factory import prepare_web_api_components
-from ..types import AnnotationSchema, RawOutput, WebApiComponents, WebApiFormattedOutput
+from ..types import (
+    AnnotationSchema,
+    RawOutput,
+    TaskCapability,
+    UnifiedAnnotationResult,
+    WebApiComponents,
+    WebApiFormattedOutput,
+)
 from ..utils import logger
 from .annotator import BaseAnnotator
 
@@ -349,22 +356,48 @@ class WebApiBaseAnnotator(BaseAnnotator):
         return []
 
     @override
-    def _format_predictions(self, raw_outputs: list[RawOutput]) -> list[WebApiFormattedOutput]:
-        """Web API からの応答 (RawOutput) を共通の WebApiFormattedOutput にフォーマットする"""
-        formatted_outputs: list[WebApiFormattedOutput] = []
+    def _format_predictions(self, raw_outputs: list[RawOutput]) -> list[UnifiedAnnotationResult]:
+        """Web APIからの応答を統一UnifiedAnnotationResultにフォーマット
+
+        capability-based統一バリデーションスキーマに対応。
+        """
+        from ..utils import get_model_capabilities
+
+        formatted_outputs: list[UnifiedAnnotationResult] = []
+        capabilities = get_model_capabilities(self.model_name)
+
         for output in raw_outputs:
             error = output.get("error")
             response_val = output.get("response")
 
             if error:
-                formatted_outputs.append(WebApiFormattedOutput(annotation=None, error=error))
+                formatted_outputs.append(
+                    UnifiedAnnotationResult(
+                        model_name=self.model_name,
+                        capabilities=capabilities,
+                        error=error,
+                        provider_name=self.provider_name or "unknown",
+                    )
+                )
                 continue
 
             if isinstance(response_val, AnnotationSchema):
-                # AnnotationSchema型ならmodel_dump()でdictに変換
-                formatted_outputs.append(
-                    WebApiFormattedOutput(annotation=response_val.model_dump(), error=None)
+                # AnnotationSchema型から統一スキーマに変換
+                response_dict = response_val.model_dump()
+
+                # capabilityに応じてフィールドを設定
+                result = UnifiedAnnotationResult(
+                    model_name=self.model_name,
+                    capabilities=capabilities,
+                    tags=response_val.tags if TaskCapability.TAGS in capabilities else None,
+                    captions=response_val.captions if TaskCapability.CAPTIONS in capabilities else None,
+                    scores={"score": response_val.score}
+                    if TaskCapability.SCORES in capabilities and response_val.score
+                    else None,
+                    provider_name=self.provider_name or "unknown",
+                    raw_output=response_dict,  # 生データ保持
                 )
+                formatted_outputs.append(result)
             else:
                 # response_valがNoneの場合や、予期せぬ型の場合
                 error_message = (
@@ -372,5 +405,12 @@ class WebApiBaseAnnotator(BaseAnnotator):
                     if response_val is not None
                     else "Response is None"
                 )
-                formatted_outputs.append(WebApiFormattedOutput(annotation=None, error=error_message))
+                formatted_outputs.append(
+                    UnifiedAnnotationResult(
+                        model_name=self.model_name,
+                        capabilities=capabilities,
+                        error=error_message,
+                        provider_name=self.provider_name or "unknown",
+                    )
+                )
         return formatted_outputs

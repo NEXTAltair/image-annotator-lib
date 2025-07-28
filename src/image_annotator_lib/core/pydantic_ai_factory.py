@@ -34,17 +34,25 @@ def _is_test_environment() -> bool:
         # Additional check for BDD tests
         any("bdd" in str(arg).lower() for arg in sys.argv),
         # Check if we're in a test file execution
-        any("test_" in str(frame.filename) for frame in 
-            __import__('inspect').stack() if hasattr(frame, 'filename')),
+        any(
+            "test_" in str(frame.filename)
+            for frame in __import__("inspect").stack()
+            if hasattr(frame, "filename")
+        ),
         # Force test environment for BDD tests
-        any("test_bdd_runner" in str(frame.filename) for frame in 
-            __import__('inspect').stack() if hasattr(frame, 'filename')),
+        any(
+            "test_bdd_runner" in str(frame.filename)
+            for frame in __import__("inspect").stack()
+            if hasattr(frame, "filename")
+        ),
     ]
 
     is_test = any(test_indicators)
     if is_test:
-        logger.debug(f"Test environment detected via: {[i for i, indicator in enumerate(test_indicators) if indicator]}")
-    
+        logger.debug(
+            f"Test environment detected via: {[i for i, indicator in enumerate(test_indicators) if indicator]}"
+        )
+
     return is_test
 
 
@@ -83,7 +91,7 @@ class PydanticAIProviderFactory:
     @classmethod
     def create_agent(cls, model_name: str, api_model_id: str, api_key: str) -> Agent:
         """Create PydanticAI Agent with provider reuse and caching"""
-        
+
         logger.debug(f"Creating agent for model: {model_name}, api_model_id: {api_model_id}")
         logger.debug(f"API key provided: {'Yes' if api_key else 'No'}")
 
@@ -94,9 +102,10 @@ class PydanticAIProviderFactory:
         if api_key:
             provider_name = cls._extract_provider_name(api_model_id)
             logger.debug(f"Extracted provider name: {provider_name}")
-            
+
             # Set environment variable for the appropriate provider
             import os
+
             if provider_name == "openai":
                 os.environ["OPENAI_API_KEY"] = api_key
             elif provider_name == "anthropic":
@@ -134,9 +143,12 @@ class PydanticAIProviderFactory:
                 "full_model_name": full_model_name,
                 "provider_name": provider_name,
                 "error_type": type(e).__name__,
-                "error_message": str(e)
+                "error_message": str(e),
             }
-            logger.error(f"Agent creation failed: model={model_name}, api_id={api_model_id}, full_name={full_model_name}, provider={provider_name}, error_type={type(e).__name__}, message={str(e)}", exc_info=True)
+            logger.error(
+                f"Agent creation failed: model={model_name}, api_id={api_model_id}, full_name={full_model_name}, provider={provider_name}, error_type={type(e).__name__}, message={e!s}",
+                exc_info=True,
+            )
             raise
 
     @classmethod
@@ -218,7 +230,7 @@ class PydanticAIProviderFactory:
     def _extract_provider_name(cls, api_model_id: str) -> str:
         """Extract provider name from model ID"""
         logger.debug(f"Extracting provider name from api_model_id: '{api_model_id}'")
-        
+
         if ":" in api_model_id:
             provider = api_model_id.split(":", 1)[0]
             logger.debug(f"Provider extracted from prefix: '{provider}'")
@@ -235,7 +247,9 @@ class PydanticAIProviderFactory:
             logger.debug(f"Auto-detected Google provider from: '{api_model_id}'")
             return "google"
         else:
-            logger.warning(f"Unable to extract provider from api_model_id: '{api_model_id}', defaulting to 'unknown'")
+            logger.warning(
+                f"Unable to extract provider from api_model_id: '{api_model_id}', defaulting to 'unknown'"
+            )
             return "unknown"
 
 

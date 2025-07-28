@@ -408,7 +408,7 @@ def _get_api_key(provider_name: str, api_model_id: str) -> str:
         ConfigurationError: サポートされていないプロバイダー名の場合。
     """
     # .env ファイルから直接読み込み（環境変数に設定しない）
-    import dotenv
+
     env_values = dotenv.dotenv_values(".env")
 
     env_var_map = {
@@ -499,8 +499,14 @@ def _initialize_api_client(
         if not api_key_str:
             # .envファイルから直接読み込み（環境変数に設定しない）
             import dotenv
+
             env_values = dotenv.dotenv_values(".env")
-            api_key_str = env_values.get("GOOGLE_API_KEY") or env_values.get("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            api_key_str = (
+                env_values.get("GOOGLE_API_KEY")
+                or env_values.get("GEMINI_API_KEY")
+                or os.getenv("GOOGLE_API_KEY")
+                or os.getenv("GEMINI_API_KEY")
+            )
         if not api_key_str:
             raise ApiAuthenticationError(
                 provider_name="Google",
