@@ -1,6 +1,5 @@
 """Simplified PydanticAI Agent factory with API discovery integration."""
 
-
 from pydantic_ai import Agent
 
 from .api_model_discovery import discover_available_vision_models

@@ -98,7 +98,6 @@ class TestAnthropicApiAnnotatorIntegration:
         # Verify results structure - should now only be UnifiedAnnotationResult format
         assert len(results) == 2
         for result in results:
-
             assert isinstance(result, UnifiedAnnotationResult)
             assert result.error is None
             assert result.tags == ["test_model_tag"]
