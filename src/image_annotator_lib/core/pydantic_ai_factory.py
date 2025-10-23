@@ -8,10 +8,7 @@ from PIL import Image
 from pydantic import SecretStr
 from pydantic_ai import Agent
 from pydantic_ai.messages import BinaryContent
-from pydantic_ai.models import infer_model
-from pydantic_ai.providers.anthropic import AnthropicProvider
-from pydantic_ai.providers.google_gla import GoogleGLAProvider as GoogleProvider
-from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers import infer_provider_class
 
 from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
 from .config import config_registry
@@ -56,11 +53,10 @@ def _is_test_environment() -> bool:
     return is_test
 
 
-_PROVIDER_MAP = {
-    "anthropic": AnthropicProvider,
-    "google": GoogleProvider,
-    "openai": OpenAIProvider,
-    "openrouter": OpenAIProvider,  # OpenRouter uses the OpenAI provider structure
+# Provider name mappings for infer_provider_class()
+_PROVIDER_NAME_MAP = {
+    "openrouter": "openai",  # OpenRouter uses OpenAI provider structure
+    "google": "google-gla",  # Google GLA (Generative Language API) provider
 }
 
 
@@ -71,7 +67,11 @@ class PydanticAIProviderFactory:
 
     @classmethod
     def get_provider(cls, provider_name: str, **provider_kwargs) -> Any:
-        """Get or create provider instance for the given provider name"""
+        """Get or create provider instance for the given provider name
+
+        Uses PydanticAI's infer_provider_class() to obtain Provider classes,
+        eliminating the need for manual provider mapping maintenance.
+        """
         import json
 
         # Convert kwargs to a stable string for the key
@@ -79,9 +79,14 @@ class PydanticAIProviderFactory:
         provider_key = f"{provider_name}:{provider_key_suffix}"
 
         if provider_key not in cls._providers:
-            provider_cls = _PROVIDER_MAP.get(provider_name)
-            if not provider_cls:
-                raise ValueError(f"Unsupported provider: {provider_name}")
+            # Map provider names to PydanticAI's expected names
+            actual_provider_name = _PROVIDER_NAME_MAP.get(provider_name, provider_name)
+
+            try:
+                # Use PydanticAI's built-in provider class inference
+                provider_cls = infer_provider_class(actual_provider_name)
+            except (ValueError, KeyError) as e:
+                raise ValueError(f"Unsupported provider: {provider_name}") from e
 
             cls._providers[provider_key] = provider_cls(**provider_kwargs)
             logger.debug(f"Created new {provider_name} provider instance: {provider_key}")
@@ -90,63 +95,49 @@ class PydanticAIProviderFactory:
 
     @classmethod
     def create_agent(cls, model_name: str, api_model_id: str, api_key: str) -> Agent:
-        """Create PydanticAI Agent with provider reuse and caching"""
+        """Create PydanticAI Agent leveraging built-in model inference
+
+        PydanticAI v1.2.1 automatically handles:
+        - Provider selection from model ID (e.g., "gpt-4" -> OpenAI)
+        - Model name normalization (e.g., "gpt-4" -> "openai:gpt-4")
+        - API key retrieval from environment variables
+
+        This method sets up the environment and delegates to PydanticAI.
+        """
 
         logger.debug(f"Creating agent for model: {model_name}, api_model_id: {api_model_id}")
         logger.debug(f"API key provided: {'Yes' if api_key else 'No'}")
 
-        # Note: BDD tests should be E2E tests, so we don't use TestModel
-        # If this is a test environment without API keys, let the test handle the authentication error
-
-        # Set API key in environment for PydanticAI to use
+        # Set API key in environment for PydanticAI's automatic provider initialization
         if api_key:
             provider_name = cls._extract_provider_name(api_model_id)
             logger.debug(f"Extracted provider name: {provider_name}")
 
-            # Set environment variable for the appropriate provider
             import os
 
-            if provider_name == "openai":
-                os.environ["OPENAI_API_KEY"] = api_key
-            elif provider_name == "anthropic":
-                os.environ["ANTHROPIC_API_KEY"] = api_key
-            elif provider_name == "google":
-                os.environ["GOOGLE_API_KEY"] = api_key
+            # Map provider names to environment variable names
+            env_var_map = {
+                "openai": "OPENAI_API_KEY",
+                "anthropic": "ANTHROPIC_API_KEY",
+                "google": "GOOGLE_API_KEY",
+            }
 
-        # Use PydanticAI's built-in model inference
-        if ":" not in api_model_id:
-            # Auto-detect provider from model name
-            if api_model_id.startswith(("gpt", "o1", "o3")):
-                full_model_name = f"openai:{api_model_id}"
-            elif api_model_id.startswith("claude"):
-                full_model_name = f"anthropic:{api_model_id}"
-            elif api_model_id.startswith("gemini"):
-                # Google models don't use provider prefix in PydanticAI
-                full_model_name = api_model_id
+            if provider_name in env_var_map:
+                os.environ[env_var_map[provider_name]] = api_key
             else:
-                full_model_name = api_model_id
-        else:
-            full_model_name = api_model_id
-
-        logger.debug(f"Model name resolution: {api_model_id} -> {full_model_name}")
+                logger.warning(f"Unknown provider '{provider_name}', skipping environment variable setup")
 
         try:
-            # Create Agent directly with model string and let PydanticAI handle provider initialization
-            agent = Agent(model=full_model_name, output_type=AnnotationSchema, system_prompt=BASE_PROMPT)
-            logger.debug(f"Created agent successfully for {full_model_name}")
+            # Let PydanticAI handle model inference and provider initialization
+            # PydanticAI automatically normalizes model names (e.g., "gpt-4" -> "openai:gpt-4")
+            agent = Agent(model=api_model_id, output_type=AnnotationSchema, system_prompt=BASE_PROMPT)
+            logger.debug(f"Created agent successfully for {api_model_id}")
 
             return agent
         except Exception as e:
-            error_details = {
-                "model_name": model_name,
-                "api_model_id": api_model_id,
-                "full_model_name": full_model_name,
-                "provider_name": provider_name,
-                "error_type": type(e).__name__,
-                "error_message": str(e),
-            }
             logger.error(
-                f"Agent creation failed: model={model_name}, api_id={api_model_id}, full_name={full_model_name}, provider={provider_name}, error_type={type(e).__name__}, message={e!s}",
+                f"Agent creation failed: model={model_name}, api_id={api_model_id}, "
+                f"error_type={type(e).__name__}, message={e!s}",
                 exc_info=True,
             )
             raise
@@ -169,7 +160,11 @@ class PydanticAIProviderFactory:
     def create_openrouter_agent(
         cls, model_name: str, api_model_id: str, api_key: str, config_data: dict[str, Any] | None = None
     ) -> Agent:
-        """Create OpenRouter-specific Agent with custom headers"""
+        """Create OpenRouter-specific Agent with custom headers
+
+        Uses PydanticAI's official pattern with OpenAIProvider + OpenAIChatModel
+        to avoid dependency on private _provider attribute.
+        """
 
         # Check if we're in test environment
         if _is_test_environment():
@@ -190,7 +185,6 @@ class PydanticAIProviderFactory:
 
         # Extract actual model ID from openrouter: prefix
         actual_model_id = api_model_id.split(":", 1)[1]
-        full_model_name = f"openai:{actual_model_id}"  # Use OpenAI provider structure
 
         # Setup OpenRouter specific provider kwargs
         provider_kwargs = {"api_key": api_key, "base_url": "https://openrouter.ai/api/v1"}
@@ -206,17 +200,19 @@ class PydanticAIProviderFactory:
             if default_headers:
                 provider_kwargs["default_headers"] = default_headers
 
-        # Use PydanticAI's native model inference
-        model = infer_model(full_model_name)
-
-        # Create or reuse OpenAI provider with OpenRouter settings
+        # Create or reuse OpenAI provider with OpenRouter settings (cached)
         provider = cls.get_provider("openrouter", **provider_kwargs)
 
-        # Override model's provider with our shared instance
-        model._provider = provider
+        # Use PydanticAI's official pattern: Create model with provider
+        # This avoids the deprecated model._provider = provider pattern
+        from pydantic_ai.models.openai import OpenAIChatModel
 
-        # Create Agent with shared provider
+        model = OpenAIChatModel(model_name=actual_model_id, provider=provider)
+
+        # Create Agent with properly initialized model
         agent = Agent(model=model, output_type=AnnotationSchema, system_prompt=BASE_PROMPT)
+
+        logger.debug(f"Created OpenRouter Agent with model: {actual_model_id}, provider caching enabled")
 
         return agent
 
