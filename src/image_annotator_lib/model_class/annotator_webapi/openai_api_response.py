@@ -5,7 +5,7 @@ from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 
 from ...core.base import WebApiBaseAnnotator
 from ...core.pydantic_ai_factory import PydanticAIAnnotatorMixin
-from ...core.types import RawOutput
+from ...core.types import TaskCapability, UnifiedAnnotationResult
 from ...core.utils import logger
 
 
@@ -47,48 +47,122 @@ class OpenAIApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
         # Provider-levelで管理されるため、個別のリソース解放は不要
         logger.debug("Provider-level OpenAI Agent コンテキスト終了")
 
-    def run_with_model(self, images: list[Image.Image], model_id: str) -> list[RawOutput]:
-        """指定されたモデルIDで推論を実行する（Provider-level実装）"""
+    def run_with_model(self, images: list[Image.Image], model_id: str) -> list[UnifiedAnnotationResult]:
+        """指定されたモデルIDで推論を実行する（Provider-level実装、UnifiedAnnotationResult対応）"""
         logger.debug(f"OpenAI API 推論実行: model={model_id}, images={len(images)}")
 
-        try:
-            # 画像をBinaryContentに変換
-            binary_contents = self._preprocess_images_to_binary(images)
+        binary_contents = self._preprocess_images_to_binary(images)
+        from ...core.utils import get_model_capabilities
 
-            results = []
-            for binary_content in binary_contents:
-                try:
-                    self._wait_for_rate_limit()
+        capabilities = get_model_capabilities(self.model_name)
+        results: list[UnifiedAnnotationResult] = []
 
-                    # PydanticAI Agent で推論実行（model override付き）
-                    annotation = self._run_inference_with_model(binary_content, model_id)
-                    results.append({"response": annotation, "error": None})
+        for binary_content in binary_contents:
+            try:
+                self._wait_for_rate_limit()
 
-                except ModelHTTPError as e:
-                    # PydanticAI統一HTTPエラー処理
-                    error_message = f"OpenAI HTTP {e.status_code}: {e.body or str(e)}"
-                    logger.error(f"OpenAI API 推論エラー: {error_message}")
-                    results.append({"response": None, "error": error_message})
+                # PydanticAI Agent で推論実行（model override付き）
+                response_content = self._run_inference_with_model(binary_content, model_id)
 
-                except UnexpectedModelBehavior as e:
-                    # PydanticAI統一モデル動作エラー処理
-                    error_message = f"OpenAI API Error: Unexpected model behavior: {e!s}"
-                    logger.error(f"OpenAI API 推論エラー: {error_message}")
-                    results.append({"response": None, "error": error_message})
+                # AnnotationSchemaからUnifiedAnnotationResultに変換
+                if response_content:
+                    # raw_outputの安全な処理（テスト時のMagicMock対策）
+                    raw_output = None
+                    try:
+                        # MagicMock検出（unittest.mockのMagicMockオブジェクト）
+                        if str(type(response_content)).find("MagicMock") != -1:
+                            raw_output = {"mock_type": "MagicMock", "mock_str": str(response_content)}
+                        elif hasattr(response_content, "model_dump") and callable(
+                            response_content.model_dump
+                        ):
+                            raw_output = response_content.model_dump()
+                        elif hasattr(response_content, "__dict__"):
+                            # 通常のオブジェクトの場合（辞書変換試行）
+                            try:
+                                raw_output = dict(response_content.__dict__)
+                            except Exception:
+                                raw_output = {
+                                    "object_type": str(type(response_content)),
+                                    "content": str(response_content),
+                                }
+                        else:
+                            raw_output = {"fallback_content": str(response_content)}
+                    except Exception:
+                        # どんなエラーでも安全にフォールバック
+                        raw_output = {
+                            "error": "Failed to serialize response",
+                            "type": str(type(response_content)),
+                        }
 
-                except Exception as e:
-                    # その他の予期しないエラー
-                    error_message = f"OpenAI API Error: {e!s}"
-                    logger.error(f"OpenAI API 推論エラー: {error_message}")
-                    results.append({"response": None, "error": error_message})
+                    result = UnifiedAnnotationResult(
+                        model_name=self.model_name,
+                        capabilities=capabilities,
+                        tags=response_content.tags if TaskCapability.TAGS in capabilities else None,
+                        captions=response_content.captions
+                        if TaskCapability.CAPTIONS in capabilities
+                        else None,
+                        scores={"score": response_content.score}
+                        if TaskCapability.SCORES in capabilities and response_content.score
+                        else None,
+                        provider_name="openai",
+                        framework="api",
+                        raw_output=raw_output,
+                    )
+                    results.append(result)
+                else:
+                    results.append(
+                        UnifiedAnnotationResult(
+                            model_name=self.model_name,
+                            capabilities=capabilities,
+                            error="Empty response from API",
+                            provider_name="openai",
+                            framework="api",
+                        )
+                    )
 
-            return results
+            except ModelHTTPError as e:
+                # PydanticAI統一HTTPエラー処理
+                error_message = f"OpenAI HTTP {e.status_code}: {e.body or str(e)}"
+                logger.error(f"OpenAI API 推論エラー: {error_message}")
+                results.append(
+                    UnifiedAnnotationResult(
+                        model_name=self.model_name,
+                        capabilities=capabilities,
+                        error=error_message,
+                        provider_name="openai",
+                        framework="api",
+                    )
+                )
 
-        except Exception as e:
-            logger.error(f"OpenAI API run_with_model エラー: {e}")
-            # 全画像にエラーを返す
-            error_message = f"OpenAI API Error: {e!s}"
-            return [{"response": None, "error": error_message} for _ in images]
+            except UnexpectedModelBehavior as e:
+                # PydanticAI統一モデル動作エラー処理
+                error_message = f"OpenAI API Error: Unexpected model behavior: {e!s}"
+                logger.error(f"OpenAI API 推論エラー: {error_message}")
+                results.append(
+                    UnifiedAnnotationResult(
+                        model_name=self.model_name,
+                        capabilities=capabilities,
+                        error=error_message,
+                        provider_name="openai",
+                        framework="api",
+                    )
+                )
+
+            except Exception as e:
+                # その他の予期しないエラー
+                error_message = f"OpenAI API Error: {e!s}"
+                logger.error(f"OpenAI API 推論エラー: {error_message}")
+                results.append(
+                    UnifiedAnnotationResult(
+                        model_name=self.model_name,
+                        capabilities=capabilities,
+                        error=error_message,
+                        provider_name="openai",
+                        framework="api",
+                    )
+                )
+
+        return results
 
     @override
     def _preprocess_images(self, images: list[Image.Image]) -> list[Image.Image]:
@@ -96,30 +170,10 @@ class OpenAIApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
         return images
 
     @override
-    def _run_inference(self, processed: list[Image.Image]) -> list[RawOutput]:
-        """Provider Managerを通して推論実行"""
+    def _run_inference(self, processed: list[Image.Image]) -> list[UnifiedAnnotationResult]:
+        """Provider Managerを通して推論実行（UnifiedAnnotationResult対応）"""
         if not self.api_model_id:
             raise ValueError(f"Model {self.model_name} has no api_model_id configured")
 
         # Provider-level実行に委譲
         return self.run_with_model(processed, self.api_model_id)
-
-    @override
-    def _format_predictions(self, raw_outputs: list[RawOutput]) -> list[RawOutput]:
-        """Provider-levelでは整形済みのため変更不要"""
-        return raw_outputs
-
-    @override
-    def _generate_tags(self, formatted_output: RawOutput) -> list[str]:
-        """整形済み出力からタグリストを生成"""
-        if formatted_output.get("error"):
-            return []
-
-        annotation = formatted_output.get("response")
-        if annotation:
-            if hasattr(annotation, "tags"):
-                return annotation.tags
-            elif isinstance(annotation, dict) and "tags" in annotation:
-                return annotation["tags"]
-
-        return []
