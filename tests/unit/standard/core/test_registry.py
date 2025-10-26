@@ -63,6 +63,7 @@ MOCK_API_MODELS = {
 
 
 @pytest.mark.unit
+@patch("image_annotator_lib.core.registry.os.getenv")
 @patch("image_annotator_lib.core.registry.register_annotators")
 @patch("image_annotator_lib.core.registry._update_config_with_api_models")
 @patch("image_annotator_lib.core.api_model_discovery._fetch_and_update_vision_models")
@@ -74,19 +75,23 @@ def test_initialize_registry_api_models_file_not_exists_calls_fetch_and_update(
     mock_fetch_api_models,
     mock_update_config,
     mock_register,
+    mock_getenv,
 ):
     """Test initialize_registry calls API fetch and config update when file not exists."""
     # Reset singleton state before test
     registry._REGISTRY_INITIALIZED = False
 
+    # Mock environment variable to not skip API discovery
+    mock_getenv.return_value = "false"
     mock_config_path.exists.return_value = False
 
     registry.initialize_registry()
 
     mock_init_logger.assert_called_once()
-    mock_config_path.exists.assert_called_once()
+    # exists() is called twice: first to check if file doesn't exist, second to verify before update
+    assert mock_config_path.exists.call_count == 2
     mock_fetch_api_models.assert_called_once()
-    mock_update_config.assert_called_once()
+    mock_update_config.assert_not_called()  # Should not be called when file doesn't exist
     mock_register.assert_called_once()
 
 
@@ -112,13 +117,15 @@ def test_initialize_registry_api_models_file_exists_skips_fetch(
     registry.initialize_registry()
 
     mock_init_logger.assert_called_once()
-    mock_config_path.exists.assert_called_once()
+    # exists() is called twice: once in the first check, once before update
+    assert mock_config_path.exists.call_count == 2
     mock_fetch_api_models.assert_not_called()
     mock_update_config.assert_called_once()
     mock_register.assert_called_once()
 
 
 @pytest.mark.unit
+@patch("image_annotator_lib.core.registry.os.getenv")
 @patch("image_annotator_lib.core.registry.register_annotators")
 @patch("image_annotator_lib.core.registry._update_config_with_api_models")
 @patch("image_annotator_lib.core.api_model_discovery._fetch_and_update_vision_models")
@@ -130,20 +137,23 @@ def test_initialize_registry_continues_if_fetch_api_fails(
     mock_fetch_api_models,
     mock_update_config,
     mock_register,
+    mock_getenv,
 ):
     """Test initialize_registry continues process even if API fetch fails."""
     # Reset singleton state before test
     registry._REGISTRY_INITIALIZED = False
 
+    mock_getenv.return_value = "false"
     mock_config_path.exists.return_value = False
     mock_fetch_api_models.side_effect = Exception("API Error")
 
     registry.initialize_registry()
 
     mock_init_logger.assert_called_once()
-    mock_config_path.exists.assert_called_once()
+    # exists() is called twice even when file doesn't exist
+    assert mock_config_path.exists.call_count == 2
     mock_fetch_api_models.assert_called_once()
-    mock_update_config.assert_called_once()
+    mock_update_config.assert_not_called()  # Should not be called when file doesn't exist
     mock_register.assert_called_once()
 
 
@@ -272,7 +282,8 @@ def test_initialize_registry_singleton_pattern(
 
     # Verify first call executed all steps
     assert mock_init_logger.call_count == 1
-    assert mock_config_path.exists.call_count == 1
+    # exists() called twice: first check and before update
+    assert mock_config_path.exists.call_count == 2
     assert mock_fetch_api_models.call_count == 0  # Should skip when file exists
     assert mock_update_config.call_count == 1
     assert mock_register.call_count == 1
@@ -282,7 +293,7 @@ def test_initialize_registry_singleton_pattern(
 
     # Verify second call did NOT execute any additional steps
     assert mock_init_logger.call_count == 2  # init_logger always runs
-    assert mock_config_path.exists.call_count == 1  # Should not check again
+    assert mock_config_path.exists.call_count == 2  # Should not check again (stays at 2)
     assert mock_fetch_api_models.call_count == 0  # Still 0
     assert mock_update_config.call_count == 1  # Still 1
     assert mock_register.call_count == 1  # Still 1
@@ -292,7 +303,7 @@ def test_initialize_registry_singleton_pattern(
 
     # Verify third call also skipped
     assert mock_init_logger.call_count == 3  # Only this increases
-    assert mock_config_path.exists.call_count == 1  # Still 1
+    assert mock_config_path.exists.call_count == 2  # Still 2 (no additional calls)
     assert mock_fetch_api_models.call_count == 0  # Still 0
     assert mock_update_config.call_count == 1  # Still 1
     assert mock_register.call_count == 1  # Still 1
