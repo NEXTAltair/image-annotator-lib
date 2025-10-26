@@ -242,12 +242,19 @@ class TestUnifiedErrorHandling:
 
             # テスト用の設定をセットアップ
             test_model_name = f"test-{provider_name.lower()}-model"
+            # PydanticAIのプロバイダープレフィックスに合わせる
+            if provider_name.lower() == "google":
+                api_model_id = "google-gla:test-model"
+            else:
+                api_model_id = f"{provider_name.lower()}:test-model"
+
             managed_config_registry.set(
                 test_model_name,
                 {
                     "api_key": api_key_manager.get_key(provider_name.lower()),
-                    "api_model_id": f"{provider_name.lower()}-test-model",
+                    "api_model_id": api_model_id,
                     "class": class_name,
+                    "capabilities": ["tags", "captions", "scores"],
                 },
             )
 
@@ -260,15 +267,12 @@ class TestUnifiedErrorHandling:
                     mock_inference.side_effect = test_error
 
                     with annotator:
-                        results = annotator.run_with_model(
-                            [test_image], f"{provider_name.lower()}-test-model"
-                        )
+                        results = annotator.run_with_model([test_image], api_model_id)
 
                         # エラーが適切にハンドリングされていることを確認
                         assert len(results) == 1
-                        assert results[0]["response"] is None
-                        assert results[0]["error"] is not None
-                        assert expected_error_content in results[0]["error"]
+                        assert results[0].error is not None
+                        assert expected_error_content in results[0].error
 
 
 if __name__ == "__main__":
