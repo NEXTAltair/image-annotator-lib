@@ -33,23 +33,27 @@ class TestErrorHandlingAndFallbackIntegration:
                 "class": "OpenAIApiChatAnnotator",
                 "api_model_id": "gpt-4o-mini",
                 "api_key": "test-openai-key",
+                "capabilities": ["tags", "captions", "scores"],
             },
             "failing_anthropic_model": {
                 "class": "AnthropicApiAnnotator",
                 "api_model_id": "claude-3-5-sonnet",
                 "api_key": "invalid-key",
+                "capabilities": ["tags", "captions", "scores"],
             },
             "working_local_model": {
                 "class": "WDTagger",
                 "model_path": "test/model/path",
                 "device": "cpu",
                 "estimated_size_gb": 1.0,
+                "capabilities": ["tags"],
             },
             "failing_local_model": {
                 "class": "DeepDanbooruTagger",
                 "model_path": "/nonexistent/path",
                 "device": "cpu",
                 "estimated_size_gb": 0.5,
+                "capabilities": ["tags"],
             },
         }
 
@@ -487,8 +491,8 @@ class TestErrorHandlingAndFallbackIntegration:
                 for image_hash, model_results in results.items():
                     if "nonexistent_model" in model_results:
                         result = model_results["nonexistent_model"]
-                        assert result["error"] is not None
-                        assert "config" in result["error"].lower() or "not found" in result["error"].lower()
+                        assert result.error is not None
+                        assert "config" in result.error.lower() or "not found" in result.error.lower()
 
         except Exception as e:
             # Configuration errors might be handled at different levels
@@ -505,7 +509,7 @@ class TestErrorHandlingAndFallbackIntegration:
                 for image_hash, model_results in results.items():
                     if "invalid_model" in model_results:
                         result = model_results["invalid_model"]
-                        assert result["error"] is not None
+                        assert result.error is not None
 
         except Exception:
             # Invalid configuration should be handled appropriately

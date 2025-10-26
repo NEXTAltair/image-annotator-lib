@@ -42,6 +42,7 @@ class TestCrossProviderIntegration:
                 "class": "GoogleApiAnnotator",
                 "api_model_id": "gemini-pro",
                 "api_key": api_key_manager.get_key("google"),
+                "capabilities": ["tags", "captions", "scores"],
             },
         )
         managed_config_registry.set(
@@ -50,6 +51,7 @@ class TestCrossProviderIntegration:
                 "class": "OpenAIApiAnnotator",
                 "api_model_id": "gpt-4",
                 "api_key": api_key_manager.get_key("openai"),
+                "capabilities": ["tags", "captions", "scores"],
             },
         )
 
@@ -95,8 +97,10 @@ class TestCrossProviderIntegration:
         print(f"OpenAI result: {openai_result}")
 
         # Check if we have results (even if there are errors, basic functionality should work)
-        assert isinstance(google_result, dict)
-        assert isinstance(openai_result, dict)
+        from image_annotator_lib.core.types import UnifiedAnnotationResult
+
+        assert isinstance(google_result, UnifiedAnnotationResult)
+        assert isinstance(openai_result, UnifiedAnnotationResult)
 
     @pytest.mark.integration
     @pytest.mark.fast_integration

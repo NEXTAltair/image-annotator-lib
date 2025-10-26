@@ -406,7 +406,7 @@ class TestLocalMLModelsIntegration:
                         if model_name in model_results:
                             result = model_results[model_name]
                             # Error should be captured, not propagated
-                            assert "error" in result
+                            assert result.error is not None
 
                 except Exception as e:
                     # Should not propagate model-specific errors

@@ -4,12 +4,16 @@
 """
 
 # Import shared fixtures from fixtures module
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from PIL import Image
+
+# テスト環境ではAPI検出を無効化
+os.environ["IMAGE_ANNOTATOR_SKIP_API_DISCOVERY"] = "true"
 
 # Add the tests directory to sys.path
 tests_dir = Path(__file__).parent
@@ -37,7 +41,7 @@ def reset_global_state(request):
     # テスト前のセットアップ
     yield
 
-    # 特別なテスト（BDDまたは統合テスト）でない場合のみクリーンアップを実行
+    # 特別なテスト(BDDまたは統合テスト)でない場合のみクリーンアップを実行
     if not is_special_test:
         # テスト後のクリーンアップ
         # レジストリとキャッシュをクリア

@@ -19,22 +19,24 @@ uv add --dev package-name
 ```
 
 ### Testing
+
+**IMPORTANT: NEVER run `uv` commands from this local package directory.**
+**ALWAYS execute from the project root (`/workspaces/LoRAIro/`).**
+
 ```bash
-# Run all tests
-make test
+# From project root ONLY:
+uv run pytest local_packages/image-annotator-lib/tests/
 
 # Run specific test categories
-make test-unit        # Unit tests only
-make test-integration # Integration tests only
-make test-webapi      # Web API tests only
-make test-scorer      # Scorer model tests only
-make test-tagger      # Tagger model tests only
+uv run pytest -m unit local_packages/image-annotator-lib/tests/
+uv run pytest -m integration local_packages/image-annotator-lib/tests/
+uv run pytest -m webapi local_packages/image-annotator-lib/tests/
+
+# Run single test file
+uv run pytest local_packages/image-annotator-lib/tests/unit/core/test_config.py
 
 # Run with coverage
-make test-cov
-
-# Run single test file (manual pytest)
-pytest tests/unit/core/test_config.py
+uv run pytest --cov=local_packages/image-annotator-lib/src --cov-report=term-missing local_packages/image-annotator-lib/tests/
 ```
 
 ### Code Quality

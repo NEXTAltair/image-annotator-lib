@@ -1,5 +1,6 @@
 import importlib
 import inspect
+import os
 from pathlib import Path
 from types import ModuleType
 from typing import TypeVar
@@ -83,7 +84,7 @@ def _gather_available_classes(directory: str) -> dict[str, ModelClass]:
         if module is None:
             continue
         for name, obj in inspect.getmembers(module, inspect.isclass):
-            # 古いプロバイダー固有のクラスは除外（PydanticAI統一後は不要）
+            # 古いプロバイダー固有のクラスは除外(PydanticAI統一後は不要)
             obsolete_classes = [
                 "AnthropicApiAnnotator",
                 "GoogleApiAnnotator",
@@ -92,7 +93,7 @@ def _gather_available_classes(directory: str) -> dict[str, ModelClass]:
             ]
             if name in obsolete_classes:
                 logger.debug(
-                    f"古いプロバイダー固有クラス '{name}' をスキップします（PydanticAI統一後は不要）"
+                    f"古いプロバイダー固有クラス '{name}' をスキップします(PydanticAI統一後は不要)"
                 )
                 continue
 
@@ -183,7 +184,7 @@ def _register_models(
                 continue
             logger.debug(f"[DEBUG _register_models] 期待されるクラス名: '{desired_class_name}'")
 
-            # WebAPIクラス（PydanticAIWebAPIAnnotator）の場合は統一実装を使用
+            # WebAPIクラス(PydanticAIWebAPIAnnotator)の場合は統一実装を使用
             if desired_class_name == "PydanticAIWebAPIAnnotator" and pydantic_ai_class:
                 model_cls = pydantic_ai_class
                 logger.debug(
@@ -197,7 +198,7 @@ def _register_models(
                 )
                 continue
             else:
-                # 非WebAPIクラス（ローカルMLモデルなど）は従来通りの処理
+                # 非WebAPIクラス(ローカルMLモデルなど)は従来通りの処理
                 model_cls = available_classes.get(desired_class_name)
                 logger.debug(
                     f"[DEBUG _register_models] 利用可能なクラスから '{desired_class_name}' を検索した結果: {model_cls}"
@@ -296,7 +297,7 @@ def find_model_class_case_insensitive(model_name: str) -> tuple[str, ModelClass]
             logger.debug(f"モデル名を正規化: '{model_name}' -> '{key}'")
             return (key, value)
 
-    # 部分マッチを試す（ハイフンやスペースを無視）
+    # 部分マッチを試す(ハイフンやスペースを無視)
     normalized_search = model_name.lower().replace("-", "").replace(" ", "")
     for key, value in _MODEL_CLASS_OBJ_REGISTRY.items():
         normalized_key = key.lower().replace("-", "").replace(" ", "")
@@ -319,20 +320,20 @@ def list_available_annotators() -> list[str]:
 def list_available_annotators_with_metadata() -> dict[str, dict[str, any]]:
     """利用可能なアノテータモデルとそのメタデータを返します。
 
-    LoRAIro統合用の拡張API。各モデルの詳細情報（プロバイダー、APIモデルID、
-    サイズ、APIキー要件等）を含む辞書を返します。
+    LoRAIro統合用の拡張API。各モデルの詳細情報(プロバイダー、APIモデルID、
+    サイズ、APIキー要件等)を含む辞書を返します。
 
     Returns:
         dict[str, dict[str, any]]: モデル名をキーとし、メタデータ辞書を値とする辞書
             メタデータには以下が含まれます:
             - class: モデルクラス名
-            - provider: プロバイダー名（API系の場合）
-            - api_model_id: APIモデルID（API系の場合）
-            - model_type: モデルタイプ（"vision", "score", "tagger"）
-            - estimated_size_gb: 推定サイズ（GB、ローカルモデルの場合）
+            - provider: プロバイダー名(API系の場合)
+            - api_model_id: APIモデルID(API系の場合)
+            - model_type: モデルタイプ("vision", "score", "tagger")
+            - estimated_size_gb: 推定サイズ(GB、ローカルモデルの場合)
             - requires_api_key: APIキーが必要かどうか
-            - max_output_tokens: 最大出力トークン数（API系の場合）
-            - discontinued_at: 廃止日時（該当する場合のみ）
+            - max_output_tokens: 最大出力トークン数(API系の場合)
+            - discontinued_at: 廃止日時(該当する場合のみ)
     """
     logger.debug("メタデータ付きアノテーターリストの生成を開始します")
 
@@ -364,7 +365,7 @@ def list_available_annotators_with_metadata() -> dict[str, dict[str, any]]:
                 "discontinued_at": model_config.get("discontinued_at"),
             }
 
-            # None値をクリーンアップ（必要に応じて）
+            # None値をクリーンアップ(必要に応じて)
             # metadata = {k: v for k, v in metadata.items() if v is not None}
 
             result[model_name] = metadata
@@ -398,7 +399,7 @@ def _determine_model_type(model_name: str, model_class: ModelClass, model_config
         model_config: モデル設定
 
     Returns:
-        str: モデルタイプ（"vision", "score", "tagger"）
+        str: モデルタイプ("vision", "score", "tagger")
     """
     # 設定から直接取得できる場合
     if "model_type" in model_config:
@@ -420,7 +421,7 @@ def _determine_model_type(model_name: str, model_class: ModelClass, model_config
     if any(keyword in class_name_lower for keyword in ["tagger", "tag", "wd", "deepdanbooru"]):
         return "tagger"
 
-    # ビジョン系モデル（デフォルト）
+    # ビジョン系モデル(デフォルト)
     # API系、キャプション系、汎用画像解析は全てvisionとする
     return "vision"
 
@@ -454,12 +455,12 @@ def _requires_api_key(model_class: ModelClass, model_config: dict) -> bool:
     if model_config.get("api_model_id"):
         return True
 
-    # デフォルトはローカルモデル（APIキー不要）
+    # デフォルトはローカルモデル(APIキー不要)
     return False
 
 
 def normalize_model_name(model_name: str) -> str | None:
-    """モデル名を正規化（大文字・小文字を区別しない検索で実際のキー名を返す）
+    """モデル名を正規化(大文字・小文字を区別しない検索で実際のキー名を返す)
 
     Args:
         model_name: 正規化するモデル名
@@ -477,7 +478,7 @@ def _find_annotator_class_by_provider(provider: str, available_classes: dict[str
     PydanticAI統一実装により、すべてのWebAPIプロバイダーは
     PydanticAIWebAPIAnnotatorを使用します。
     """
-    # 常にPydanticAI統一実装を使用（すべてのWebAPIプロバイダーを統一）
+    # 常にPydanticAI統一実装を使用(すべてのWebAPIプロバイダーを統一)
     logger.debug(f"プロバイダー '{provider}' に対してPydanticAI統一実装を使用します")
     return "PydanticAIWebAPIAnnotator"
 
@@ -555,29 +556,45 @@ def initialize_registry() -> None:
 
     logger.debug("レジストリ初期化プロセスを開始します...")
 
+    # 環境変数チェック: テスト環境などでAPI検出をスキップする
+    skip_api_discovery = os.getenv("IMAGE_ANNOTATOR_SKIP_API_DISCOVERY", "false").lower() == "true"
+
     # --- Web API モデル情報の取得と設定ファイルの自動更新 --- #
     try:
         if not AVAILABLE_API_MODELS_CONFIG_PATH.exists():
-            logger.info(
-                f"{AVAILABLE_API_MODELS_CONFIG_PATH} が見つかりません。APIから最新情報を取得します..."
-            )
-            try:
-                # APIから取得してtomlファイルを生成/更新
-                api_model_discovery._fetch_and_update_vision_models()
+            if skip_api_discovery:
                 logger.info(
-                    f"API からモデル情報を取得し、{AVAILABLE_API_MODELS_CONFIG_PATH} を更新しました。"
+                    f"環境変数 IMAGE_ANNOTATOR_SKIP_API_DISCOVERY=true のため、"
+                    f"API モデル情報の取得をスキップします。"
                 )
-            except Exception as api_e:
-                # API取得に失敗しても、処理は続行する(ログには残す)
-                logger.error(f"API からのモデル情報取得中にエラーが発生しました: {api_e}", exc_info=True)
-                logger.warning(
-                    "APIからのモデル情報取得に失敗したため、Web API モデルの自動設定は行われない可能性があります。"
+                # ファイルが存在しない場合でも処理を続行
+            else:
+                logger.info(
+                    f"{AVAILABLE_API_MODELS_CONFIG_PATH} が見つかりません。APIから最新情報を取得します..."
                 )
+                try:
+                    # APIから取得してtomlファイルを生成/更新
+                    api_model_discovery._fetch_and_update_vision_models()
+                    logger.info(
+                        f"API からモデル情報を取得し、{AVAILABLE_API_MODELS_CONFIG_PATH} を更新しました。"
+                    )
+                except Exception as api_e:
+                    # API取得に失敗しても、処理は続行する(ログには残す)
+                    logger.error(f"API からのモデル情報取得中にエラーが発生しました: {api_e}", exc_info=True)
+                    logger.warning(
+                        "APIからのモデル情報取得に失敗したため、Web API モデルの自動設定は行われない可能性があります。"
+                    )
         else:
             logger.debug(f"{AVAILABLE_API_MODELS_CONFIG_PATH} が存在します。既存のファイルを使用します。")
 
         # available_api_models.toml を読み込み、annotator_config.toml を更新
-        _update_config_with_api_models()
+        # ファイルが存在する場合のみ実行
+        if AVAILABLE_API_MODELS_CONFIG_PATH.exists():
+            _update_config_with_api_models()
+        else:
+            logger.warning(
+                f"{AVAILABLE_API_MODELS_CONFIG_PATH} が存在しないため、Web API モデル設定を読み込めません。"
+            )
 
     except Exception as e:
         # このステップ全体でエラーが発生しても初期化は続行する

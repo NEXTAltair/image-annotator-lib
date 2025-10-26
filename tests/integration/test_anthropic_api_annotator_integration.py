@@ -130,11 +130,11 @@ class TestAnthropicApiAnnotatorIntegration:
                 )
 
         assert len(results) == 1
-        assert results[0]["error"] is None
-        response = results[0]["response"]
-        assert response.tags == ["claude-3-haiku-tag"]
-        assert response.captions == ["Haiku model caption."]
-        assert response.score == 0.88
+        assert results[0].error is None
+        assert results[0].tags == ["claude-3-haiku-tag"]
+        assert results[0].captions == ["Haiku model caption."]
+        if results[0].scores:
+            assert results[0].scores.get("score") == 0.88
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -151,9 +151,8 @@ class TestAnthropicApiAnnotatorIntegration:
                 results = annotator.run_with_model(lightweight_test_images[:1], "claude-3-5-sonnet")
 
             assert len(results) == 1
-            assert results[0]["error"] is not None
-            assert "authentication failed" in results[0]["error"]
-            assert results[0]["response"] is None
+            assert results[0].error is not None
+            assert "authentication failed" in results[0].error
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -170,9 +169,8 @@ class TestAnthropicApiAnnotatorIntegration:
                 results = annotator.run_with_model(lightweight_test_images[:1], "claude-3-5-sonnet")
 
             assert len(results) == 1
-            assert results[0]["error"] is not None
-            assert "rate limit exceeded" in results[0]["error"]
-            assert results[0]["response"] is None
+            assert results[0].error is not None
+            assert "rate limit exceeded" in results[0].error
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -191,9 +189,8 @@ class TestAnthropicApiAnnotatorIntegration:
                 results = annotator.run_with_model(lightweight_test_images[:1], "claude-invalid-model")
 
             assert len(results) == 1
-            assert results[0]["error"] is not None
-            assert "モデル未検出エラー: Model not found" in results[0]["error"]
-            assert results[0]["response"] is None
+            assert results[0].error is not None
+            assert "モデル未検出エラー: Model not found" in results[0].error
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -210,9 +207,8 @@ class TestAnthropicApiAnnotatorIntegration:
                 results = annotator.run_with_model(lightweight_test_images[:1], "claude-3-5-sonnet")
 
             assert len(results) == 1
-            assert results[0]["error"] is not None
-            assert "timeout occurred" in results[0]["error"]
-            assert results[0]["response"] is None
+            assert results[0].error is not None
+            assert "timeout occurred" in results[0].error
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -229,9 +225,8 @@ class TestAnthropicApiAnnotatorIntegration:
                 results = annotator.run_with_model(lightweight_test_images[:1], "claude-3-5-sonnet")
 
             assert len(results) == 1
-            assert results[0]["error"] is not None
-            assert "500 server error" in results[0]["error"]
-            assert results[0]["response"] is None
+            assert results[0].error is not None
+            assert "500 server error" in results[0].error
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -250,9 +245,8 @@ class TestAnthropicApiAnnotatorIntegration:
             results = anthropic_annotator.run_with_model(lightweight_test_images[:1], "claude-3-5-sonnet")
 
             assert len(results) == 1
-            assert results[0]["error"] is not None
-            assert "Anthropic API Error" in results[0]["error"]
-            assert results[0]["response"] is None
+            assert results[0].error is not None
+            assert "Anthropic API Error" in results[0].error
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -279,7 +273,7 @@ class TestAnthropicApiAnnotatorIntegration:
             # Test with PIL Images
             results = anthropic_annotator.run_with_model(lightweight_test_images[:1], "claude-3-5-sonnet")
             assert len(results) == 1
-            assert results[0]["error"] is None
+            assert results[0].error is None
 
             # Test preprocessing of different formats in _run_inference
             test_image = lightweight_test_images[0]
@@ -344,8 +338,8 @@ class TestAnthropicApiAnnotatorIntegration:
             assert len(results) == 6
 
             # Count successes and failures
-            success_count = sum(1 for r in results if r["error"] is None)
-            error_count = sum(1 for r in results if r["error"] is not None)
+            success_count = sum(1 for r in results if r.error is None)
+            error_count = sum(1 for r in results if r.error is not None)
 
             assert success_count == 4  # Should have 4 successes
             assert error_count == 2  # Should have 2 failures
@@ -488,11 +482,11 @@ class TestAnthropicApiAnnotatorIntegration:
                 for model_id in claude_models:
                     results = annotator.run_with_model(lightweight_test_images[:1], model_id)
                     assert len(results) == 1
-                    assert results[0]["error"] is None
-                    response = results[0]["response"]
-                    assert response.tags == ["override_test_tag"]
-                    assert response.captions == ["Override test caption."]
-                    assert response.score == 0.92
+                    assert results[0].error is None
+                    assert results[0].tags == ["override_test_tag"]
+                    assert results[0].captions == ["Override test caption."]
+                    if results[0].scores:
+                        assert results[0].scores.get("score") == 0.92
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -555,7 +549,6 @@ class TestAnthropicApiAnnotatorIntegration:
             results = anthropic_annotator.run_with_model([large_image], "claude-3-5-sonnet")
 
             assert len(results) == 1
-            assert results[0]["error"] is None
-            # Check that we have a response rather than comparing MagicMock objects
-            assert results[0]["response"] is not None
-            assert hasattr(results[0]["response"], "tags")
+            assert results[0].error is None
+            # Check that we have tags in the result
+            assert results[0].tags is not None

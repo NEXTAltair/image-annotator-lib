@@ -462,6 +462,14 @@ def annotate(
             from .core.utils import get_model_capabilities
 
             capabilities = get_model_capabilities(model_name)
+            if not capabilities:
+                # エラー結果用のデフォルトcapability（タグ生成を想定）
+                from .core.types import TaskCapability
+
+                capabilities = {TaskCapability.TAGS}
+                logger.warning(
+                    f"モデル '{model_name}' のcapabilitiesが未設定のため、デフォルト値 {{TAGS}} を使用"
+                )
             error_results = [
                 UnifiedAnnotationResult(
                     model_name=model_name, capabilities=capabilities, error=error_message
