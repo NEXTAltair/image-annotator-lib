@@ -8,6 +8,7 @@ from PIL import Image
 from pydantic import SecretStr
 from pydantic_ai import Agent
 from pydantic_ai.messages import BinaryContent
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers import infer_provider_class
 
 from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
@@ -97,9 +98,10 @@ class PydanticAIProviderFactory:
     def create_agent(cls, model_name: str, api_model_id: str, api_key: str) -> Agent:
         """Create PydanticAI Agent leveraging built-in model inference
 
-        PydanticAI v1.2.1 automatically handles:
-        - Provider selection from model ID (e.g., "gpt-4" -> OpenAI)
-        - Model name normalization (e.g., "gpt-4" -> "openai:gpt-4")
+        PydanticAI v1.2.1 handles model inference:
+        - Known models (e.g., "gpt-4", "claude-3-opus") are auto-detected
+        - Unknown models require "provider:model-name" format (e.g., "openai:custom-model")
+        - Provider selection from model ID prefix or known model patterns
         - API key retrieval from environment variables
 
         This method sets up the environment and delegates to PydanticAI.
@@ -120,6 +122,7 @@ class PydanticAIProviderFactory:
                 "openai": "OPENAI_API_KEY",
                 "anthropic": "ANTHROPIC_API_KEY",
                 "google": "GOOGLE_API_KEY",
+                "google-gla": "GOOGLE_API_KEY",  # Google Generative Language API
             }
 
             if provider_name in env_var_map:
@@ -128,8 +131,7 @@ class PydanticAIProviderFactory:
                 logger.warning(f"Unknown provider '{provider_name}', skipping environment variable setup")
 
         try:
-            # Let PydanticAI handle model inference and provider initialization
-            # PydanticAI automatically normalizes model names (e.g., "gpt-4" -> "openai:gpt-4")
+            # PydanticAI infers provider from model ID (known models or "provider:model" format)
             agent = Agent(model=api_model_id, output_type=AnnotationSchema, system_prompt=BASE_PROMPT)
             logger.debug(f"Created agent successfully for {api_model_id}")
 
@@ -205,8 +207,6 @@ class PydanticAIProviderFactory:
 
         # Use PydanticAI's official pattern: Create model with provider
         # This avoids the deprecated model._provider = provider pattern
-        from pydantic_ai.models.openai import OpenAIChatModel
-
         model = OpenAIChatModel(model_name=actual_model_id, provider=provider)
 
         # Create Agent with properly initialized model
