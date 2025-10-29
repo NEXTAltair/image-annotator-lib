@@ -67,7 +67,7 @@ class PydanticAIProviderFactory:
     _providers: ClassVar[dict[str, Any]] = {}
 
     @classmethod
-    def get_provider(cls, provider_name: str, **provider_kwargs) -> Any:
+    def get_provider(cls, provider_name: str, **provider_kwargs: Any) -> Any:
         """Get or create provider instance for the given provider name
 
         Uses PydanticAI's infer_provider_class() to obtain Provider classes,
@@ -95,7 +95,7 @@ class PydanticAIProviderFactory:
         return cls._providers[provider_key]
 
     @classmethod
-    def create_agent(cls, model_name: str, api_model_id: str, api_key: str) -> Agent:
+    def create_agent(cls, model_name: str, api_model_id: str, api_key: str) -> Agent[None, AnnotationSchema]:
         """Create PydanticAI Agent leveraging built-in model inference
 
         PydanticAI v1.2.1 handles model inference:
@@ -147,7 +147,7 @@ class PydanticAIProviderFactory:
     @classmethod
     def get_cached_agent(
         cls, model_name: str, api_model_id: str, api_key: str, config_data: dict[str, Any] | None = None
-    ) -> Agent:
+    ) -> Agent[None, AnnotationSchema]:
         """Get cached Agent or create new one with provider sharing"""
 
         # Handle OpenRouter special case
@@ -161,7 +161,7 @@ class PydanticAIProviderFactory:
     @classmethod
     def create_openrouter_agent(
         cls, model_name: str, api_model_id: str, api_key: str, config_data: dict[str, Any] | None = None
-    ) -> Agent:
+    ) -> Agent[None, AnnotationSchema]:
         """Create OpenRouter-specific Agent with custom headers
 
         Uses PydanticAI's official pattern with OpenAIProvider + OpenAIChatModel
@@ -175,8 +175,8 @@ class PydanticAIProviderFactory:
             from pydantic_ai.models.test import TestModel
 
             test_model = TestModel()
-            # Set a default response for tests
-            test_model.response = ModelResponse(
+            # Set a default response for tests (TestModel API may vary by version)
+            test_model.response = ModelResponse(  # type: ignore[attr-defined]
                 parts=[TextPart('{"tags": ["test_tag"], "captions": ["test caption"], "score": 0.95}')]
             )
 
@@ -188,8 +188,8 @@ class PydanticAIProviderFactory:
         # Extract actual model ID from openrouter: prefix
         actual_model_id = api_model_id.split(":", 1)[1]
 
-        # Setup OpenRouter specific provider kwargs
-        provider_kwargs = {"api_key": api_key, "base_url": "https://openrouter.ai/api/v1"}
+        # Setup OpenRouter specific provider kwargs (explicitly typed as dict[str, Any])
+        provider_kwargs: dict[str, Any] = {"api_key": api_key, "base_url": "https://openrouter.ai/api/v1"}
 
         # Add OpenRouter custom headers if present in config
         if config_data:
@@ -217,7 +217,7 @@ class PydanticAIProviderFactory:
         return agent
 
     @classmethod
-    def clear_cache(cls):
+    def clear_cache(cls) -> None:
         """Clear all cached providers"""
         cls._providers.clear()
         logger.debug("Cleared all PydanticAI provider cache")
@@ -250,18 +250,45 @@ class PydanticAIProviderFactory:
 
 
 class PydanticAIAnnotatorMixin:
-    """Mixin for PydanticAI-based annotators with provider sharing"""
+    """Mixin for PydanticAI-based annotators with provider sharing
 
-    def __init__(self, model_name: str):
+    Note:
+        Phase 1B: Config Object統合
+        - WebAPIModelConfigからapi_keyとapi_model_idを取得
+        - 後方互換のためconfig_registry経由の読み込みもサポート
+    """
+
+    def __init__(self, model_name: str, config: Any | None = None) -> None:
+        """初期化
+
+        Args:
+            model_name: モデル名
+            config: WebAPIModelConfig (Phase 1B DI)。Noneの場合、_load_configurationで後方互換フォールバック。
+        """
         self.model_name = model_name
-        self.agent: Agent | None = None
+        self._webapi_config = config  # WebAPIModelConfigを保持
+        self.agent: Agent[None, AnnotationSchema] | None = None
         self.api_key: SecretStr | None = None
         self.api_model_id: str | None = None
 
-    def _load_configuration(self):
-        """Load configuration from registry"""
-        self.api_key = SecretStr(config_registry.get(self.model_name, "api_key", default=""))
-        self.api_model_id = config_registry.get(self.model_name, "api_model_id", default=None)
+    def _load_configuration(self) -> None:
+        """Load configuration from WebAPIModelConfig or registry (backward compatible)
+
+        Phase 1B: Config Object優先、config_registryフォールバック
+        """
+        # Config Objectから取得を試みる
+        if self._webapi_config:
+            logger.debug(f"Loading configuration from WebAPIModelConfig for {self.model_name}")
+            # WebAPIModelConfigからapi_model_idを取得
+            self.api_model_id = self._webapi_config.api_model_id
+
+            # api_keyはconfig_registryから取得(機密情報のため設定ファイル経由)
+            self.api_key = SecretStr(config_registry.get(self.model_name, "api_key", default=""))
+        else:
+            # 後方互換: config_registryから取得
+            logger.debug(f"Loading configuration from config_registry for {self.model_name} (backward compatible)")
+            self.api_key = SecretStr(config_registry.get(self.model_name, "api_key", default=""))
+            self.api_model_id = config_registry.get(self.model_name, "api_model_id", default=None)
 
         # テスト環境では検証を緩和
         if _is_test_environment():
@@ -282,9 +309,15 @@ class PydanticAIAnnotatorMixin:
             return PydanticAIProviderFactory._extract_provider_name(self.api_model_id)
         return "Unknown"
 
-    def _setup_agent(self):
+    def _setup_agent(self) -> None:
         """Setup PydanticAI Agent with provider sharing"""
         self._load_configuration()
+
+        # Validate that api_model_id and api_key are set after loading configuration
+        if not self.api_model_id:
+            raise ValueError(f"api_model_id is not configured for model {self.model_name}")
+        if not self.api_key:
+            raise ValueError(f"api_key is not configured for model {self.model_name}")
 
         self.agent = PydanticAIProviderFactory.get_cached_agent(
             model_name=self.model_name,
@@ -315,6 +348,8 @@ class PydanticAIAnnotatorMixin:
 
         # If model override is requested, create temporary agent
         if override_model_id and override_model_id != self.api_model_id:
+            if not self.api_key:
+                raise ValueError(f"api_key is not configured for model {self.model_name}")
             temp_agent = PydanticAIProviderFactory.create_agent(
                 model_name=f"{self.model_name}_temp",
                 api_model_id=override_model_id,
@@ -323,6 +358,8 @@ class PydanticAIAnnotatorMixin:
             agent_to_use = temp_agent
             logger.debug(f"Using temporary agent with model: {override_model_id}")
         else:
+            if not self.agent:
+                raise RuntimeError(f"Agent is not initialized for model {self.model_name}")
             agent_to_use = self.agent
 
         # Get model parameters
@@ -334,11 +371,21 @@ class PydanticAIAnnotatorMixin:
             "max_tokens": int(max_tokens) if max_tokens is not None else 1800,
         }
 
-        # Run inference
-        result = await agent_to_use.run(
-            user_prompt="この画像を詳細に分析して、タグとキャプションを生成してください。",
-            message_history=[binary_content],
-            model_settings=model_params,
+        # Run inference with properly typed user_prompt
+        from pydantic_ai import ModelSettings
+
+        # Create properly typed user_prompt list
+        user_prompt_parts: list[str | BinaryContent] = [
+            "この画像を詳細に分析して、タグとキャプションを生成してください。",
+            binary_content,
+        ]
+
+        # Create ModelSettings from our parameters
+        settings = ModelSettings(
+            temperature=model_params["temperature"], max_tokens=int(model_params["max_tokens"])
         )
 
+        result = await agent_to_use.run(user_prompt_parts, model_settings=settings)
+
+        # Return output (Agent is typed as Agent[None, AnnotationSchema] so result.output is AnnotationSchema)
         return result.output

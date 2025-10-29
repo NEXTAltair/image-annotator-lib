@@ -2,9 +2,10 @@
 
 import asyncio
 from io import BytesIO
-from typing import Any
+from typing import Any, Self
 
 from PIL import Image
+from pydantic_ai import Agent
 from pydantic_ai.messages import BinaryContent
 
 from .base.annotator import BaseAnnotator
@@ -23,9 +24,10 @@ class SimplifiedAgentWrapper(BaseAnnotator):
         Args:
             model_id: The model ID (e.g., "google/gemini-2.5-pro-preview-03-25")
         """
-        super().__init__()
+        # Initialize BaseAnnotator with model_id as model_name
+        super().__init__(model_name=model_id)
         self.model_id = model_id
-        self._agent = None
+        self._agent: Agent | None = None
         self._setup_agent()
 
     def _setup_agent(self) -> None:
@@ -38,36 +40,85 @@ class SimplifiedAgentWrapper(BaseAnnotator):
             logger.error(f"Failed to setup agent for {self.model_id}: {e}")
             raise
 
-    def _generate_tags(self, image: Image.Image) -> list[str]:
+    def __enter__(self) -> Self:
+        """Context manager entry - agent is already initialized in __init__."""
+        return self
+
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any
+    ) -> None:
+        """Context manager exit - cleanup if needed."""
+        # PydanticAI agents don't require explicit cleanup
+        pass
+
+    def _preprocess_images(self, images: list[Image.Image]) -> list[BinaryContent]:
         """
-        Generate tags for an image using the PydanticAI Agent.
+        Preprocess images by converting to PydanticAI BinaryContent format.
 
         Args:
-            image: PIL Image to annotate
+            images: List of PIL Images to preprocess
 
         Returns:
-            List of generated tags
+            List of BinaryContent objects for PydanticAI
+        """
+        return [self._pil_to_binary_content(img) for img in images]
+
+    def _run_inference(self, processed: list[BinaryContent]) -> list[Any]:
+        """
+        Run inference on preprocessed data.
+
+        Args:
+            processed: List of BinaryContent from _preprocess_images
+
+        Returns:
+            List of raw inference results
         """
         if not self._agent:
             raise RuntimeError(f"Agent not initialized for model {self.model_id}")
 
-        try:
-            # Convert PIL Image to BinaryContent for PydanticAI
-            binary_content = self._pil_to_binary_content(image)
-
-            # Run inference
+        results = []
+        for binary_content in processed:
             result = self._run_agent_inference(binary_content)
+            results.append(result)
+        return results
 
+    def _format_predictions(self, raw_outputs: list[Any]) -> list[dict[str, Any]]:
+        """
+        Format raw inference results.
+
+        Args:
+            raw_outputs: List of raw results from _run_inference
+
+        Returns:
+            List of formatted prediction dictionaries
+        """
+        formatted = []
+        for output in raw_outputs:
             # Extract tags from AnnotationSchema result
-            if hasattr(result, "tags") and result.tags:
-                return result.tags
+            if hasattr(output, "tags") and output.tags:
+                tags = output.tags
             else:
-                logger.warning(f"No tags returned from {self.model_id}")
-                return []
+                tags = []
 
-        except Exception as e:
-            logger.error(f"Error generating tags with {self.model_id}: {e}")
-            return []
+            formatted.append(
+                {"model_id": self.model_id, "tags": tags, "tag_count": len(tags), "method": "simplified_pydantic_ai"}
+            )
+        return formatted
+
+    def _generate_tags(self, formatted_output: Any) -> list[str]:
+        """
+        Extract tags from formatted output.
+
+        Args:
+            formatted_output: Formatted prediction dictionary from _format_predictions
+
+        Returns:
+            List of extracted tags
+        """
+        if isinstance(formatted_output, dict) and "tags" in formatted_output:
+            tags = formatted_output["tags"]
+            return tags if isinstance(tags, list) else []
+        return []
 
     def _pil_to_binary_content(self, image: Image.Image) -> BinaryContent:
         """Convert PIL Image to PydanticAI BinaryContent."""
@@ -81,6 +132,9 @@ class SimplifiedAgentWrapper(BaseAnnotator):
 
     def _run_agent_inference(self, binary_content: BinaryContent) -> Any:
         """Run PydanticAI Agent inference with proper async handling."""
+        if not self._agent:
+            raise RuntimeError(f"Agent not initialized for model {self.model_id}")
+
         try:
             # Try sync first
             result = self._agent.run_sync([binary_content])
@@ -96,11 +150,15 @@ class SimplifiedAgentWrapper(BaseAnnotator):
 
     def _run_async_with_new_loop(self, binary_content: BinaryContent) -> Any:
         """Run async inference with a new event loop."""
+        if not self._agent:
+            raise RuntimeError(f"Agent not initialized for model {self.model_id}")
 
-        def run_with_new_loop():
+        def run_with_new_loop() -> Any:
             new_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(new_loop)
             try:
+                if not self._agent:
+                    raise RuntimeError(f"Agent not initialized for model {self.model_id}")
                 return new_loop.run_until_complete(self._agent.run([binary_content]))
             finally:
                 new_loop.close()

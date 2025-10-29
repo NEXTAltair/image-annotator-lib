@@ -11,7 +11,7 @@ from .utils import logger
 class SimplifiedAgentFactory:
     """Factory for creating PydanticAI Agents with simplified configuration."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._available_models: list[str] = []
         self._agents_cache: dict[str, Agent] = {}
 

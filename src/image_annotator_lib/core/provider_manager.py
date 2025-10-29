@@ -88,7 +88,7 @@ class ProviderManager:
         return results
 
     @classmethod
-    def _run_agent_safely(cls, agent, binary_content, api_model_id: str):
+    def _run_agent_safely(cls, agent: Any, binary_content: Any, api_model_id: str) -> Any:
         """Safely run PydanticAI agent with simplified event loop management"""
         logger.debug(f"Attempting to run agent with model_id: {api_model_id}")
         logger.debug(f"Agent type: {type(agent)}")
@@ -110,7 +110,7 @@ class ProviderManager:
                 try:
                     import concurrent.futures
 
-                    def run_with_new_loop():
+                    def run_with_new_loop() -> Any:
                         new_loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(new_loop)
                         try:
@@ -134,7 +134,7 @@ class ProviderManager:
                 raise
         except Exception as e:
             # Enhanced error reporting for debugging
-            error_context = {
+            {
                 "error_type": type(e).__name__,
                 "error_message": str(e),
                 "api_model_id": api_model_id,
@@ -184,7 +184,7 @@ class ProviderManager:
 class ProviderInstanceBase:
     """Base class for provider instances"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._active_contexts = {}
 
     def run_with_model(
@@ -207,14 +207,14 @@ class ProviderInstanceBase:
         # Execute inference with specified model
         return context.run_with_model(images_list, api_model_id, api_keys)
 
-    def _create_annotator(self, model_name: str):
+    def _create_annotator(self, model_name: str) -> Any:
         """Create annotator instance - to be implemented by subclasses"""
         raise NotImplementedError
 
-    def cleanup_context(self, model_name: str):
+    def cleanup_context(self, model_name: str) -> None:
         """Clean up context for specific model"""
         if model_name in self._active_contexts:
-            annotator, context = self._active_contexts[model_name]
+            annotator, _context = self._active_contexts[model_name]
             try:
                 annotator.__exit__(None, None, None)
             except Exception as e:
@@ -231,7 +231,7 @@ class AnthropicProviderInstance(ProviderInstanceBase):
         images_list: list[Image.Image],
         api_model_id: str,
         api_keys: dict[str, str] | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Direct execution using PydanticAI Factory"""
         from .config import config_registry
         from .pydantic_ai_factory import PydanticAIProviderFactory
@@ -275,7 +275,7 @@ class AnthropicProviderInstance(ProviderInstanceBase):
                     results.append({"response": result.data})
                 except Exception as e:
                     # Enhanced error logging for debugging
-                    error_details = {
+                    {
                         "error_type": type(e).__name__,
                         "error_message": str(e),
                         "model_name": model_name,
@@ -294,7 +294,7 @@ class AnthropicProviderInstance(ProviderInstanceBase):
             logger.error(f"Anthropic provider error: {e}", exc_info=True)
             return [{"error": f"Anthropic provider failed: {e}"}] * len(images_list)
 
-    def _create_annotator(self, model_name: str):
+    def _create_annotator(self, model_name: str) -> Any:
         # Backward compatibility - not used in direct execution
         from ..model_class.annotator_webapi.anthropic_api import AnthropicApiAnnotator
 
@@ -310,7 +310,7 @@ class OpenAIProviderInstance(ProviderInstanceBase):
         images_list: list[Image.Image],
         api_model_id: str,
         api_keys: dict[str, str] | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Direct execution using PydanticAI Factory"""
         from .config import config_registry
         from .pydantic_ai_factory import PydanticAIProviderFactory
@@ -354,7 +354,7 @@ class OpenAIProviderInstance(ProviderInstanceBase):
                     results.append({"response": result.data})
                 except Exception as e:
                     # Enhanced error logging for debugging
-                    error_details = {
+                    {
                         "error_type": type(e).__name__,
                         "error_message": str(e),
                         "model_name": model_name,
@@ -373,7 +373,7 @@ class OpenAIProviderInstance(ProviderInstanceBase):
             logger.error(f"OpenAI provider error: {e}", exc_info=True)
             return [{"error": f"OpenAI provider failed: {e}"}] * len(images_list)
 
-    def _create_annotator(self, model_name: str):
+    def _create_annotator(self, model_name: str) -> Any:
         # Backward compatibility - not used in direct execution
         from ..model_class.annotator_webapi.openai_api_response import OpenAIApiAnnotator
 
@@ -389,7 +389,7 @@ class OpenRouterProviderInstance(ProviderInstanceBase):
         images_list: list[Image.Image],
         api_model_id: str,
         api_keys: dict[str, str] | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Direct execution using PydanticAI Factory"""
         from .config import config_registry
         from .pydantic_ai_factory import PydanticAIProviderFactory
@@ -445,7 +445,7 @@ class OpenRouterProviderInstance(ProviderInstanceBase):
             logger.error(f"OpenRouter provider error: {e}", exc_info=True)
             return [{"error": f"OpenRouter provider failed: {e}"}] * len(images_list)
 
-    def _create_annotator(self, model_name: str):
+    def _create_annotator(self, model_name: str) -> Any:
         # Backward compatibility - not used in direct execution
         from ..model_class.annotator_webapi.openai_api_chat import OpenRouterApiAnnotator
 
@@ -461,7 +461,7 @@ class GoogleProviderInstance(ProviderInstanceBase):
         images_list: list[Image.Image],
         api_model_id: str,
         api_keys: dict[str, str] | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Direct execution using PydanticAI Factory"""
         from .config import config_registry
         from .pydantic_ai_factory import PydanticAIProviderFactory
@@ -517,7 +517,7 @@ class GoogleProviderInstance(ProviderInstanceBase):
             logger.error(f"Google provider error: {e}", exc_info=True)
             return [{"error": f"Google provider failed: {e}"}] * len(images_list)
 
-    def _create_annotator(self, model_name: str):
+    def _create_annotator(self, model_name: str) -> Any:
         # Backward compatibility - not used in direct execution
         from ..model_class.annotator_webapi.google_api import GoogleApiAnnotator
 

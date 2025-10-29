@@ -3,6 +3,7 @@ import sys
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import huggingface_hub
@@ -20,6 +21,20 @@ DEFAULT_TIMEOUT = 30
 WD_MODEL_FILENAME = "model.onnx"
 WD_LABEL_FILENAME = "selected_tags.csv"
 
+# Explicitly export logger and other public functions
+__all__ = [
+    "calculate_phash",
+    "convert_unix_to_iso8601",
+    "determine_effective_device",
+    "download_onnx_tagger_model",
+    "extract_zip",
+    "get_file_path",
+    "get_model_capabilities",
+    "init_logger",
+    "load_file",
+    "logger",
+]
+
 
 # ログフォーマット
 LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function} - {message}"
@@ -28,7 +43,7 @@ LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function} -
 _logger_initialized = False
 
 
-def init_logger():
+def init_logger() -> None:
     global _logger_initialized
     if _logger_initialized:
         return
@@ -46,13 +61,13 @@ def init_logger():
     )
 
     # 特定のモジュールのDEBUGログをフィルタするための関数
-    def filter_module_logs(record):
+    def filter_module_logs(record: Any) -> bool:  # loguru.Record type (dict-like access)
         # 'registry' または 'config' モジュールからのDEBUGログをフィルタ
         if record["name"].startswith("image_annotator_lib.core.registry") or record["name"].startswith(
             "image_annotator_lib.core.config"
         ):
             # INFOレベル以上のログだけを許可する (DEBUGレベルは除外)
-            return record["level"].no >= logger.level("INFO").no
+            return bool(record["level"].no >= logger.level("INFO").no)
         # その他のモジュールのログはすべて通す
         return True
 
@@ -283,7 +298,7 @@ def determine_effective_device(requested_device: str, model_name: str | None = N
     return actual_device
 
 
-def get_model_capabilities(model_name: str) -> set:
+def get_model_capabilities(model_name: str) -> set[Any]:
     """モデル名からcapabilitiesを取得
 
     Args:

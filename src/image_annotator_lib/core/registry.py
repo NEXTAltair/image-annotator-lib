@@ -3,7 +3,7 @@ import inspect
 import os
 from pathlib import Path
 from types import ModuleType
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from . import api_model_discovery
 from .base import BaseAnnotator
@@ -56,7 +56,7 @@ def _import_module_from_file(module_file: Path, base_module_path: str) -> Module
         return None
 
 
-def _recursive_subclasses(cls: type[T]) -> set[type[T]]:
+def _recursive_subclasses[T: BaseAnnotator](cls: type[T]) -> set[type[T]]:
     """指定されたクラスのすべての再帰的サブクラスを返します。"""
     # この関数はそのままですが、他で使用する場合はTが適切にバインドされていることを確認してください
     # _gather_available_classesでは、BaseAnnotatorを直接使用します。
@@ -390,7 +390,7 @@ def list_available_annotators_with_metadata() -> dict[str, dict[str, any]]:
     return result
 
 
-def _determine_model_type(model_name: str, model_class: ModelClass, model_config: dict) -> str:
+def _determine_model_type(model_name: str, model_class: ModelClass, model_config: dict[str, Any]) -> str:
     """モデルタイプを判定する
 
     Args:
@@ -426,7 +426,7 @@ def _determine_model_type(model_name: str, model_class: ModelClass, model_config
     return "vision"
 
 
-def _requires_api_key(model_class: ModelClass, model_config: dict) -> bool:
+def _requires_api_key(model_class: ModelClass, model_config: dict[str, Any]) -> bool:
     """APIキーが必要かどうかを判定する
 
     Args:
@@ -564,8 +564,8 @@ def initialize_registry() -> None:
         if not AVAILABLE_API_MODELS_CONFIG_PATH.exists():
             if skip_api_discovery:
                 logger.info(
-                    f"環境変数 IMAGE_ANNOTATOR_SKIP_API_DISCOVERY=true のため、"
-                    f"API モデル情報の取得をスキップします。"
+                    "環境変数 IMAGE_ANNOTATOR_SKIP_API_DISCOVERY=true のため、"
+                    "API モデル情報の取得をスキップします。"
                 )
                 # ファイルが存在しない場合でも処理を続行
             else:

@@ -85,15 +85,15 @@ def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None 
 
     actual_model_name, Annotator_class = model_result
 
-    # 実際のモデル名を使用（大文字・小文字が正規化されている場合）
+    # 実際のモデル名を使用(大文字・小文字が正規化されている場合)
     effective_model_name = actual_model_name
 
     # PydanticAI WebAPIアノテーターの場合はProvider-level管理を使用
     if _is_pydantic_ai_webapi_annotator(Annotator_class):
-        # Provider-levelラッパーを返す（正規化されたモデル名を使用）
+        # Provider-levelラッパーを返す(正規化されたモデル名を使用)
         return PydanticAIWebAPIWrapper(effective_model_name, Annotator_class, api_keys=api_keys)
     else:
-        # 従来通りのインスタンス作成（正規化されたモデル名を使用）
+        # 従来通りのインスタンス作成(正規化されたモデル名を使用)
         # TODO: レガシーアノテーターでもAPIキー対応が必要な場合は、ここでapi_keysを渡す
         instance = Annotator_class(model_name=effective_model_name)
         logger.debug(
@@ -139,10 +139,18 @@ class PydanticAIWebAPIWrapper(BaseAnnotator):
         # Provider-levelで管理されるため何もしない
         pass
 
-    def predict(self, images: list[Image.Image], phash_list: list[str]) -> list[UnifiedAnnotationResult]:
+    def predict(
+        self, images: list[Image.Image], phash_list: list[str] | None = None
+    ) -> list[UnifiedAnnotationResult]:
         """Provider-level実行でのpredict実装"""
         if not self._api_model_id:
             raise ValueError(f"Model {self.model_name} has no api_model_id configured")
+
+        # phash_listが提供されていない場合は計算
+        if phash_list is None:
+            import imagehash
+
+            phash_list = [str(imagehash.phash(img)) for img in images]
 
         try:
             # Provider Managerを通して実行（辞書形式の戻り値）
@@ -168,7 +176,7 @@ class PydanticAIWebAPIWrapper(BaseAnnotator):
 
         # 辞書形式の結果をリスト形式に変換
         results = []
-        for i, image in enumerate(images):
+        for i, _image in enumerate(images):
             phash = phash_list[i] if i < len(phash_list) else None
 
             # phashに対応する結果を検索
@@ -201,7 +209,7 @@ class PydanticAIWebAPIWrapper(BaseAnnotator):
         """Provider-levelでは前処理は不要"""
         return images
 
-    def _run_inference(self, processed: list[Image.Image]) -> list[dict]:
+    def _run_inference(self, processed: list[Image.Image]) -> list[dict[str, Any]]:
         """Provider Managerを通して推論実行"""
         if not self._api_model_id:
             raise ValueError(f"Model {self.model_name} has no api_model_id configured")
@@ -213,11 +221,11 @@ class PydanticAIWebAPIWrapper(BaseAnnotator):
             api_keys=self.api_keys,
         )
 
-    def _format_predictions(self, raw_outputs: list[dict]) -> list[dict]:
+    def _format_predictions(self, raw_outputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Provider-levelでは整形済みのため変更不要"""
         return raw_outputs
 
-    def _generate_tags(self, formatted_output: list[dict]) -> list[str]:
+    def _generate_tags(self, formatted_output: list[dict[str, Any]]) -> list[str]:
         """整形済み出力からタグリストを生成"""
         all_tags = []
         for output in formatted_output:
@@ -445,7 +453,7 @@ def annotate(
 
         except Exception as e:
             # エラーハンドリング: このモデルでの処理は失敗とみなし、全画像にエラーを記録
-            error_details = {
+            {
                 "model_name": model_name,
                 "error_type": type(e).__name__,
                 "error_message": str(e),
