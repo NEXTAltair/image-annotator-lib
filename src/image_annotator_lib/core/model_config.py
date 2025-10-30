@@ -149,7 +149,22 @@ class ModelConfigFactory:
             # Web APIモデルは model_name_on_provider フィールドを持つ
             if "model_name_on_provider" in config_dict:
                 logger.debug(f"Web APIモデルとして '{model_name}' をパース")
-                return WebAPIModelConfig(**config_dict)
+                # Filter out api_key and other fields not in WebAPIModelConfig
+                # api_key is retrieved separately from config_registry for security
+                # api_model_id is aliased as model_name_on_provider, so filter it out to avoid duplication
+                filtered_dict = {
+                    k: v
+                    for k, v in config_dict.items()
+                    if k
+                    not in (
+                        "api_key",
+                        "api_model_id",
+                        "capabilities",
+                        "max_retries",
+                        "rate_limit_requests_per_minute",
+                    )
+                }
+                return WebAPIModelConfig(**filtered_dict)
             elif "model_path" in config_dict:
                 logger.debug(f"ローカルMLモデルとして '{model_name}' をパース")
                 return LocalMLModelConfig(**config_dict)
