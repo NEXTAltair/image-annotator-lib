@@ -101,7 +101,12 @@ class SimplifiedAgentWrapper(BaseAnnotator):
                 tags = []
 
             formatted.append(
-                {"model_id": self.model_id, "tags": tags, "tag_count": len(tags), "method": "simplified_pydantic_ai"}
+                {
+                    "model_id": self.model_id,
+                    "tags": tags,
+                    "tag_count": len(tags),
+                    "method": "simplified_pydantic_ai",
+                }
             )
         return formatted
 

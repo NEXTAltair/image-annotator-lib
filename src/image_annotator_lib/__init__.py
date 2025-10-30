@@ -24,7 +24,6 @@ from .core.registry import (
 from .core.simplified_agent_factory import create_agent, get_available_models
 from .core.types import AnnotationResult
 from .core.utils import init_logger
-from .exceptions import *
 from .exceptions.errors import AnnotatorError, ModelLoadError, ModelNotFoundError, OutOfMemoryError
 
 # --- Public API ---

@@ -580,7 +580,9 @@ def initialize_registry() -> None:
                     )
                 except Exception as api_e:
                     # API取得に失敗しても、処理は続行する(ログには残す)
-                    logger.error(f"API からのモデル情報取得中にエラーが発生しました: {api_e}", exc_info=True)
+                    logger.error(
+                        f"API からのモデル情報取得中にエラーが発生しました: {api_e}", exc_info=True
+                    )
                     logger.warning(
                         "APIからのモデル情報取得に失敗したため、Web API モデルの自動設定は行われない可能性があります。"
                     )

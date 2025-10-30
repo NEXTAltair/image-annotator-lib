@@ -95,7 +95,9 @@ class PydanticAIProviderFactory:
         return cls._providers[provider_key]
 
     @classmethod
-    def create_agent(cls, model_name: str, api_model_id: str, api_key: str) -> Agent[None, AnnotationSchema]:
+    def create_agent(
+        cls, model_name: str, api_model_id: str, api_key: str
+    ) -> Agent[None, AnnotationSchema]:
         """Create PydanticAI Agent leveraging built-in model inference
 
         PydanticAI v1.2.1 handles model inference:
@@ -286,7 +288,9 @@ class PydanticAIAnnotatorMixin:
             self.api_key = SecretStr(config_registry.get(self.model_name, "api_key", default=""))
         else:
             # 後方互換: config_registryから取得
-            logger.debug(f"Loading configuration from config_registry for {self.model_name} (backward compatible)")
+            logger.debug(
+                f"Loading configuration from config_registry for {self.model_name} (backward compatible)"
+            )
             self.api_key = SecretStr(config_registry.get(self.model_name, "api_key", default=""))
             self.api_model_id = config_registry.get(self.model_name, "api_model_id", default=None)
 
