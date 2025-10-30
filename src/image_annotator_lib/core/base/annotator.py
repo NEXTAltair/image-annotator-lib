@@ -10,6 +10,7 @@ from PIL import Image
 # --- ローカルインポート ---
 from ...exceptions.errors import OutOfMemoryError
 from ..config import config_registry
+from ..model_config import BaseModelConfig, ModelConfigFactory
 from ..types import AnnotationResult, LoaderComponents
 from ..utils import logger
 
@@ -21,15 +22,25 @@ class BaseAnnotator(ABC):
     各フレームワーク固有の実装に必要な抽象メソッドを提供します。
     """
 
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, config: BaseModelConfig | None = None):
         """BaseAnnotator を初期化します。
 
         Args:
-            model_name (str): モデルの名前。設定ファイルでの識別子として使用されます。
+            model_name: モデルの名前。設定ファイルでの識別子として使用されます。
+            config: Config Object (Phase 1B DI)。Noneの場合、config_registryから読み込み。
+
+        Note:
+            Phase 1B: Dependency Injection導入
+            - config引数経由でConfig Objectを注入可能
+            - config=Noneの場合、後方互換のためconfig_registryから読み込み
         """
         self.model_name = model_name
-        self.model_path = config_registry.get(model_name, "model_path")
-        self.device = config_registry.get(model_name, "device", "cpu")
+        # Config Object注入 or 後方互換フォールバック
+        self._config = config if config is not None else self._load_config_from_registry(model_name)
+
+        # model_pathはLocalMLModelConfig専用(WebAPIModelConfigにはない)
+        self.model_path = getattr(self._config, "model_path", None)
+        self.device = self._config.device
         self.components: LoaderComponents | None = None
 
     @abstractmethod
@@ -185,6 +196,31 @@ class BaseAnnotator(ABC):
                 results.append(err_result)
 
         return results
+
+    def _load_config_from_registry(self, model_name: str) -> BaseModelConfig:
+        """config_registryからConfig Objectを生成します (後方互換性用)。
+
+        Args:
+            model_name: モデル名
+
+        Returns:
+            BaseModelConfig: 生成されたConfig Object
+
+        Raises:
+            ConfigurationError: 設定の読み込みまたは変換に失敗した場合
+
+        Note:
+            Phase 1B: config=None時の後方互換フォールバック
+            既存コード (config引数なし) が引き続き動作するよう、
+            config_registryから設定を読み込んでConfig Objectに変換します。
+        """
+        logger.debug(f"後方互換: config_registryから '{model_name}' の設定を読み込み")
+        registry_dict = config_registry.get_all_config().get(model_name)
+        if not registry_dict:
+            # model_nameが存在しない場合のエラー処理
+            logger.error(f"モデル '{model_name}' の設定がconfig_registryに存在しません")
+            raise ValueError(f"Model '{model_name}' not found in config_registry")
+        return ModelConfigFactory.from_registry(model_name, registry_dict)
 
     def _calculate_phash(self, image: Image.Image) -> str | None:
         """画像の知覚ハッシュを計算します。

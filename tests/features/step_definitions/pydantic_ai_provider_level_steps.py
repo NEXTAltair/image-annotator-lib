@@ -256,7 +256,7 @@ def both_models_return_valid_results(provider_level_annotation_result):
     assert provider_level_annotation_result is not None
 
     model_count = 0
-    for image_hash, model_results in provider_level_annotation_result.items():
+    for _image_hash, model_results in provider_level_annotation_result.items():
         for model_name, result in model_results.items():
             model_count += 1
 
@@ -293,8 +293,8 @@ def openrouter_base_url_used(openrouter_annotation_result):
     # 結果からOpenRouterが正常に動作していることを間接的に確認
     assert openrouter_annotation_result is not None
 
-    for image_hash, model_results in openrouter_annotation_result.items():
-        for model_name, result in model_results.items():
+    for _image_hash, model_results in openrouter_annotation_result.items():
+        for _model_name, result in model_results.items():
             error = result.get("error")
             if error and ("api key" in error.lower() or "authentication" in error.lower()):
                 pytest.skip(f"OpenRouterのAPIキーが未設定のためスキップ: {error}")
@@ -376,7 +376,7 @@ def unified_error_handling_works(provider_error_handling_results):
             pytest.fail(f"モデル '{model_name}' で予期しない例外: {result['exception']}")
 
         # アノテーション結果からエラーを確認
-        for image_hash, model_results in result.items():
+        for _image_hash, model_results in result.items():
             for model, model_result in model_results.items():
                 error = model_result.get("error")
                 if error:
@@ -391,8 +391,8 @@ def pydantic_ai_http_error_handled(provider_error_handling_results):
     """PydanticAI ModelHTTPErrorが適切に処理されることを確認"""
     http_error_found = False
 
-    for model_name, result in provider_error_handling_results.items():
-        for image_hash, model_results in result.items():
+    for _model_name, result in provider_error_handling_results.items():
+        for _image_hash, model_results in result.items():
             for model, model_result in model_results.items():
                 error = model_result.get("error")
                 if error and ("HTTP" in error or "401" in error or "403" in error):
@@ -407,8 +407,8 @@ def error_message_contains_http_status(provider_error_handling_results):
     """エラーメッセージにHTTPステータスコードが含まれることを確認"""
     status_code_found = False
 
-    for model_name, result in provider_error_handling_results.items():
-        for image_hash, model_results in result.items():
+    for _model_name, result in provider_error_handling_results.items():
+        for _image_hash, model_results in result.items():
             for model, model_result in model_results.items():
                 error = model_result.get("error")
                 if error and any(code in error for code in ["401", "403", "429", "500"]):
@@ -423,8 +423,8 @@ def processed_by_provider_level(unified_wrapper_result):
     """PydanticAI Provider-levelで正常に処理されることを確認"""
     assert unified_wrapper_result is not None
 
-    for image_hash, model_results in unified_wrapper_result.items():
-        for model_name, result in model_results.items():
+    for _image_hash, model_results in unified_wrapper_result.items():
+        for _model_name, result in model_results.items():
             error = result.get("error")
             if error and ("api key" in error.lower() or "authentication" in error.lower()):
                 pytest.skip(f"APIキーが未設定のためスキップ: {error}")
@@ -438,9 +438,9 @@ def api_compatibility_maintained(unified_wrapper_result):
     # annotate()関数の戻り値形式が期待通りであることを確認
     assert isinstance(unified_wrapper_result, dict)
 
-    for image_hash, model_results in unified_wrapper_result.items():
+    for _image_hash, model_results in unified_wrapper_result.items():
         assert isinstance(model_results, dict)
-        for model_name, result in model_results.items():
+        for _model_name, result in model_results.items():
             assert "error" in result
             # tags, captions, score のいずれかが存在することを確認
             has_content = any(key in result for key in ["tags", "captions", "score"])
@@ -487,13 +487,12 @@ def all_requests_processed_efficiently(concurrent_annotation_results):
     assert result is not None
 
     # 全ての画像とモデルの組み合わせで結果があることを確認
-    total_expected = 3 * 2  # 3画像 × 2モデル
     total_actual = sum(len(model_results) for model_results in result.values())
 
     # APIキーエラーを除いて確認
     successful_results = 0
-    for image_hash, model_results in result.items():
-        for model_name, model_result in model_results.items():
+    for _image_hash, model_results in result.items():
+        for _model_name, model_result in model_results.items():
             error = model_result.get("error")
             if not error or "api key" not in error.lower():
                 successful_results += 1
@@ -531,8 +530,8 @@ def structured_pydantic_output_returned(annotation_result):
     """構造化されたPydantic出力スキーマが返されることを確認"""
     assert annotation_result is not None
 
-    for image_hash, model_results in annotation_result.items():
-        for model_name, result in model_results.items():
+    for _image_hash, model_results in annotation_result.items():
+        for _model_name, result in model_results.items():
             error = result.get("error")
             if error and ("api key" in error.lower() or "authentication" in error.lower()):
                 pytest.skip(f"APIキーが未設定のためスキップ: {error}")
@@ -548,7 +547,7 @@ def structured_pydantic_output_returned(annotation_result):
 @then("タグ配列が適切な形式で含まれる")
 def tags_array_properly_formatted(annotation_result):
     """タグ配列が適切な形式で含まれることを確認"""
-    for image_hash, model_results in annotation_result.items():
+    for _image_hash, model_results in annotation_result.items():
         for model_name, result in model_results.items():
             if result.get("error"):
                 continue
@@ -564,7 +563,7 @@ def tags_array_properly_formatted(annotation_result):
 @then("キャプション配列が適切な形式で含まれる")
 def captions_array_properly_formatted(annotation_result):
     """キャプション配列が適切な形式で含まれることを確認"""
-    for image_hash, model_results in annotation_result.items():
+    for _image_hash, model_results in annotation_result.items():
         for model_name, result in model_results.items():
             if result.get("error"):
                 continue
@@ -580,7 +579,7 @@ def captions_array_properly_formatted(annotation_result):
 @then("スコア値が数値形式で含まれる")
 def score_value_properly_formatted(annotation_result):
     """スコア値が数値形式で含まれることを確認"""
-    for image_hash, model_results in annotation_result.items():
+    for _image_hash, model_results in annotation_result.items():
         for model_name, result in model_results.items():
             if result.get("error"):
                 continue

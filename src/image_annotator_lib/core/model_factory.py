@@ -1148,7 +1148,7 @@ class ModelLoad:
             logger.error(f"メモリ不足エラー: モデル '{model_name}' ロード中。詳細: {error_msg}")
             if isinstance(error, torch.cuda.OutOfMemoryError) and torch.cuda.is_available():
                 try:
-                    device_name = str(error.device) if hasattr(error, "device") else "cuda"  # type: ignore[attr-defined]
+                    device_name = str(error.device) if hasattr(error, "device") else "cuda"
                     logger.error(f"CUDA メモリサマリー ({device_name}):")
                     logger.error(torch.cuda.memory_summary(device=device_name, abbreviated=True))
                 except Exception as mem_e:

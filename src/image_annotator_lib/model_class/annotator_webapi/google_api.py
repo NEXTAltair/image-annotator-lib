@@ -14,16 +14,20 @@ class GoogleApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
 
     Provider-level アーキテクチャによる効率的なリソース共有で
     Google Gemini API と構造化出力を統合する。
+
+    Note:
+        Phase 1B: Config Object統合
     """
 
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, config=None):
         """Google アノテーターをmodel_nameで初期化する
 
         Args:
             model_name: 設定ファイルからのモデル名
+            config: WebAPIModelConfig (Phase 1B DI)。Noneの場合、後方互換フォールバック。
         """
-        WebApiBaseAnnotator.__init__(self, model_name)
-        PydanticAIAnnotatorMixin.__init__(self, model_name)
+        WebApiBaseAnnotator.__init__(self, model_name, config=config)
+        PydanticAIAnnotatorMixin.__init__(self, model_name, config=config)
         # 設定を初期化時に読み込む
         self._load_configuration()
 

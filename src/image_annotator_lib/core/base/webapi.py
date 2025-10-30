@@ -9,7 +9,7 @@ from PIL import Image
 
 # --- ローカルインポート ---
 from ...exceptions.errors import ApiAuthenticationError, ConfigurationError
-from ..config import config_registry
+from ..model_config import WebAPIModelConfig
 from ..model_factory import prepare_web_api_components
 from ..types import (
     AnnotationSchema,
@@ -26,60 +26,41 @@ from .annotator import BaseAnnotator
 class WebApiBaseAnnotator(BaseAnnotator):
     """Web API を利用するアノテーターの基底クラス。"""
 
-    def __init__(self, model_name: str):
-        """初期化 (model_name のみ受け取るように変更)"""
-        super().__init__(model_name)
-        self.prompt_template = config_registry.get(
-            self.model_name, "prompt_template", "Describe this image."
-        )
+    def __init__(self, model_name: str, config: WebAPIModelConfig | None = None):
+        """初期化 (model_name と config を受け取る)
 
-        timeout_val: Any = config_registry.get(self.model_name, "timeout", 60)
-        try:
-            self.timeout = int(timeout_val) if timeout_val is not None else 60
-        except (ValueError, TypeError):
-            logger.warning(
-                f"timeout に不正な値 {timeout_val} が設定されました。デフォルトの 60 を使用します。"
+        Args:
+            model_name: モデルの名前
+            config: WebAPIModelConfig (Phase 1B DI)。Noneの場合、親クラス経由でconfig_registryから読み込み。
+
+        Note:
+            Phase 1B: Dependency Injection導入
+            - config引数経由でWebAPIModelConfigを注入可能
+            - config=Noneの場合、後方互換のためBaseAnnotatorがconfig_registryから読み込み
+        """
+        # 親クラス(BaseAnnotator)でConfig Objectを準備
+        super().__init__(model_name, config=config)
+
+        # WebAPIModelConfig型でない場合はエラー
+        if not isinstance(self._config, WebAPIModelConfig):
+            raise ConfigurationError(
+                message=f"WebApiBaseAnnotatorはWebAPIModelConfigが必要です。model_name='{model_name}'",
+                details={"model_name": model_name, "config_type": type(self._config).__name__},
             )
-            self.timeout = 60
 
-        retry_count_val: Any = config_registry.get(self.model_name, "retry_count", 3)
-        try:
-            self.retry_count = int(retry_count_val) if retry_count_val is not None else 3
-        except (ValueError, TypeError):
-            logger.warning(
-                f"retry_count に不正な値 {retry_count_val} が設定されました。デフォルトの 3 を使用します。"
-            )
-            self.retry_count = 3
+        # Config Objectから値を取得(型安全・バリデーション済み)
+        self.prompt_template = self._config.prompt_template
+        self.timeout = self._config.timeout
+        self.retry_count = self._config.retry_count
+        self.retry_delay = self._config.retry_delay
+        self.min_request_interval = self._config.min_request_interval
+        self.max_output_tokens = self._config.max_output_tokens
 
-        retry_delay_val: Any = config_registry.get(self.model_name, "retry_delay", 1.0)
-        try:
-            self.retry_delay = float(retry_delay_val) if retry_delay_val is not None else 1.0
-        except (ValueError, TypeError):
-            logger.warning(
-                f"retry_delay に不正な値 {retry_delay_val} が設定されました。デフォルトの 1.0 を使用します。"
-            )
-            self.retry_delay = 1.0
-
+        # APIコンポーネント初期化
         self.last_request_time = 0.0
-        min_interval_val: Any = config_registry.get(self.model_name, "min_request_interval", 1.0)
-        try:
-            self.min_request_interval = float(min_interval_val) if min_interval_val is not None else 1.0
-        except (ValueError, TypeError):
-            logger.warning(
-                f"min_request_interval に不正な値 {min_interval_val} が設定されました。デフォルトの 1.0 を使用します。"
-            )
-            self.min_request_interval = 1.0
-
         self.model_id_on_provider: str | None = None  # __enter__ で設定される
         self.api_model_id: str | None = None  # __enter__ で設定される (加工済みID)
         self.provider_name: str | None = None  # __enter__ で設定される
-
-        self.max_output_tokens: int | None = config_registry.get(self.model_name, "max_output_tokens", 1800)
-        if self.max_output_tokens is not None and not isinstance(self.max_output_tokens, int):
-            logger.warning(
-                f"max_output_tokens に不正な値 {self.max_output_tokens} が設定されました。None を使用します。"
-            )
-            self.max_output_tokens = None
 
         # APIキーは __enter__ で prepare_web_api_components から取得されるため、ここでは不要
 

@@ -15,11 +15,21 @@ from ...core.utils import logger
 
 
 class OpenRouterApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
-    """OpenRouter API を使用して画像に注釈を付けるクラス (Provider-level PydanticAI版)"""
+    """OpenRouter API を使用して画像に注釈を付けるクラス (Provider-level PydanticAI版)
 
-    def __init__(self, model_name: str):
-        WebApiBaseAnnotator.__init__(self, model_name)
-        PydanticAIAnnotatorMixin.__init__(self, model_name)
+    Note:
+        Phase 1B: Config Object統合
+    """
+
+    def __init__(self, model_name: str, config=None):
+        """初期化
+
+        Args:
+            model_name: モデル名
+            config: WebAPIModelConfig (Phase 1B DI)。Noneの場合、後方互換フォールバック。
+        """
+        WebApiBaseAnnotator.__init__(self, model_name, config=config)
+        PydanticAIAnnotatorMixin.__init__(self, model_name, config=config)
 
     def __enter__(self):
         """コンテキストマネージャーのエントリーポイント"""

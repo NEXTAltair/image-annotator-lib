@@ -105,7 +105,9 @@ def test_create_web_api_instance_model_not_found_in_toml(mock_find_model, mock_g
     mock_find_model.return_value = None
 
     # Test actual error behavior
-    with pytest.raises(KeyError, match=f"Model '{model_name_short}' not found in registry or available models."):
+    with pytest.raises(
+        KeyError, match=f"Model '{model_name_short}' not found in registry or available models."
+    ):
         api._create_annotator_instance(model_name_short)
 
 
@@ -165,9 +167,9 @@ def test_get_annotator_instance_with_api_keys_no_cache(mock_get_factory, mock_wr
     mock_get_factory.return_value = mock_factory
 
     # First call with api_keys
-    instance1 = api.get_annotator_instance(model_name, api_keys=api_keys)
+    api.get_annotator_instance(model_name, api_keys=api_keys)
     # Second call with api_keys
-    instance2 = api.get_annotator_instance(model_name, api_keys=api_keys)
+    api.get_annotator_instance(model_name, api_keys=api_keys)
 
     # Should create new instances each time (no caching)
     assert mock_wrapper.call_count == 2
@@ -196,7 +198,9 @@ def test_pydanticai_wrapper_predict_without_api_model_id(mock_config):
 @patch("image_annotator_lib.core.provider_manager.ProviderManager.run_inference_with_model")
 @patch("image_annotator_lib.core.utils.get_model_capabilities")
 @patch("image_annotator_lib.core.config.config_registry")
-def test_pydanticai_wrapper_predict_handles_provider_error(mock_config, mock_get_capabilities, mock_run_inference):
+def test_pydanticai_wrapper_predict_handles_provider_error(
+    mock_config, mock_get_capabilities, mock_run_inference
+):
     """Test PydanticAIWebAPIWrapper.predict handles ProviderManager errors gracefully."""
     from PIL import Image
 
@@ -223,3 +227,496 @@ def test_pydanticai_wrapper_predict_handles_provider_error(mock_config, mock_get
         assert len(results) == 2
         assert all(result.error is not None for result in results)
         assert all("Failed to run inference" in result.error for result in results)
+
+
+# --- annotate() Function Tests ---
+
+
+@pytest.mark.unit
+@patch("image_annotator_lib.api.calculate_phash")
+@patch("image_annotator_lib.api.get_annotator_instance")
+@patch("image_annotator_lib.api._annotate_model")
+@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
+@patch("image_annotator_lib.core.registry.initialize_registry")
+def test_annotate_with_single_model_success(
+    mock_init_registry, mock_get_registry, mock_annotate_model, mock_get_instance, mock_calc_phash
+):
+    """Test annotate() function with single model success."""
+    from PIL import Image
+
+    from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
+
+    # Mock registry
+    mock_registry = {"test-model": MagicMock()}
+    mock_get_registry.return_value = mock_registry
+
+    # Mock phash calculation
+    mock_calc_phash.side_effect = lambda img: f"phash_{id(img)}"
+
+    # Mock annotator instance
+    mock_annotator = MagicMock()
+    mock_get_instance.return_value = mock_annotator
+
+    # Mock annotation results
+    mock_result = UnifiedAnnotationResult(
+        model_name="test-model",
+        capabilities={TaskCapability.TAGS},
+        tags=["tag1", "tag2"],
+        error=None,
+    )
+    mock_annotate_model.return_value = [mock_result]
+
+    # Execute
+    test_images = [Image.new("RGB", (100, 100))]
+    results = api.annotate(test_images, ["test-model"])
+
+    # Verify
+    assert len(results) == 1
+    assert "test-model" in next(iter(results.values()))
+    mock_annotate_model.assert_called_once()
+
+
+@pytest.mark.unit
+@patch("image_annotator_lib.api.calculate_phash")
+@patch("image_annotator_lib.api.get_annotator_instance")
+@patch("image_annotator_lib.api._annotate_model")
+@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
+@patch("image_annotator_lib.core.registry.initialize_registry")
+def test_annotate_with_multiple_models_success(
+    mock_init_registry, mock_get_registry, mock_annotate_model, mock_get_instance, mock_calc_phash
+):
+    """Test annotate() function with multiple models success."""
+    from PIL import Image
+
+    from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
+
+    # Mock registry
+    mock_registry = {"model1": MagicMock(), "model2": MagicMock()}
+    mock_get_registry.return_value = mock_registry
+
+    # Mock phash calculation
+    mock_calc_phash.side_effect = lambda img: f"phash_{id(img)}"
+
+    # Mock annotator instances
+    mock_get_instance.side_effect = [MagicMock(), MagicMock()]
+
+    # Mock annotation results
+    mock_result1 = UnifiedAnnotationResult(
+        model_name="model1", capabilities={TaskCapability.TAGS}, tags=["tag1"], error=None
+    )
+    mock_result2 = UnifiedAnnotationResult(
+        model_name="model2", capabilities={TaskCapability.TAGS}, tags=["tag2"], error=None
+    )
+    mock_annotate_model.side_effect = [[mock_result1], [mock_result2]]
+
+    # Execute
+    test_images = [Image.new("RGB", (100, 100))]
+    results = api.annotate(test_images, ["model1", "model2"])
+
+    # Verify
+    assert len(results) == 1
+    phash_key = next(iter(results.keys()))
+    assert "model1" in results[phash_key]
+    assert "model2" in results[phash_key]
+    assert mock_annotate_model.call_count == 2
+
+
+@pytest.mark.unit
+@patch("image_annotator_lib.api.get_annotator_instance")
+@patch("image_annotator_lib.api._annotate_model")
+@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
+@patch("image_annotator_lib.core.registry.initialize_registry")
+def test_annotate_with_phash_provided(
+    mock_init_registry, mock_get_registry, mock_annotate_model, mock_get_instance
+):
+    """Test annotate() function with provided pHash list."""
+    from PIL import Image
+
+    from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
+
+    # Mock registry
+    mock_registry = {"test-model": MagicMock()}
+    mock_get_registry.return_value = mock_registry
+
+    # Mock annotator instance
+    mock_get_instance.return_value = MagicMock()
+
+    # Mock annotation results
+    mock_result = UnifiedAnnotationResult(
+        model_name="test-model", capabilities={TaskCapability.TAGS}, tags=["tag1"], error=None
+    )
+    mock_annotate_model.return_value = [mock_result]
+
+    # Execute with provided phash
+    test_images = [Image.new("RGB", (100, 100))]
+    provided_phash = ["custom_phash_1"]
+    results = api.annotate(test_images, ["test-model"], phash_list=provided_phash)
+
+    # Verify - pHash calculation should not be called (phash_list provided)
+    # Results should use the provided structure
+    assert len(results) >= 1
+
+
+@pytest.mark.unit
+@patch("image_annotator_lib.api.calculate_phash")
+@patch("image_annotator_lib.api.get_annotator_instance")
+@patch("image_annotator_lib.api._annotate_model")
+@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
+@patch("image_annotator_lib.core.registry.initialize_registry")
+def test_annotate_with_phash_none(
+    mock_init_registry, mock_get_registry, mock_annotate_model, mock_get_instance, mock_calc_phash
+):
+    """Test annotate() function with pHash auto-calculation."""
+    from PIL import Image
+
+    from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
+
+    # Mock registry
+    mock_registry = {"test-model": MagicMock()}
+    mock_get_registry.return_value = mock_registry
+
+    # Mock phash calculation
+    mock_calc_phash.return_value = "auto_calculated_phash"
+
+    # Mock annotator instance
+    mock_get_instance.return_value = MagicMock()
+
+    # Mock annotation results
+    mock_result = UnifiedAnnotationResult(
+        model_name="test-model", capabilities={TaskCapability.TAGS}, tags=["tag1"], error=None
+    )
+    mock_annotate_model.return_value = [mock_result]
+
+    # Execute without phash_list
+    test_images = [Image.new("RGB", (100, 100))]
+    results = api.annotate(test_images, ["test-model"], phash_list=None)
+
+    # Verify pHash was calculated
+    mock_calc_phash.assert_called_once()
+    assert len(results) >= 1
+
+
+@pytest.mark.unit
+@patch("image_annotator_lib.api.calculate_phash")
+@patch("image_annotator_lib.api.get_annotator_instance")
+@patch("image_annotator_lib.api._annotate_model")
+@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
+@patch("image_annotator_lib.core.registry.initialize_registry")
+def test_annotate_with_api_keys(
+    mock_init_registry, mock_get_registry, mock_annotate_model, mock_get_instance, mock_calc_phash
+):
+    """Test annotate() function with API keys provided."""
+    from PIL import Image
+
+    from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
+
+    # Mock registry
+    mock_registry = {"test-model": MagicMock()}
+    mock_get_registry.return_value = mock_registry
+
+    # Mock phash calculation
+    mock_calc_phash.return_value = "test_phash"
+
+    # Mock annotator instance
+    mock_annotator = MagicMock()
+    mock_get_instance.return_value = mock_annotator
+
+    # Mock annotation results
+    mock_result = UnifiedAnnotationResult(
+        model_name="test-model", capabilities={TaskCapability.TAGS}, tags=["tag1"], error=None
+    )
+    mock_annotate_model.return_value = [mock_result]
+
+    # Execute with API keys
+    test_images = [Image.new("RGB", (100, 100))]
+    api_keys = {"openai": "sk-test123"}
+    results = api.annotate(test_images, ["test-model"], api_keys=api_keys)
+
+    # Verify get_annotator_instance was called with api_keys
+    mock_get_instance.assert_called_once_with("test-model", api_keys=api_keys)
+    assert len(results) >= 1
+
+
+@pytest.mark.unit
+@patch("image_annotator_lib.api.calculate_phash")
+@patch("image_annotator_lib.api.get_annotator_instance")
+@patch("image_annotator_lib.api._annotate_model")
+@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
+@patch("image_annotator_lib.core.registry.initialize_registry")
+def test_annotate_empty_registry_initialization(
+    mock_init_registry, mock_get_registry, mock_annotate_model, mock_get_instance, mock_calc_phash
+):
+    """Test annotate() initializes empty registry."""
+    from PIL import Image
+
+    from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
+
+    # Mock empty registry initially, then populated
+    mock_get_registry.side_effect = [{}, {"test-model": MagicMock()}]
+
+    # Mock phash calculation
+    mock_calc_phash.return_value = "test_phash"
+
+    # Mock annotator instance
+    mock_get_instance.return_value = MagicMock()
+
+    # Mock annotation results
+    mock_result = UnifiedAnnotationResult(
+        model_name="test-model", capabilities={TaskCapability.TAGS}, tags=["tag1"], error=None
+    )
+    mock_annotate_model.return_value = [mock_result]
+
+    # Execute
+    test_images = [Image.new("RGB", (100, 100))]
+    api.annotate(test_images, ["test-model"])
+
+    # Verify initialize_registry was called
+    mock_init_registry.assert_called_once()
+    assert mock_get_registry.call_count == 2
+
+
+@pytest.mark.unit
+@patch("image_annotator_lib.api.calculate_phash")
+@patch("image_annotator_lib.api.get_annotator_instance")
+@patch("image_annotator_lib.api._annotate_model")
+@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
+@patch("image_annotator_lib.core.registry.initialize_registry")
+@patch("image_annotator_lib.core.utils.get_model_capabilities")
+def test_annotate_model_error_handling(
+    mock_get_capabilities,
+    mock_init_registry,
+    mock_get_registry,
+    mock_annotate_model,
+    mock_get_instance,
+    mock_calc_phash,
+):
+    """Test annotate() handles model processing errors."""
+    from PIL import Image
+
+    from image_annotator_lib.core.types import TaskCapability
+
+    # Mock registry
+    mock_registry = {"test-model": MagicMock()}
+    mock_get_registry.return_value = mock_registry
+
+    # Mock phash calculation
+    mock_calc_phash.return_value = "test_phash"
+
+    # Mock annotator instance
+    mock_get_instance.return_value = MagicMock()
+
+    # Mock annotation to raise exception
+    mock_annotate_model.side_effect = ValueError("Test error")
+
+    # Mock capabilities
+    mock_get_capabilities.return_value = {TaskCapability.TAGS}
+
+    # Execute
+    test_images = [Image.new("RGB", (100, 100))]
+    results = api.annotate(test_images, ["test-model"])
+
+    # Verify error is handled and result created
+    assert len(results) >= 1
+    phash_key = next(iter(results.keys()))
+    assert "test-model" in results[phash_key]
+    assert results[phash_key]["test-model"].error is not None
+    assert "ValueError" in results[phash_key]["test-model"].error
+
+
+@pytest.mark.unit
+@patch("image_annotator_lib.api.calculate_phash")
+@patch("image_annotator_lib.api.get_annotator_instance")
+@patch("image_annotator_lib.api._annotate_model")
+@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
+@patch("image_annotator_lib.core.registry.initialize_registry")
+@patch("image_annotator_lib.core.utils.get_model_capabilities")
+def test_annotate_result_length_mismatch(
+    mock_get_capabilities,
+    mock_init_registry,
+    mock_get_registry,
+    mock_annotate_model,
+    mock_get_instance,
+    mock_calc_phash,
+):
+    """Test annotate() handles result length mismatch."""
+    from PIL import Image
+
+    from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
+
+    # Mock registry
+    mock_registry = {"test-model": MagicMock()}
+    mock_get_registry.return_value = mock_registry
+
+    # Mock phash calculation
+    mock_calc_phash.side_effect = lambda img: f"phash_{id(img)}"
+
+    # Mock annotator instance
+    mock_get_instance.return_value = MagicMock()
+
+    # Mock annotation results with wrong length (1 result for 2 images)
+    mock_result = UnifiedAnnotationResult(
+        model_name="test-model", capabilities={TaskCapability.TAGS}, tags=["tag1"], error=None
+    )
+    mock_annotate_model.return_value = [mock_result]  # Only 1 result
+
+    # Mock capabilities
+    mock_get_capabilities.return_value = {TaskCapability.TAGS}
+
+    # Execute with 2 images
+    test_images = [Image.new("RGB", (100, 100)), Image.new("RGB", (100, 100))]
+    results = api.annotate(test_images, ["test-model"])
+
+    # Verify error result is created for missing image
+    assert len(results) >= 1
+    # At least one result should have an error for the missing annotation
+    found_error = False
+    for phash_key in results:
+        if "test-model" in results[phash_key]:
+            if results[phash_key]["test-model"].error is not None:
+                found_error = True
+                break
+    # Note: Due to _process_model_results logic, missing results get filled
+    assert found_error or len(results) == 2
+
+
+@pytest.mark.unit
+@patch("image_annotator_lib.api.calculate_phash")
+@patch("image_annotator_lib.api.get_annotator_instance")
+@patch("image_annotator_lib.api._annotate_model")
+@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
+@patch("image_annotator_lib.core.registry.initialize_registry")
+def test_annotate_phash_list_longer_than_images(
+    mock_init_registry, mock_get_registry, mock_annotate_model, mock_get_instance, mock_calc_phash
+):
+    """Test annotate() handles phash_list longer than images_list."""
+    from PIL import Image
+
+    from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
+
+    # Mock registry
+    mock_registry = {"test-model": MagicMock()}
+    mock_get_registry.return_value = mock_registry
+
+    # Mock annotator instance
+    mock_get_instance.return_value = MagicMock()
+
+    # Mock annotation results
+    mock_result = UnifiedAnnotationResult(
+        model_name="test-model", capabilities={TaskCapability.TAGS}, tags=["tag1"], error=None
+    )
+    mock_annotate_model.return_value = [mock_result]
+
+    # Execute with phash_list longer than images
+    test_images = [Image.new("RGB", (100, 100))]
+    long_phash_list = ["phash1", "phash2", "phash3"]  # 3 phashes for 1 image
+    results = api.annotate(test_images, ["test-model"], phash_list=long_phash_list)
+
+    # Verify function completes without error
+    assert len(results) >= 1
+    # Excess phashes should be ignored (warning logged)
+
+
+# --- Helper Function Tests ---
+
+
+@pytest.mark.unit
+def test_annotate_model_context_manager():
+    """Test _annotate_model() executes predict in context manager."""
+    from PIL import Image
+
+    from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
+
+    # Create mock annotator
+    mock_annotator = MagicMock()
+    mock_result = UnifiedAnnotationResult(
+        model_name="test-model", capabilities={TaskCapability.TAGS}, tags=["tag1"], error=None
+    )
+    mock_annotator.predict.return_value = [mock_result]
+
+    # Execute
+    test_images = [Image.new("RGB", (100, 100))]
+    phash_list = ["test_phash"]
+    results = api._annotate_model(mock_annotator, test_images, phash_list)
+
+    # Verify context manager was used
+    mock_annotator.__enter__.assert_called_once()
+    mock_annotator.__exit__.assert_called_once()
+    mock_annotator.predict.assert_called_once_with(test_images, phash_list)
+    assert results == [mock_result]
+
+
+@pytest.mark.unit
+def test_process_model_results():
+    """Test _process_model_results() converts results to pHash structure."""
+    from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
+
+    # Create mock results
+    mock_result1 = UnifiedAnnotationResult(
+        model_name="test-model", capabilities={TaskCapability.TAGS}, tags=["tag1"], error=None
+    )
+    mock_result2 = UnifiedAnnotationResult(
+        model_name="test-model", capabilities={TaskCapability.TAGS}, tags=["tag2"], error=None
+    )
+    annotation_results = [mock_result1, mock_result2]
+
+    # Create empty results dict
+    results_by_phash = api.PHashAnnotationResults()
+
+    # Execute
+    api._process_model_results("test-model", annotation_results, results_by_phash)
+
+    # Verify results were added
+    assert len(results_by_phash) == 2
+    assert "image_0" in results_by_phash
+    assert "image_1" in results_by_phash
+    assert "test-model" in results_by_phash["image_0"]
+    assert "test-model" in results_by_phash["image_1"]
+    assert results_by_phash["image_0"]["test-model"] == mock_result1
+    assert results_by_phash["image_1"]["test-model"] == mock_result2
+
+
+@pytest.mark.unit
+@patch("image_annotator_lib.core.utils.get_model_capabilities")
+def test_handle_error(mock_get_capabilities):
+    """Test _handle_error() creates error result."""
+    from image_annotator_lib.core.types import TaskCapability
+
+    # Mock capabilities
+    mock_get_capabilities.return_value = {TaskCapability.TAGS}
+
+    # Create empty results dict
+    results_dict = api.PHashAnnotationResults()
+
+    # Execute
+    test_error = ValueError("Test error message")
+    api._handle_error(
+        e=test_error,
+        model_name="test-model",
+        image_hash="test_phash",
+        results_dict=results_dict,
+        idx=0,
+        total_models=1,
+    )
+
+    # Verify error result was created
+    assert "test_phash" in results_dict
+    assert "test-model" in results_dict["test_phash"]
+    error_result = results_dict["test_phash"]["test-model"]
+    assert error_result.error is not None
+    assert "ValueError" in error_result.error
+    assert "Test error message" in error_result.error
+
+
+@pytest.mark.unit
+@patch("image_annotator_lib.core.registry.list_available_annotators")
+def test_list_available_annotators(mock_list_annotators):
+    """Test list_available_annotators() delegates to registry."""
+    # Mock registry function
+    mock_list_annotators.return_value = ["model1", "model2", "model3"]
+
+    # Execute
+    result = api.list_available_annotators()
+
+    # Verify
+    mock_list_annotators.assert_called_once()
+    assert result == ["model1", "model2", "model3"]

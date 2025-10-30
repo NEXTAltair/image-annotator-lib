@@ -156,7 +156,7 @@ class ONNXBaseAnnotator(BaseAnnotator):
 
         # 閾値を超えるタグを抽出
         filtered_tags = []
-        for category, tag_dict in category_scores.items():
+        for _category, tag_dict in category_scores.items():
             for tag, confidence in tag_dict.items():
                 if confidence >= threshold:
                     filtered_tags.append((tag, confidence))

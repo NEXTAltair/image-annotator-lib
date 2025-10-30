@@ -266,7 +266,7 @@ class TestPydanticAIFactoryApiKeyManagement:
             ("openrouter", "openrouter:anthropic/claude-3.5-sonnet", "OPENROUTER_API_KEY"),
         ]
 
-        for provider_name, model_id, env_var in test_cases:
+        for provider_name, model_id, _env_var in test_cases:
             with patch("pydantic_ai.models.infer_model") as mock_infer:
                 # Mock the model inference to avoid actual provider instantiation
                 mock_model = MagicMock()
@@ -378,7 +378,6 @@ class TestPydanticAIFactoryApiKeyManagement:
 
                 # Verify the agent was created with proper API key
                 mock_get_agent.assert_called()
-                call_args = mock_get_agent.call_args
                 # API key should be passed (either from config or environment)
 
             except Exception as e:

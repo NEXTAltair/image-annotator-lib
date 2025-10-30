@@ -13,16 +13,23 @@ from ...exceptions.errors import WebApiError
 
 
 class AnthropicApiAnnotator(WebApiBaseAnnotator, PydanticAIAnnotatorMixin):
-    """Anthropic Claude API を使用するアノテーター (Provider-level PydanticAI版)"""
+    """Anthropic Claude API を使用するアノテーター (Provider-level PydanticAI版)
 
-    def __init__(self, model_name: str):
+    Note:
+        Phase 1B: Config Object統合
+        - WebAPIModelConfig経由でAPI関連設定を注入
+        - 後方互換のためconfig=Noneをサポート
+    """
+
+    def __init__(self, model_name: str, config=None):
         """初期化
 
         Args:
             model_name: モデル名 (model_name_short)
+            config: WebAPIModelConfig (Phase 1B DI)。Noneの場合、後方互換フォールバック。
         """
-        WebApiBaseAnnotator.__init__(self, model_name)
-        PydanticAIAnnotatorMixin.__init__(self, model_name)
+        WebApiBaseAnnotator.__init__(self, model_name, config=config)
+        PydanticAIAnnotatorMixin.__init__(self, model_name, config=config)
         # 設定を初期化時に読み込む
         self._load_configuration()
         # テスト環境ではAPIキー検証をスキップ

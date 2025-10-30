@@ -351,7 +351,7 @@ class TestGoogleApiAnnotatorIntegration:
 
             # Verify ProviderManager properly handled the request
             # ProviderManager returns dict[str, AnnotationResult] not dict[str, dict[str, AnnotationResult]]
-            for image_hash, annotation_result in result.items():
+            for _image_hash, annotation_result in result.items():
                 # AnnotationResult is TypedDict, so always use dictionary access
                 assert annotation_result.get("error") is None or annotation_result.get("error") == ""
                 # The mock should return provider_manager_tag from the mock setup

@@ -131,7 +131,7 @@ class TestLocalMLModelsIntegration:
                     from image_annotator_lib.core.types import AnnotationResult
 
                     results = []
-                    for i, (image, phash) in enumerate(zip(images, phash_list, strict=False)):
+                    for _i, (_image, phash) in enumerate(zip(images, phash_list, strict=False)):
                         results.append(
                             AnnotationResult(
                                 phash=phash,
@@ -194,7 +194,7 @@ class TestLocalMLModelsIntegration:
                     from image_annotator_lib.core.types import AnnotationResult
 
                     results = []
-                    for i, (image, phash) in enumerate(zip(images, phash_list, strict=False)):
+                    for _i, (_image, phash) in enumerate(zip(images, phash_list, strict=False)):
                         results.append(
                             AnnotationResult(
                                 phash=phash,
@@ -298,7 +298,7 @@ class TestLocalMLModelsIntegration:
                 assert isinstance(results, dict)
                 assert len(results) == 1
 
-                for image_hash, model_results in results.items():
+                for _image_hash, model_results in results.items():
                     assert test_model in model_results
                     result = model_results[test_model]
                     # Result should have proper structure even if inference fails
@@ -347,7 +347,7 @@ class TestLocalMLModelsIntegration:
                 def mock_predict(images, phash_list):
                     """Mock predict that returns results for actual image hashes"""
                     results = []
-                    for i, (image, phash) in enumerate(zip(images, phash_list, strict=False)):
+                    for _i, (_image, phash) in enumerate(zip(images, phash_list, strict=False)):
                         results.append(
                             AnnotationResult(
                                 phash=phash,
@@ -371,7 +371,7 @@ class TestLocalMLModelsIntegration:
                     assert len(results) > 0
 
                     # Verify structure
-                    for image_hash, model_results in results.items():
+                    for _image_hash, model_results in results.items():
                         assert model_name in model_results
                         result = model_results[model_name]
                         assert result["error"] is None
@@ -402,7 +402,7 @@ class TestLocalMLModelsIntegration:
                     assert isinstance(results, dict)
 
                     # Check that errors are captured properly
-                    for image_hash, model_results in results.items():
+                    for _image_hash, model_results in results.items():
                         if model_name in model_results:
                             result = model_results[model_name]
                             # Error should be captured, not propagated
@@ -430,7 +430,7 @@ class TestLocalMLModelsIntegration:
                 def mock_predict(images, phash_list):
                     """Mock predict that returns results for actual image hashes"""
                     results = []
-                    for i, (image, phash) in enumerate(zip(images, phash_list, strict=False)):
+                    for _i, (_image, phash) in enumerate(zip(images, phash_list, strict=False)):
                         results.append(
                             AnnotationResult(
                                 phash=phash,
@@ -489,7 +489,7 @@ class TestLocalMLModelsIntegration:
                     assert isinstance(img, (Image.Image, np.ndarray)) or hasattr(img, "save")
 
                 results = []
-                for i, (image, phash) in enumerate(zip(images, phash_list, strict=False)):
+                for _i, (_image, phash) in enumerate(zip(images, phash_list, strict=False)):
                     results.append(
                         AnnotationResult(
                             phash=phash,
@@ -540,7 +540,7 @@ class TestLocalMLModelsIntegration:
 
                 def mock_predict(images, phash_list):
                     results = []
-                    for i, (image, phash) in enumerate(zip(images, phash_list, strict=False)):
+                    for _i, (_image, phash) in enumerate(zip(images, phash_list, strict=False)):
                         results.append(
                             AnnotationResult(
                                 phash=phash,

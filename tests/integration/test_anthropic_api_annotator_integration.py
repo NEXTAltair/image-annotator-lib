@@ -382,7 +382,7 @@ class TestAnthropicApiAnnotatorIntegration:
         assert len(result) > 0
 
         # Verify ProviderManager properly handled the request
-        for image_hash, annotation_result in result.items():
+        for _image_hash, annotation_result in result.items():
             # AnnotationResult is a TypedDict, so access like a dictionary
             assert annotation_result.get("error") is None
             assert annotation_result.get("tags") == ["test_model_tag"]

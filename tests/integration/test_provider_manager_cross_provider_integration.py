@@ -106,7 +106,7 @@ class TestProviderManagerCrossProviderIntegration:
                     assert len(result) > 0
 
                     # Verify the result structure (handle both dict and AnnotationResult)
-                    for image_hash, annotation_result in result.items():
+                    for _image_hash, annotation_result in result.items():
                         # AnnotationResult is TypedDict, so always use dictionary access
                         assert annotation_result.get("error") is None
 
@@ -197,8 +197,8 @@ class TestProviderManagerCrossProviderIntegration:
             assert len(provider_calls) == len(same_provider_requests)
 
             # Verify unique model IDs were used
-            unique_model_ids = set(call[1] for call in provider_calls)
-            expected_unique_ids = len(set(req[1] for req in same_provider_requests))
+            unique_model_ids = {call[1] for call in provider_calls}
+            expected_unique_ids = len({req[1] for req in same_provider_requests})
             assert len(unique_model_ids) == expected_unique_ids
 
     @pytest.mark.integration
@@ -316,7 +316,7 @@ class TestProviderManagerCrossProviderIntegration:
                     if should_succeed:
                         assert result is not None
                         # Verify successful result structure
-                        for image_hash, annotation_result in result.items():
+                        for _image_hash, annotation_result in result.items():
                             if isinstance(annotation_result, dict):
                                 assert (
                                     annotation_result.get("error") is None
@@ -327,7 +327,7 @@ class TestProviderManagerCrossProviderIntegration:
                     else:
                         # Failing provider should return error in result, not raise exception
                         if result:
-                            for image_hash, annotation_result in result.items():
+                            for _image_hash, annotation_result in result.items():
                                 if isinstance(annotation_result, dict):
                                     assert annotation_result.get("error") is not None
                                 elif hasattr(annotation_result, "error"):
@@ -367,7 +367,7 @@ class TestProviderManagerCrossProviderIntegration:
                 mock_create_openrouter.assert_called_once()
 
                 # Verify result structure (AnnotationResult is TypedDict)
-                for image_hash, annotation_result in result.items():
+                for _image_hash, annotation_result in result.items():
                     # AnnotationResult is TypedDict, so always use dictionary access
                     assert annotation_result.get("error") is None
 
@@ -480,7 +480,7 @@ class TestProviderManagerCrossProviderIntegration:
 
                     # Should handle configuration errors gracefully
                     if result:
-                        for image_hash, annotation_result in result.items():
+                        for _image_hash, annotation_result in result.items():
                             # AnnotationResult is TypedDict, so check attributes instead of isinstance
                             if hasattr(annotation_result, "error"):
                                 assert annotation_result.error is not None

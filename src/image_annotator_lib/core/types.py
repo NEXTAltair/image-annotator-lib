@@ -100,7 +100,7 @@ class WebApiInput(BaseModel):
 
     @field_validator("image_b64", "image_bytes")
     @staticmethod
-    def at_least_one_image(value, info: ValidationInfo):
+    def at_least_one_image(value: str | bytes | None, info: ValidationInfo) -> str | bytes | None:
         values = info.data
         if value is None and (
             values.get("image_b64") is None
@@ -140,7 +140,7 @@ class WebApiFormattedOutput(TypedDict):
                エラーがない場合はNone。
     """
 
-    annotation: dict | None
+    annotation: dict[str, Any] | None
     error: str | None
 
 
@@ -324,7 +324,7 @@ class UnifiedAnnotationResult(BaseModel):
     # === 厳密なcapabilityバリデーション ===
     @field_validator("tags")
     @classmethod
-    def validate_tags_capability(cls, v, info: ValidationInfo):
+    def validate_tags_capability(cls, v: list[str] | None, info: ValidationInfo) -> list[str] | None:
         if v is not None:
             capabilities = info.data.get("capabilities", set())
             if TaskCapability.TAGS not in capabilities:
@@ -333,7 +333,7 @@ class UnifiedAnnotationResult(BaseModel):
 
     @field_validator("captions")
     @classmethod
-    def validate_captions_capability(cls, v, info: ValidationInfo):
+    def validate_captions_capability(cls, v: list[str] | None, info: ValidationInfo) -> list[str] | None:
         if v is not None:
             capabilities = info.data.get("capabilities", set())
             if TaskCapability.CAPTIONS not in capabilities:
@@ -342,7 +342,9 @@ class UnifiedAnnotationResult(BaseModel):
 
     @field_validator("scores")
     @classmethod
-    def validate_scores_capability(cls, v, info: ValidationInfo):
+    def validate_scores_capability(
+        cls, v: dict[str, float] | None, info: ValidationInfo
+    ) -> dict[str, float] | None:
         if v is not None:
             capabilities = info.data.get("capabilities", set())
             if TaskCapability.SCORES not in capabilities:
@@ -351,7 +353,7 @@ class UnifiedAnnotationResult(BaseModel):
 
     @field_validator("capabilities")
     @classmethod
-    def validate_capabilities_not_empty(cls, v):
+    def validate_capabilities_not_empty(cls, v: set[TaskCapability]) -> set[TaskCapability]:
         if not v:
             raise ValueError("capabilities cannot be empty")
         return v

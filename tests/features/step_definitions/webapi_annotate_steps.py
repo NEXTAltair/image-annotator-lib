@@ -180,7 +180,7 @@ def run_annotation_with_model(model_name, single_image):
     )
 
     if isinstance(result, dict) and result:
-        first_key = list(result.keys())[0]
+        first_key = next(iter(result.keys()))
         first_value = result[first_key]
         logger.info(f"最初のキー '{first_key}' の値の型: {type(first_value)}")
         logger.info(f"最初のキー '{first_key}' の値: {first_value}")
@@ -324,7 +324,7 @@ def authentication_error_returned(annotation_result):
     assert annotation_result is not None
     found_auth_error = False
 
-    for image_hash, model_results_dict in annotation_result.items():
+    for _image_hash, model_results_dict in annotation_result.items():
         for model_name, model_result in model_results_dict.items():
             error_message = model_result.get("error")
             if error_message:
@@ -345,7 +345,7 @@ def authentication_error_returned(annotation_result):
     if not found_auth_error:
         # デバッグ用:実際に返されたエラーメッセージを表示
         all_errors = []
-        for image_hash, model_results_dict in annotation_result.items():
+        for _image_hash, model_results_dict in annotation_result.items():
             for model_name, model_result in model_results_dict.items():
                 error_message = model_result.get("error")
                 if error_message:
@@ -363,8 +363,8 @@ def model_unavailable_error_returned(annotation_result):
     assert annotation_result is not None
     found_model_error = False
 
-    for image_hash, model_results_dict in annotation_result.items():
-        for model_name, model_result in model_results_dict.items():
+    for _image_hash, model_results_dict in annotation_result.items():
+        for _model_name, model_result in model_results_dict.items():
             error_message = model_result.get("error")
             if error_message and (
                 "invalid" in error_message.lower() or "unauthorized" in error_message.lower()
@@ -381,8 +381,8 @@ def timeout_error_returned(annotation_result):
     assert annotation_result is not None
     found_timeout_error = False
 
-    for image_hash, model_results_dict in annotation_result.items():
-        for model_name, model_result in model_results_dict.items():
+    for _image_hash, model_results_dict in annotation_result.items():
+        for _model_name, model_result in model_results_dict.items():
             error_message = model_result.get("error")
             if error_message and ("timeout" in error_message.lower() or "タイムアウト" in error_message):
                 found_timeout_error = True
@@ -395,9 +395,8 @@ def timeout_error_returned(annotation_result):
 def all_models_return_results(annotation_result):
     """全てのモデルから結果が返されることを確認"""
     assert annotation_result is not None
-    expected_models = ["GPT-4o-mini", "Gemini 2.5 Flash Preview", "Claude 3.5 Sonnet (2024-06-20)"]
 
-    for image_hash, model_results_dict in annotation_result.items():
+    for _image_hash, model_results_dict in annotation_result.items():
         # 実際に実行されたモデル名を取得
         executed_models = list(model_results_dict.keys())
         logger.info(f"実行されたモデル: {executed_models}")

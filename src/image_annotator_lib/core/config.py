@@ -305,11 +305,11 @@ def get_config_registry() -> ModelConfigRegistry:
 
 # 後方互換性のための遅延プロパティ
 class _ConfigRegistryProxy:
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(get_config_registry(), name)
 
-    def __setattr__(self, name, value):
-        return setattr(get_config_registry(), name, value)
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(get_config_registry(), name, value)
 
 
 config_registry = _ConfigRegistryProxy()

@@ -77,7 +77,7 @@ def test_simplified_wrapper():
 
     try:
         # Create a simple test image
-        test_image = Image.new("RGB", (100, 100), color="red")
+        Image.new("RGB", (100, 100), color="red")
 
         # Test with API discovery
         from image_annotator_lib.core.simplified_agent_factory import get_agent_factory

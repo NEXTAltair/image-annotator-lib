@@ -148,8 +148,8 @@ class TestErrorHandlingAndFallbackIntegration:
                         success_count = 0
                         error_count = 0
 
-                        for image_hash, model_results in results.items():
-                            for model_name, result in model_results.items():
+                        for _image_hash, model_results in results.items():
+                            for _model_name, result in model_results.items():
                                 # Handle both dict and AnnotationResult access patterns
                                 if isinstance(result, dict):
                                     error_value = result.get("error")
@@ -181,7 +181,7 @@ class TestErrorHandlingAndFallbackIntegration:
             def mock_timeout_inference(model_name, images, api_model_id=None):
                 """Mock provider manager with timeout"""
                 results = {}
-                for i, image in enumerate(images):
+                for i, _image in enumerate(images):
                     phash = f"test_hash_{i}"
                     results[phash] = {
                         model_name: AnnotationResult(
@@ -199,8 +199,8 @@ class TestErrorHandlingAndFallbackIntegration:
 
                 # Should handle timeout gracefully
                 if result:
-                    for image_hash, model_results in result.items():
-                        for model_name, annotation_result in model_results.items():
+                    for _image_hash, model_results in result.items():
+                        for _model_name, annotation_result in model_results.items():
                             # Handle both dict, object, and string access patterns
                             if isinstance(annotation_result, str):
                                 error_msg = annotation_result
@@ -230,7 +230,7 @@ class TestErrorHandlingAndFallbackIntegration:
             call_count += 1
 
             results = {}
-            for i, image in enumerate(images):
+            for i, _image in enumerate(images):
                 phash = f"test_hash_{i}"
 
                 if call_count <= 2:
@@ -266,8 +266,8 @@ class TestErrorHandlingAndFallbackIntegration:
                     if i < 2:
                         # First 2 should fail with rate limit
                         if result:
-                            for image_hash, model_results in result.items():
-                                for model_name, annotation_result in model_results.items():
+                            for _image_hash, model_results in result.items():
+                                for _model_name, annotation_result in model_results.items():
                                     # Handle both dict, object, and string access patterns
                                     if isinstance(annotation_result, str):
                                         error_msg = annotation_result
@@ -283,8 +283,8 @@ class TestErrorHandlingAndFallbackIntegration:
                     else:
                         # Third should succeed
                         if result:
-                            for image_hash, model_results in result.items():
-                                for model_name, annotation_result in model_results.items():
+                            for _image_hash, model_results in result.items():
+                                for _model_name, annotation_result in model_results.items():
                                     # Handle both dict, object, and string access patterns
                                     if isinstance(annotation_result, str):
                                         error_msg = annotation_result
@@ -316,7 +316,7 @@ class TestErrorHandlingAndFallbackIntegration:
         def mock_malformed_inference(model_name, images, api_model_id=None):
             """Mock provider manager with malformed response"""
             results = {}
-            for i, image in enumerate(images):
+            for i, _image in enumerate(images):
                 phash = f"test_hash_{i}"
                 results[phash] = {
                     model_name: AnnotationResult(
@@ -328,7 +328,7 @@ class TestErrorHandlingAndFallbackIntegration:
         with patch(
             "image_annotator_lib.core.provider_manager.ProviderManager.run_inference_with_model"
         ) as mock_provider_run:
-            for i, malformed_response in enumerate(malformed_responses):
+            for i, _malformed_response in enumerate(malformed_responses):
                 mock_provider_run.side_effect = mock_malformed_inference
 
                 try:
@@ -338,8 +338,8 @@ class TestErrorHandlingAndFallbackIntegration:
 
                     # Should handle malformed responses gracefully
                     if result:
-                        for image_hash, model_results in result.items():
-                            for model_name, annotation_result in model_results.items():
+                        for _image_hash, model_results in result.items():
+                            for _model_name, annotation_result in model_results.items():
                                 # Handle both dict and AnnotationResult access patterns
                                 if isinstance(annotation_result, dict):
                                     error_msg = annotation_result.get("error", "")
@@ -401,8 +401,8 @@ class TestErrorHandlingAndFallbackIntegration:
                     if attempt < 2:
                         # First 2 attempts should fail with memory error
                         if results:
-                            for image_hash, model_results in results.items():
-                                for model_name, result in model_results.items():
+                            for _image_hash, model_results in results.items():
+                                for _model_name, result in model_results.items():
                                     # Handle both dict and AnnotationResult access patterns
                                     if isinstance(result, dict):
                                         error_value = result.get("error")
@@ -425,8 +425,8 @@ class TestErrorHandlingAndFallbackIntegration:
                     else:
                         # Third attempt should succeed
                         if results:
-                            for image_hash, model_results in results.items():
-                                for model_name, result in model_results.items():
+                            for _image_hash, model_results in results.items():
+                                for _model_name, result in model_results.items():
                                     # Handle both dict and AnnotationResult access patterns
                                     if isinstance(result, dict):
                                         error_value = result.get("error")
@@ -457,14 +457,14 @@ class TestErrorHandlingAndFallbackIntegration:
                 b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01",  # Corrupted PNG header
             ]
 
-            for i, invalid_image in enumerate(invalid_images):
+            for _i, invalid_image in enumerate(invalid_images):
                 try:
                     results = annotate([invalid_image], ["working_openai_model"])
 
                     # Should handle invalid images gracefully
                     if results:
-                        for image_hash, model_results in results.items():
-                            for model_name, result in model_results.items():
+                        for _image_hash, model_results in results.items():
+                            for _model_name, result in model_results.items():
                                 # Should have error for invalid image
                                 assert result["error"] is not None
                                 error_msg = result["error"].lower()
@@ -488,7 +488,7 @@ class TestErrorHandlingAndFallbackIntegration:
 
             # Should handle missing configuration gracefully
             if results:
-                for image_hash, model_results in results.items():
+                for _image_hash, model_results in results.items():
                     if "nonexistent_model" in model_results:
                         result = model_results["nonexistent_model"]
                         assert result.error is not None
@@ -506,7 +506,7 @@ class TestErrorHandlingAndFallbackIntegration:
             results = annotate(lightweight_test_images[:1], ["invalid_model"])
 
             if results:
-                for image_hash, model_results in results.items():
+                for _image_hash, model_results in results.items():
                     if "invalid_model" in model_results:
                         result = model_results["invalid_model"]
                         assert result.error is not None
@@ -601,7 +601,7 @@ class TestErrorHandlingAndFallbackIntegration:
         def mock_error_inference(model_name, images, api_model_id=None, error_message="Generic error"):
             """Mock provider manager with specific error message"""
             results = {}
-            for i, image in enumerate(images):
+            for i, _image in enumerate(images):
                 phash = f"test_hash_{i}"
                 results[phash] = {
                     model_name: AnnotationResult(tags=[], formatted_output={}, error=error_message)
@@ -625,8 +625,8 @@ class TestErrorHandlingAndFallbackIntegration:
                     )
 
                     if result:
-                        for image_hash, model_results in result.items():
-                            for model_name, annotation_result in model_results.items():
+                        for _image_hash, model_results in result.items():
+                            for _model_name, annotation_result in model_results.items():
                                 # Handle both dict and AnnotationResult access patterns
                                 if isinstance(annotation_result, dict):
                                     error_msg = annotation_result.get("error")
@@ -713,7 +713,7 @@ class TestErrorHandlingAndFallbackIntegration:
                 # Run multiple stress test iterations
                 stress_results = []
 
-                for iteration in range(6):  # Multiple iterations to hit different error patterns
+                for _iteration in range(6):  # Multiple iterations to hit different error patterns
                     try:
                         results = annotate(
                             lightweight_test_images[:1], ["working_openai_model", "working_local_model"]

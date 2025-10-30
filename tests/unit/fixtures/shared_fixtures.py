@@ -13,7 +13,7 @@ from PIL import Image
 def test_images():
     """テスト用画像リスト"""
     images = []
-    for i in range(3):
+    for _i in range(3):
         img = MagicMock(spec=Image.Image)
         img.size = (224, 224)
         img.mode = "RGB"

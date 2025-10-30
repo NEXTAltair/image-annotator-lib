@@ -59,7 +59,7 @@ class TestMemoryManagementSimple:
         """Test cache clearing functionality."""
 
         # Verify initial state
-        initial_size = len(PydanticAIProviderFactory._providers)
+        len(PydanticAIProviderFactory._providers)
 
         # Add a provider to cache
         PydanticAIProviderFactory.get_provider("openai", api_key="test_key")
@@ -92,7 +92,7 @@ class TestMemoryManagementSimple:
 
         # Record initial memory state
         gc.collect()
-        initial_objects = len(gc.get_objects())
+        len(gc.get_objects())
 
         # Clear all caches
         AdvancedAgentFactory.clear_cache()
