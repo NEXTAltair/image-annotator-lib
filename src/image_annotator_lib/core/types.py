@@ -2,14 +2,19 @@
 型定義モジュール - pydantic、pydantic_ai、および基底クラス用の型定義
 """
 
-from pathlib import Path
-from typing import Any, Literal, Protocol, TypedDict, Union
+from __future__ import annotations
 
-import onnxruntime as ort
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, Union
+
 from pydantic import BaseModel, Field, SecretStr, ValidationInfo, field_validator
-from transformers.models.auto.processing_auto import AutoProcessor
-from transformers.models.clip import CLIPModel, CLIPProcessor
-from transformers.pipelines.base import Pipeline as TransformersPipelineObject
+
+# Lazy imports for heavy ML libraries (imported only during type checking)
+if TYPE_CHECKING:
+    import onnxruntime as ort
+    from transformers.models.auto.processing_auto import AutoProcessor
+    from transformers.models.clip import CLIPModel, CLIPProcessor
+    from transformers.pipelines.base import Pipeline as TransformersPipelineObject
 
 # --- 基底クラス用の型定義 (base.py から移動) ---
 
