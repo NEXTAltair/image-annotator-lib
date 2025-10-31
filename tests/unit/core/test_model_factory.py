@@ -721,6 +721,7 @@ def test_update_model_state_released():
 @pytest.mark.fast
 def test_move_components_to_device_torch_module():
     """Test moving PyTorch module to device."""
+
     # Create a mock component class that will pass isinstance check
     class MockTorchModule:
         def __init__(self):

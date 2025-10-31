@@ -49,7 +49,7 @@ def test_get_current_cache_usage_multiple_models():
     ModelLoad._MEMORY_USAGE.clear()
     ModelLoad._MEMORY_USAGE["model1"] = 1024.0  # 1GB in MB
     ModelLoad._MEMORY_USAGE["model2"] = 2048.0  # 2GB in MB
-    ModelLoad._MEMORY_USAGE["model3"] = 512.0   # 0.5GB in MB
+    ModelLoad._MEMORY_USAGE["model3"] = 512.0  # 0.5GB in MB
 
     usage = ModelLoad._get_current_cache_usage()
 

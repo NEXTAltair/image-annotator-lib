@@ -37,7 +37,11 @@ class TestAnthropicApiAnnotatorIntegration:
             "model_name_on_provider": "claude-3-5-sonnet-20241022",
             "api_model_id": "claude-3-5-sonnet-20241022",  # Kept in config_registry, filtered in WebAPIModelConfig
             "api_key": "test-anthropic-api-key",  # Kept in config_registry, filtered in WebAPIModelConfig
-            "capabilities": ["tags", "captions", "scores"],  # Kept in config_registry, filtered in WebAPIModelConfig
+            "capabilities": [
+                "tags",
+                "captions",
+                "scores",
+            ],  # Kept in config_registry, filtered in WebAPIModelConfig
             "timeout": 30,
             "retry_count": 3,
             "min_request_interval": 1.0,
@@ -94,7 +98,9 @@ class TestAnthropicApiAnnotatorIntegration:
             mock_run_inference.return_value = mock_annotation
 
             with anthropic_annotator as annotator:
-                results = annotator.run_with_model(lightweight_test_images[:2], "anthropic:claude-3-5-sonnet")
+                results = annotator.run_with_model(
+                    lightweight_test_images[:2], "anthropic:claude-3-5-sonnet"
+                )
 
         # Verify results structure - should now only be UnifiedAnnotationResult format
         assert len(results) == 2
@@ -149,7 +155,9 @@ class TestAnthropicApiAnnotatorIntegration:
 
             with anthropic_annotator as annotator:
                 # Should return error in result instead of raising exception
-                results = annotator.run_with_model(lightweight_test_images[:1], "anthropic:claude-3-5-sonnet")
+                results = annotator.run_with_model(
+                    lightweight_test_images[:1], "anthropic:claude-3-5-sonnet"
+                )
 
             assert len(results) == 1
             assert results[0].error is not None
@@ -167,7 +175,9 @@ class TestAnthropicApiAnnotatorIntegration:
 
             with anthropic_annotator as annotator:
                 # Should return error in result instead of raising exception
-                results = annotator.run_with_model(lightweight_test_images[:1], "anthropic:claude-3-5-sonnet")
+                results = annotator.run_with_model(
+                    lightweight_test_images[:1], "anthropic:claude-3-5-sonnet"
+                )
 
             assert len(results) == 1
             assert results[0].error is not None
@@ -187,7 +197,9 @@ class TestAnthropicApiAnnotatorIntegration:
 
             with anthropic_annotator as annotator:
                 # Should return error in result instead of raising exception
-                results = annotator.run_with_model(lightweight_test_images[:1], "anthropic:claude-invalid-model")
+                results = annotator.run_with_model(
+                    lightweight_test_images[:1], "anthropic:claude-invalid-model"
+                )
 
             assert len(results) == 1
             assert results[0].error is not None
@@ -205,7 +217,9 @@ class TestAnthropicApiAnnotatorIntegration:
 
             with anthropic_annotator as annotator:
                 # Should return error in result instead of raising exception
-                results = annotator.run_with_model(lightweight_test_images[:1], "anthropic:claude-3-5-sonnet")
+                results = annotator.run_with_model(
+                    lightweight_test_images[:1], "anthropic:claude-3-5-sonnet"
+                )
 
             assert len(results) == 1
             assert results[0].error is not None
@@ -223,7 +237,9 @@ class TestAnthropicApiAnnotatorIntegration:
 
             with anthropic_annotator as annotator:
                 # Should return error in result instead of raising exception
-                results = annotator.run_with_model(lightweight_test_images[:1], "anthropic:claude-3-5-sonnet")
+                results = annotator.run_with_model(
+                    lightweight_test_images[:1], "anthropic:claude-3-5-sonnet"
+                )
 
             assert len(results) == 1
             assert results[0].error is not None
@@ -231,10 +247,13 @@ class TestAnthropicApiAnnotatorIntegration:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    @pytest.mark.skip(reason="TODO: Fix mock setup - currently makes real API calls when ALLOW_MODEL_REQUESTS=True")
+    @pytest.mark.skip(
+        reason="TODO: Fix mock setup - currently makes real API calls when ALLOW_MODEL_REQUESTS=True"
+    )
     def test_anthropic_generic_error_handling(self, anthropic_annotator, lightweight_test_images):
         """Test handling of generic Anthropic API errors."""
         from pydantic_ai import models
+
         # Temporarily enable ALLOW_MODEL_REQUESTS so mock can work
         original_value = models.ALLOW_MODEL_REQUESTS
         models.ALLOW_MODEL_REQUESTS = True
@@ -250,7 +269,9 @@ class TestAnthropicApiAnnotatorIntegration:
                 anthropic_annotator._setup_agent()
 
                 # Should handle generic errors gracefully
-                results = anthropic_annotator.run_with_model(lightweight_test_images[:1], "anthropic:claude-3-5-sonnet")
+                results = anthropic_annotator.run_with_model(
+                    lightweight_test_images[:1], "anthropic:claude-3-5-sonnet"
+                )
         finally:
             models.ALLOW_MODEL_REQUESTS = original_value
 
@@ -281,7 +302,9 @@ class TestAnthropicApiAnnotatorIntegration:
             anthropic_annotator._setup_agent()
 
             # Test with PIL Images
-            results = anthropic_annotator.run_with_model(lightweight_test_images[:1], "anthropic:claude-3-5-sonnet")
+            results = anthropic_annotator.run_with_model(
+                lightweight_test_images[:1], "anthropic:claude-3-5-sonnet"
+            )
             assert len(results) == 1
             assert results[0].error is None
 
@@ -315,10 +338,13 @@ class TestAnthropicApiAnnotatorIntegration:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    @pytest.mark.skip(reason="TODO: Fix mock setup - currently makes real API calls when ALLOW_MODEL_REQUESTS=True")
+    @pytest.mark.skip(
+        reason="TODO: Fix mock setup - currently makes real API calls when ALLOW_MODEL_REQUESTS=True"
+    )
     def test_batch_processing_resilience(self, anthropic_annotator, lightweight_test_images):
         """Test batch processing with individual failures."""
         from pydantic_ai import models
+
         # Temporarily enable ALLOW_MODEL_REQUESTS so mock can work
         original_value = models.ALLOW_MODEL_REQUESTS
         models.ALLOW_MODEL_REQUESTS = True
@@ -389,7 +415,9 @@ class TestAnthropicApiAnnotatorIntegration:
         ) as mock_get_provider:
             # Test through Provider Manager
             result = ProviderManager.run_inference_with_model(
-                "anthropic_test_model", lightweight_test_images[:1], api_model_id="anthropic:claude-3-5-sonnet"
+                "anthropic_test_model",
+                lightweight_test_images[:1],
+                api_model_id="anthropic:claude-3-5-sonnet",
             )
 
             # Verify that get_provider_instance was called
@@ -424,7 +452,9 @@ class TestAnthropicApiAnnotatorIntegration:
                 anthropic_annotator._setup_agent()
 
                 # Test multiple images (should trigger rate limiting)
-                results = anthropic_annotator.run_with_model(lightweight_test_images, "anthropic:claude-3-5-sonnet")
+                results = anthropic_annotator.run_with_model(
+                    lightweight_test_images, "anthropic:claude-3-5-sonnet"
+                )
 
                 # Verify rate limiting was called for each image
                 assert mock_rate_limit.call_count == len(lightweight_test_images)
@@ -460,7 +490,6 @@ class TestAnthropicApiAnnotatorIntegration:
     @pytest.mark.fast_integration
     def test_configuration_validation(self, managed_config_registry):
         """Test configuration validation for Anthropic annotator."""
-        from unittest.mock import patch
         from image_annotator_lib.exceptions.errors import ConfigurationError
 
         # Test missing model_name_on_provider (should raise ConfigurationError)
@@ -496,7 +525,11 @@ class TestAnthropicApiAnnotatorIntegration:
 
             with anthropic_annotator as annotator:
                 # Test with different Claude models
-                claude_models = ["anthropic:claude-3-5-sonnet", "anthropic:claude-3-haiku", "anthropic:claude-3-opus"]
+                claude_models = [
+                    "anthropic:claude-3-5-sonnet",
+                    "anthropic:claude-3-haiku",
+                    "anthropic:claude-3-opus",
+                ]
 
                 for model_id in claude_models:
                     results = annotator.run_with_model(lightweight_test_images[:1], model_id)
@@ -509,10 +542,13 @@ class TestAnthropicApiAnnotatorIntegration:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    @pytest.mark.skip(reason="TODO: Fix mock setup - currently makes real API calls when ALLOW_MODEL_REQUESTS=True")
+    @pytest.mark.skip(
+        reason="TODO: Fix mock setup - currently makes real API calls when ALLOW_MODEL_REQUESTS=True"
+    )
     def test_sequential_claude_requests(self, anthropic_annotator, lightweight_test_images):
         """Test handling of sequential requests to Claude (per specification)."""
         from pydantic_ai import models
+
         # Temporarily enable ALLOW_MODEL_REQUESTS so mock can work
         original_value = models.ALLOW_MODEL_REQUESTS
         models.ALLOW_MODEL_REQUESTS = True
@@ -539,7 +575,9 @@ class TestAnthropicApiAnnotatorIntegration:
                 anthropic_annotator._setup_agent()
 
                 # Test sequential processing (per specification)
-                results = anthropic_annotator.run_with_model(lightweight_test_images, "anthropic:claude-3-5-sonnet")
+                results = anthropic_annotator.run_with_model(
+                    lightweight_test_images, "anthropic:claude-3-5-sonnet"
+                )
         finally:
             models.ALLOW_MODEL_REQUESTS = original_value
 

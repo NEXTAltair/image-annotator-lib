@@ -450,8 +450,10 @@ class ModelLoad:
                 elif hasattr(component, "to") and callable(component.to) and hasattr(component, "device"):
                     current_device_str = str(getattr(component, "device", "unknown"))
                     # Only check isinstance if torch is available
-                    if torch is not None and current_device_str != target_device and isinstance(
-                        component, torch.Tensor | torch.nn.Module
+                    if (
+                        torch is not None
+                        and current_device_str != target_device
+                        and isinstance(component, torch.Tensor | torch.nn.Module)
                     ):
                         component.to(target_device)
                         moved = True
@@ -590,9 +592,7 @@ class ModelLoad:
                 try:
                     device_name = str(error.device) if hasattr(error, "device") else "cuda"
                     logger.error(f"CUDA メモリサマリー ({device_name}):")
-                    logger.error(
-                        torch_module.cuda.memory_summary(device=device_name, abbreviated=True)
-                    )
+                    logger.error(torch_module.cuda.memory_summary(device=device_name, abbreviated=True))
                 except Exception as mem_e:
                     logger.error(f"CUDAメモリ情報取得失敗: {mem_e}")
         elif isinstance(error, FileNotFoundError):
