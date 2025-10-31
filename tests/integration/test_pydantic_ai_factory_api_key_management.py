@@ -105,21 +105,25 @@ class TestPydanticAIFactoryApiKeyManagement:
             "openai_test_model": {
                 "class": "OpenAIApiChatAnnotator",
                 "api_model_id": "gpt-4o-mini",
+                "model_name_on_provider": "gpt-4o-mini",
                 "api_key": "test-openai-key-from-config",
             },
             "anthropic_test_model": {
                 "class": "AnthropicApiAnnotator",
                 "api_model_id": "claude-3-5-sonnet",
+                "model_name_on_provider": "claude-3-5-sonnet",
                 "api_key": "test-anthropic-key-from-config",
             },
             "google_test_model": {
                 "class": "GoogleApiAnnotator",
                 "api_model_id": "gemini-1.5-pro",
+                "model_name_on_provider": "gemini-1.5-pro",
                 "api_key": "test-google-key-from-config",
             },
             "openrouter_test_model": {
                 "class": "OpenAIApiChatAnnotator",
                 "api_model_id": "openrouter:anthropic/claude-3.5-sonnet",
+                "model_name_on_provider": "openrouter:anthropic/claude-3.5-sonnet",
                 "api_key": "test-openrouter-key-from-config",
             },
         }
@@ -229,23 +233,32 @@ class TestPydanticAIFactoryApiKeyManagement:
             with patch(
                 "image_annotator_lib.core.pydantic_ai_factory._is_test_environment", return_value=False
             ):
-                # This should raise an appropriate error about missing API key
-                with pytest.raises(Exception) as exc_info:
-                    PydanticAIProviderFactory.get_cached_agent(
-                        "test_model",
-                        "gpt-4o-mini",
-                        None,  # No API key provided
-                    )
+                # Also need to enable ALLOW_MODEL_REQUESTS to test real provider creation
+                from pydantic_ai import models
 
-                # Should get a clear error message about missing API key
-                error_msg = str(exc_info.value)
-                assert (
-                    "api_key" in error_msg.lower()
-                    or "key" in error_msg.lower()
-                    or "authentication" in error_msg.lower()
-                    or "credential" in error_msg.lower()
-                    or "none" in error_msg.lower()
-                ), f"Unexpected error message: {error_msg}"
+                original_allow = models.ALLOW_MODEL_REQUESTS
+                models.ALLOW_MODEL_REQUESTS = True
+
+                try:
+                    # This should raise an appropriate error about missing API key
+                    with pytest.raises(Exception) as exc_info:
+                        PydanticAIProviderFactory.get_cached_agent(
+                            "test_model",
+                            "gpt-4o-mini",
+                            None,  # No API key provided
+                        )
+
+                    # Should get a clear error message about missing API key
+                    error_msg = str(exc_info.value)
+                    assert (
+                        "api_key" in error_msg.lower()
+                        or "key" in error_msg.lower()
+                        or "authentication" in error_msg.lower()
+                        or "credential" in error_msg.lower()
+                        or "none" in error_msg.lower()
+                    ), f"Unexpected error message: {error_msg}"
+                finally:
+                    models.ALLOW_MODEL_REQUESTS = original_allow
 
         finally:
             # Restore original environment variables

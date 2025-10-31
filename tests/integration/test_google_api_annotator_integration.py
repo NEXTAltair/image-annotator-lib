@@ -276,15 +276,20 @@ class TestGoogleApiAnnotatorIntegration:
             # Track what gets passed to the agent
             captured_inputs = []
 
-            def mock_run(user_prompt=None, message_history=None, model_settings=None, **kwargs):
-                if message_history:
-                    captured_inputs.append(message_history[0])  # binary_content is in message_history[0]
+            async def mock_run(user_prompt_parts, model_settings=None, **kwargs):
+                # user_prompt_parts is a list containing [str, BinaryContent]
+                if isinstance(user_prompt_parts, list) and len(user_prompt_parts) > 1:
+                    captured_inputs.append(user_prompt_parts[1])  # BinaryContent is at index 1
                 mock_response = MagicMock()
                 mock_response.tags = ["preprocessing_test"]
-                return MagicMock(data=mock_response)
+                mock_response.captions = ["Test caption"]
+                mock_response.score = 0.9
+                mock_result = MagicMock()
+                mock_result.output = mock_response
+                return mock_result
 
             mock_agent = MagicMock()
-            mock_agent.run = AsyncMock(side_effect=mock_run)
+            mock_agent.run = mock_run
             mock_get_agent.return_value = mock_agent
 
             google_annotator._setup_agent()

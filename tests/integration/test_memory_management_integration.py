@@ -197,6 +197,7 @@ class TestMemoryManagementIntegration:
         # Setup test model configuration before creating annotator
         config_registry.add_default_setting("test_model", "class", "PydanticAIWebAPIAnnotator")
         config_registry.add_default_setting("test_model", "api_model_id", "gpt-4o-mini")
+        config_registry.add_default_setting("test_model", "model_name_on_provider", "gpt-4o-mini")
 
         try:
             with patch("image_annotator_lib.core.base.pydantic_ai_annotator.Agent") as MockAgent:

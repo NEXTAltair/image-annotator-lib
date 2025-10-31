@@ -188,10 +188,21 @@ class TestAPIWrapperBackwardCompatibility:
                 f"{provider_name}: PydanticAI WebAPI annotator detection failed"
             )
 
-    def test_wrapper_methods(self):
+    def test_wrapper_methods(self, managed_config_registry):
         """ラッパー必要メソッドテスト"""
         from image_annotator_lib.api import PydanticAIWebAPIWrapper
         from image_annotator_lib.model_class.annotator_webapi.anthropic_api import AnthropicApiAnnotator
+
+        # テスト用設定をセットアップ
+        managed_config_registry.set(
+            "test-model",
+            {
+                "class": "AnthropicApiAnnotator",
+                "api_model_id": "claude-3-5-sonnet",
+                "model_name_on_provider": "claude-3-5-sonnet",
+                "api_key": "test-api-key",
+            },
+        )
 
         # ラッパーインスタンス作成テスト
         wrapper = PydanticAIWebAPIWrapper("test-model", AnthropicApiAnnotator)
@@ -253,6 +264,7 @@ class TestUnifiedErrorHandling:
                 {
                     "api_key": api_key_manager.get_key(provider_name.lower()),
                     "api_model_id": api_model_id,
+                    "model_name_on_provider": api_model_id,
                     "class": class_name,
                     "capabilities": ["tags", "captions", "scores"],
                 },
