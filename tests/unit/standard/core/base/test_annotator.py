@@ -10,6 +10,36 @@ from image_annotator_lib.core.base.annotator import BaseAnnotator
 from image_annotator_lib.exceptions.errors import OutOfMemoryError
 
 
+@pytest.fixture(autouse=True)
+def setup_test_model_config():
+    """Setup test model configuration for all tests."""
+    from image_annotator_lib.core.config import config_registry
+
+    config = {
+        "model_path": "/path/to/model",
+        "device": "cpu",
+        "class": "MockAnnotator",
+    }
+    for key, value in config.items():
+        config_registry.add_default_setting("test_model", key, value)
+
+    # Store original get_all_config for potential restoration
+    original_get_all_config = config_registry.get_all_config
+
+    yield
+
+    # Cleanup
+    try:
+        config_registry._config.pop("test_model", None)
+    except (AttributeError, KeyError):
+        pass
+
+
+def setup_mock_config_registry(mock_config, model_config: dict[str, Any]):
+    """Helper to setup mock config_registry with get_all_config."""
+    mock_config.get_all_config.return_value = {"test_model": model_config}
+
+
 class MockAnnotator(BaseAnnotator):
     """テスト用の BaseAnnotator 実装"""
 
@@ -45,15 +75,14 @@ class TestBaseAnnotator:
     @patch("image_annotator_lib.core.base.annotator.config_registry")
     def test_init_with_default_device(self, mock_config):
         """初期化テスト - デフォルトデバイス"""
-
-        def mock_get(model: str, key: str, default: str = "cpu") -> str:
-            if model == "test_model" and key == "model_path":
-                return "/path/to/model"
-            elif model == "test_model" and key == "device":
-                return default
-            return default
-
-        mock_config.get.side_effect = mock_get
+        # Mock get_all_config to return full model config dict
+        mock_config.get_all_config.return_value = {
+            "test_model": {
+                "model_path": "/path/to/model",
+                "device": "cpu",
+                "class": "MockAnnotator",
+            }
+        }
 
         annotator = MockAnnotator("test_model")
 
@@ -62,22 +91,18 @@ class TestBaseAnnotator:
         assert annotator.device == "cpu"
         assert annotator.components is None
 
-        mock_config.get.assert_any_call("test_model", "model_path")
-        mock_config.get.assert_any_call("test_model", "device", "cpu")
-
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.config_registry")
     def test_init_with_custom_device(self, mock_config):
         """初期化テスト - カスタムデバイス"""
-
-        def mock_get(model: str, key: str, default: str = "cpu") -> str:
-            if model == "test_model" and key == "model_path":
-                return "/path/to/model"
-            elif model == "test_model" and key == "device":
-                return "cuda"
-            return default
-
-        mock_config.get.side_effect = mock_get
+        # Mock get_all_config to return full model config dict with custom device
+        mock_config.get_all_config.return_value = {
+            "test_model": {
+                "model_path": "/path/to/model",
+                "device": "cuda",
+                "class": "MockAnnotator",
+            }
+        }
 
         annotator = MockAnnotator("test_model")
 
@@ -86,7 +111,10 @@ class TestBaseAnnotator:
     @pytest.mark.standard
     def test_context_manager(self):
         """コンテキストマネージャーのテスト"""
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
+            )
             annotator = MockAnnotator("test_model")
 
             assert not annotator.entered
@@ -107,7 +135,10 @@ class TestBaseAnnotator:
         mock_hash.__str__ = Mock(return_value="abc123")
         mock_imagehash.phash.return_value = mock_hash
 
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
+            )
             annotator = MockAnnotator("test_model")
             image = Mock(spec=Image.Image)
 
@@ -123,7 +154,10 @@ class TestBaseAnnotator:
         """知覚ハッシュ計算失敗テスト"""
         mock_imagehash.phash.side_effect = Exception("Hash calculation failed")
 
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
+            )
             annotator = MockAnnotator("test_model")
             image = Mock(spec=Image.Image)
 
@@ -136,7 +170,10 @@ class TestBaseAnnotator:
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_empty_images(self, mock_logger):
         """空の画像リストでの予測テスト"""
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
+            )
             annotator = MockAnnotator("test_model")
 
             result = annotator.predict([])
@@ -150,7 +187,10 @@ class TestBaseAnnotator:
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_success_single_image(self, mock_logger):
         """単一画像での予測成功テスト"""
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
+            )
             annotator = MockAnnotator("test_model")
             image = cast(Image.Image, Mock(spec=Image.Image))
 
@@ -170,7 +210,10 @@ class TestBaseAnnotator:
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_success_multiple_images(self, mock_logger):
         """複数画像での予測成功テスト"""
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
+            )
             annotator = MockAnnotator("test_model")
             images = [cast(Image.Image, Mock(spec=Image.Image)) for _ in range(3)]
 
@@ -190,7 +233,10 @@ class TestBaseAnnotator:
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_with_provided_phash(self, mock_logger):
         """事前計算されたハッシュでの予測テスト"""
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
+            )
             annotator = MockAnnotator("test_model")
             images = [cast(Image.Image, Mock(spec=Image.Image)) for _ in range(2)]
             phash_list = ["provided_hash1", "provided_hash2"]
@@ -205,7 +251,10 @@ class TestBaseAnnotator:
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_tag_generation_error(self, mock_logger):
         """タグ生成エラーのテスト"""
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
+            )
             annotator = MockAnnotator("test_model")
             annotator._generate_tags = Mock(side_effect=Exception("Tag generation failed"))
 
@@ -226,7 +275,10 @@ class TestBaseAnnotator:
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_out_of_memory_error(self, mock_logger):
         """メモリ不足エラーのテスト"""
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
+            )
             annotator = MockAnnotator("test_model")
             annotator._preprocess_images = Mock(side_effect=OutOfMemoryError("Out of memory"))
 
@@ -248,7 +300,10 @@ class TestBaseAnnotator:
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_unexpected_error(self, mock_logger):
         """予期せぬエラーのテスト"""
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
+            )
             annotator = MockAnnotator("test_model")
             annotator._preprocess_images = Mock(side_effect=RuntimeError("Unexpected error"))
 
@@ -270,7 +325,10 @@ class TestBaseAnnotator:
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_single_formatted_output(self, mock_logger):
         """単一の整形出力での予測テスト"""
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
+            )
             annotator = MockAnnotator("test_model")
             # _format_predictions が単一の値を返すようにモック
             annotator._format_predictions = Mock(return_value="single_formatted_output")
@@ -289,7 +347,10 @@ class TestBaseAnnotator:
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_timing_logs(self, mock_logger):
         """処理時間ログのテスト"""
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
+            )
             annotator = MockAnnotator("test_model")
             image = cast(Image.Image, Mock(spec=Image.Image))
 
@@ -303,7 +364,7 @@ class TestBaseAnnotator:
     @pytest.mark.standard
     def test_abstract_methods_not_implemented(self):
         """抽象メソッドが実装されていない場合のテスト"""
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
             # BaseAnnotator を直接インスタンス化しようとするとエラーになることを確認
             with pytest.raises(TypeError):
                 BaseAnnotator("test_model")  # type: ignore
@@ -332,7 +393,10 @@ class TestBaseAnnotator:
             def _generate_tags(self, formatted_output: Any) -> list[str]:
                 raise NotImplementedError()
 
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "PartialAnnotator"}
+            )
             annotator = PartialAnnotator("test_model")
 
             with pytest.raises(NotImplementedError):
@@ -351,7 +415,10 @@ class TestBaseAnnotator:
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_phash_list_shorter_than_images(self, mock_logger):
         """ハッシュリストが画像リストより短い場合のテスト"""
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
+            )
             annotator = MockAnnotator("test_model")
             images = [cast(Image.Image, Mock(spec=Image.Image)) for _ in range(3)]
             phash_list = ["hash1", "hash2"]  # 画像より少ない
@@ -368,7 +435,10 @@ class TestBaseAnnotator:
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_error_with_phash_list(self, mock_logger):
         """エラー時にハッシュリストが正しく使用されることのテスト"""
-        with patch("image_annotator_lib.core.base.annotator.config_registry"):
+        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+            setup_mock_config_registry(
+                mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
+            )
             annotator = MockAnnotator("test_model")
             annotator._preprocess_images = Mock(side_effect=RuntimeError("Test error"))
 
