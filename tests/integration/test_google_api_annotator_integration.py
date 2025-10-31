@@ -31,6 +31,7 @@ class TestGoogleApiAnnotatorIntegration:
         """Setup Google annotator configuration."""
         config = {
             "class": "GoogleApiAnnotator",
+            "model_name_on_provider": "gemini-1.5-pro",
             "api_model_id": "gemini-1.5-pro",
             "api_key": "test-google-api-key",
             "timeout": 30,
