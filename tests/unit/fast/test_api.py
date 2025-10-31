@@ -41,6 +41,55 @@ def clear_instance_registry():  # Renamed fixture, removed mock resets
     api._MODEL_INSTANCE_REGISTRY.clear()
 
 
+@pytest.fixture(autouse=True)
+def setup_test_model_configs():
+    """Setup test model configurations for API tests."""
+    from image_annotator_lib.core.config import config_registry
+
+    configs = {
+        "Gemini 1.5 Pro": {
+            "class": "GoogleApiAnnotator",
+            "api_model_id": "gemini-1.5-pro",
+            "model_name_on_provider": "gemini-1.5-pro",
+            "api_key": "test-api-key",
+        },
+        "GPT-4o": {
+            "class": "OpenAIApiAnnotator",
+            "api_model_id": "gpt-4o",
+            "model_name_on_provider": "gpt-4o",
+            "api_key": "test-api-key",
+        },
+        "Claude 3 Opus": {
+            "class": "AnthropicApiAnnotator",
+            "api_model_id": "claude-3-opus-20240229",
+            "model_name_on_provider": "claude-3-opus-20240229",
+            "api_key": "test-api-key",
+        },
+        "Gemini 1.5 Flash (OpenRouter)": {
+            "class": "OpenRouterApiAnnotator",
+            "api_model_id": "google/gemini-flash-1.5",
+            "model_name_on_provider": "google/gemini-flash-1.5",
+            "api_key": "test-api-key",
+        },
+        "test-model": {
+            "class": "GoogleApiAnnotator",
+            "api_model_id": "gemini-1.5-pro",
+            "model_name_on_provider": "gemini-1.5-pro",
+            "api_key": "test-api-key",
+        },
+    }
+    for model_name, config in configs.items():
+        for key, value in config.items():
+            config_registry.add_default_setting(model_name, key, value)
+    yield
+    # Cleanup
+    for model_name in configs.keys():
+        try:
+            config_registry._config.pop(model_name, None)
+        except (AttributeError, KeyError):
+            pass
+
+
 # --- Test Cases ---
 
 
