@@ -721,27 +721,29 @@ def test_update_model_state_released():
 @pytest.mark.fast
 def test_move_components_to_device_torch_module():
     """Test moving PyTorch module to device."""
-    with patch("image_annotator_lib.core.model_factory.torch") as mock_torch:
-        # Create a mock component class that will pass isinstance check
-        class MockTorchModule:
-            def __init__(self):
-                self.device = "cpu"
-                self._to_called = False
-                self._to_device = None
+    # Create a mock component class that will pass isinstance check
+    class MockTorchModule:
+        def __init__(self):
+            self.device = "cpu"
+            self._to_called = False
+            self._to_device = None
 
-            def to(self, device):
-                self._to_called = True
-                self._to_device = device
-                return self
+        def to(self, device):
+            self._to_called = True
+            self._to_device = device
+            return self
 
-        mock_component = MockTorchModule()
+    mock_component = MockTorchModule()
 
-        # Set up torch mock to make isinstance check work
-        mock_torch.Tensor = type("Tensor", (), {})
-        mock_torch.nn.Module = MockTorchModule
+    # Create mock torch module
+    mock_torch = MagicMock()
+    mock_torch.Tensor = type("Tensor", (), {})
+    mock_torch.nn.Module = MockTorchModule
 
-        components = {"model": mock_component}
+    components = {"model": mock_component}
 
+    # Inject mock torch into sys.modules
+    with patch.dict("sys.modules", {"torch": mock_torch}):
         ModelLoad._move_components_to_device(components, "cuda")
 
         # Verify to() was called with cuda
@@ -769,11 +771,14 @@ def test_release_model_internal():
     mock_pipeline = MagicMock()
     components = {"model": mock_model, "pipeline": mock_pipeline}
 
-    with patch("gc.collect") as mock_gc:
-        with patch("image_annotator_lib.core.model_factory.torch") as mock_torch:
-            mock_torch.cuda.is_available.return_value = True
-            mock_torch.cuda.empty_cache = MagicMock()
+    # Create mock torch module
+    mock_torch = MagicMock()
+    mock_torch.cuda.is_available.return_value = True
+    mock_torch.cuda.empty_cache = MagicMock()
 
+    with patch("gc.collect") as mock_gc:
+        # Inject mock torch into sys.modules
+        with patch.dict("sys.modules", {"torch": mock_torch}):
             ModelLoad._release_model_internal(model_name, components)
 
             # Verify state was cleared
@@ -795,24 +800,28 @@ def test_release_model_internal():
 @pytest.mark.fast
 def test_calculate_transformer_size_mb_success():
     """Test calculating transformer model size from parameters."""
-    with patch("image_annotator_lib.core.model_factory.torch"):
-        # Create mock model with parameters and buffers
-        mock_param1 = MagicMock()
-        mock_param1.numel.return_value = 1000
-        mock_param1.element_size.return_value = 4  # 4 bytes (float32)
+    # Create mock torch module
+    mock_torch = MagicMock()
 
-        mock_param2 = MagicMock()
-        mock_param2.numel.return_value = 2000
-        mock_param2.element_size.return_value = 4
+    # Create mock model with parameters and buffers
+    mock_param1 = MagicMock()
+    mock_param1.numel.return_value = 1000
+    mock_param1.element_size.return_value = 4  # 4 bytes (float32)
 
-        mock_buffer = MagicMock()
-        mock_buffer.numel.return_value = 500
-        mock_buffer.element_size.return_value = 4
+    mock_param2 = MagicMock()
+    mock_param2.numel.return_value = 2000
+    mock_param2.element_size.return_value = 4
 
-        mock_model = MagicMock()
-        mock_model.parameters.return_value = [mock_param1, mock_param2]
-        mock_model.buffers.return_value = [mock_buffer]
+    mock_buffer = MagicMock()
+    mock_buffer.numel.return_value = 500
+    mock_buffer.element_size.return_value = 4
 
+    mock_model = MagicMock()
+    mock_model.parameters.return_value = [mock_param1, mock_param2]
+    mock_model.buffers.return_value = [mock_buffer]
+
+    # Inject mock torch into sys.modules
+    with patch.dict("sys.modules", {"torch": mock_torch}):
         # Expected: (1000*4 + 2000*4 + 500*4) / (1024*1024) = 14000 / 1048576 ≈ 0.0133514...
         result = ModelLoad._calculate_transformer_size_mb(mock_model)
 

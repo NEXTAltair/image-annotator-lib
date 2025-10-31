@@ -1,35 +1,29 @@
 from __future__ import annotations
 
 import gc
-import io
-import json
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, Union, cast, override
+from typing import TYPE_CHECKING, Any, ClassVar, cast, override
 
 import psutil
-from PIL import Image
-from pydantic import ValidationError
 
 # Lazy imports for heavy ML libraries (imported in Loader classes when needed)
 if TYPE_CHECKING:
-    import onnxruntime as ort
     import tensorflow as tf
     import torch
     import torch.nn as nn
-    from transformers.models.auto.modeling_auto import AutoModelForVision2Seq
-    from transformers.models.auto.processing_auto import AutoProcessor
     from transformers.models.clip import CLIPModel, CLIPProcessor
-    from transformers.pipelines import pipeline
     from transformers.pipelines.base import Pipeline
 
 from ..exceptions.errors import (
     ModelLoadError,
     OutOfMemoryError,
-    WebApiError,
 )
-from . import config, utils
+from . import utils
+
+# Import Classifier, Adapter classes, and WebAPI helper from separate modules
+from .classifier import Classifier
 from .config import config_registry
 from .types import (
     CLIPComponents,
@@ -40,11 +34,6 @@ from .types import (
     TransformersPipelineComponents,
 )
 from .utils import logger
-
-# Import Classifier, Adapter classes, and WebAPI helper from separate modules
-from .classifier import Classifier
-from .model_factory_adapters.adapters import AnthropicAdapter, GoogleClientAdapter, OpenAIAdapter
-from .model_factory_adapters.webapi_helpers import prepare_web_api_components
 
 
 # --- ModelLoad Refactoring ---
@@ -174,7 +163,7 @@ class ModelLoad:
         model_name: str,
         model_path: str,  # Path or identifier
         model_type: str,  # 'transformers', 'pipeline', 'onnx', 'tensorflow', 'clip'
-        loader_instance: "_BaseLoaderInternal",  # Instance of the internal loader for calculation method
+        loader_instance: _BaseLoaderInternal,  # Instance of the internal loader for calculation method
         **kwargs: Any,  # Additional args for specific calculators (task, format, etc.)
     ) -> float:
         """Gets or calculates the model size (in MB). Internal helper.
@@ -438,6 +427,12 @@ class ModelLoad:
             components: Dictionary containing model components.
             target_device: The target device string (e.g., "cuda", "cpu").
         """
+        # Lazy import torch for type checking
+        try:
+            import torch
+        except ImportError:
+            torch = None  # type: ignore
+
         logger.debug(f"コンポーネントを {target_device} に移動中...")
         for component_name, component in list(components.items()):
             moved = False
@@ -454,7 +449,8 @@ class ModelLoad:
                         moved = True
                 elif hasattr(component, "to") and callable(component.to) and hasattr(component, "device"):
                     current_device_str = str(getattr(component, "device", "unknown"))
-                    if current_device_str != target_device and isinstance(
+                    # Only check isinstance if torch is available
+                    if torch is not None and current_device_str != target_device and isinstance(
                         component, torch.Tensor | torch.nn.Module
                     ):
                         component.to(target_device)
@@ -495,6 +491,12 @@ class ModelLoad:
             model_name: Name of the model to release.
             components: Optional dictionary of model components to attempt deletion for.
         """
+        # Lazy import torch for CUDA cache operations
+        try:
+            import torch
+        except ImportError:
+            torch = None  # type: ignore
+
         logger.info(f"モデル '{model_name}' 解放処理開始...")
         if components:
             try:
@@ -520,7 +522,7 @@ class ModelLoad:
         try:
             logger.debug("ガベージコレクションとCUDAキャッシュクリア実行...")
             gc.collect()
-            if torch.cuda.is_available():
+            if torch is not None and torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 logger.debug("クリーンアップ完了。")
         except Exception as e:
@@ -539,9 +541,33 @@ class ModelLoad:
             model_name: Name of the model that failed to load.
             error: The exception that occurred during loading.
         """
+        # Lazy imports for framework-specific error types
+        torch_cuda_oom_error = None
+        tf_resource_error = None
+        torch_module = None
+
+        try:
+            import torch
+
+            torch_module = torch
+            torch_cuda_oom_error = torch.cuda.OutOfMemoryError
+        except ImportError:
+            pass
+
+        try:
+            import tensorflow as tf
+
+            tf_resource_error = tf.errors.ResourceExhaustedError
+        except ImportError:
+            pass
+
         error_msg = str(error)
         is_memory_error = False
-        if isinstance(error, torch.cuda.OutOfMemoryError | MemoryError | OutOfMemoryError):
+
+        # Check for memory errors
+        if isinstance(error, MemoryError | OutOfMemoryError):
+            is_memory_error = True
+        elif torch_cuda_oom_error is not None and isinstance(error, torch_cuda_oom_error):
             is_memory_error = True
         elif isinstance(error, OSError) and "allocate memory" in error_msg.lower():
             is_memory_error = True
@@ -549,16 +575,24 @@ class ModelLoad:
             "Failed to allocate memory" in error_msg or "AllocateRawInternal" in error_msg
         ):
             is_memory_error = True
-        elif isinstance(error, tf.errors.ResourceExhaustedError):
+        elif tf_resource_error is not None and isinstance(error, tf_resource_error):
             is_memory_error = True
 
         if is_memory_error:
             logger.error(f"メモリ不足エラー: モデル '{model_name}' ロード中。詳細: {error_msg}")
-            if isinstance(error, torch.cuda.OutOfMemoryError) and torch.cuda.is_available():
+            # Log CUDA memory summary if available
+            if (
+                torch_cuda_oom_error is not None
+                and isinstance(error, torch_cuda_oom_error)
+                and torch_module is not None
+                and torch_module.cuda.is_available()
+            ):
                 try:
                     device_name = str(error.device) if hasattr(error, "device") else "cuda"
                     logger.error(f"CUDA メモリサマリー ({device_name}):")
-                    logger.error(torch.cuda.memory_summary(device=device_name, abbreviated=True))
+                    logger.error(
+                        torch_module.cuda.memory_summary(device=device_name, abbreviated=True)
+                    )
                 except Exception as mem_e:
                     logger.error(f"CUDAメモリ情報取得失敗: {mem_e}")
         elif isinstance(error, FileNotFoundError):
@@ -798,7 +832,6 @@ class ModelLoad:
             """
             # Lazy import for transformers
             from transformers.pipelines import pipeline
-            from transformers.pipelines.base import Pipeline
 
             task = cast(str, kwargs.get("task"))
             batch_size = cast(int, kwargs.get("batch_size"))

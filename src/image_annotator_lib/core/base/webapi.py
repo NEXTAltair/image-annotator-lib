@@ -10,7 +10,7 @@ from PIL import Image
 # --- ローカルインポート ---
 from ...exceptions.errors import ApiAuthenticationError, ConfigurationError
 from ..model_config import WebAPIModelConfig
-from ..model_factory import prepare_web_api_components
+from ..model_factory_adapters.webapi_helpers import prepare_web_api_components
 from ..types import (
     AnnotationSchema,
     RawOutput,
@@ -171,9 +171,7 @@ class WebApiBaseAnnotator(BaseAnnotator):
             エラーが発生した場合は、errorフィールドにメッセージが含まれる。
         """
         if isinstance(text_content, dict):
-            # 構造が AnnotationSchema に合うかバリデーションするのが望ましい
-            # ここでは簡略化のため、dict であればそのまま通す
-            # TODO: AnnotationSchema.model_validate(text_content) のようなバリデーションを追加検討
+            # dict を AnnotationSchema でバリデーション
             try:
                 validated_annotation = AnnotationSchema.model_validate(text_content).model_dump()
                 return WebApiFormattedOutput(annotation=validated_annotation, error=None)
