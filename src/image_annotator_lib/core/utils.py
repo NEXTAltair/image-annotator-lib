@@ -9,11 +9,11 @@ from urllib.parse import urlparse
 import huggingface_hub
 import imagehash
 import requests
-import torch
 from loguru import logger
 from PIL import Image
 from tqdm import tqdm
 
+# torch は関数内で lazy import（pytest collection時のエラー回避）
 # confing モジュールで定数を定義すると循環インポートになるのを回避
 from .constants import DEFAULT_PATHS
 
@@ -251,6 +251,8 @@ def determine_effective_device(requested_device: str, model_name: str | None = N
     Returns:
         実際に使用すべきデバイス名 ("cuda" または "cpu")。
     """
+    import torch  # lazy import (pytest collection時のエラー回避)
+
     actual_device = requested_device
 
     if requested_device.startswith("cuda"):

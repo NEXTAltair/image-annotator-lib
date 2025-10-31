@@ -33,7 +33,6 @@ class WaifuAesthetic(ClipBaseAnnotator):
 
     def _get_score_tag(self, score: float) -> str:
         """スコアをタグ形式の文字列に変換します (例: [WAIFU]score_7)。"""
-        # スコアを 0-10 の範囲の整数に変換
-        # FIXME: 計算式がおかしい後で直す
-        score_int = max(0, min(round(score * 10), 100))
+        # スコアを 0-10 の範囲の整数に変換（ImprovedAestheticと同じロジック）
+        score_int = max(0, min(round(score), 10))
         return f"[WAIFU]score_{score_int}"
