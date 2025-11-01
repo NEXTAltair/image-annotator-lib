@@ -29,25 +29,24 @@ sys.path.insert(0, str(tests_dir))
 @pytest.fixture(autouse=True)
 def reset_global_state(request):
     """各テスト前後でグローバル状態をリセット"""
-    # BDDテストまたは統合テストの場合はグローバル状態のクリアを制限
+    # BDDテストの場合のみグローバル状態のクリアを制限
     # (BDDテストでは各ステップ間でレジストリの状態を保持する必要がある)
-    # (統合テストでは順序依存を避けるためレジストリを保持)
-    is_special_test = (
+    is_bdd_test = (
         hasattr(request, "node")
         and hasattr(request.node, "name")
-        and ("test_bdd_runner.py" in str(request.node.fspath) or "integration" in str(request.node.fspath))
+        and "test_bdd_runner.py" in str(request.node.fspath)
     )
 
     # テスト前のセットアップ
     yield
 
-    # 特別なテスト(BDDまたは統合テスト)でない場合のみクリーンアップを実行
-    if not is_special_test:
+    # BDDテスト以外は全てクリーンアップを実行
+    if not is_bdd_test:
         # テスト後のクリーンアップ
-        # レジストリとキャッシュをクリア
         try:
             from image_annotator_lib.core.config import config_registry
             from image_annotator_lib.core.model_factory import ModelLoad
+            from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
             from image_annotator_lib.core.provider_manager import ProviderManager
             from image_annotator_lib.core.registry import _MODEL_CLASS_OBJ_REGISTRY
 
@@ -63,6 +62,11 @@ def reset_global_state(request):
             # 設定レジストリクリア
             if hasattr(config_registry, "_config_cache"):
                 config_registry._config_cache.clear()
+            if hasattr(config_registry, "_config"):
+                # テスト用の設定をクリア（システムデフォルトは保持）
+                test_models = [k for k in config_registry._config.keys() if "test" in k.lower()]
+                for model in test_models:
+                    config_registry._config.pop(model, None)
 
             # ProviderManagerキャッシュクリア
             if hasattr(ProviderManager, "_provider_cache"):
@@ -70,9 +74,18 @@ def reset_global_state(request):
             if hasattr(ProviderManager, "_agent_cache"):
                 ProviderManager._agent_cache.clear()
 
+            # PydanticAIProviderFactoryキャッシュクリア
+            if hasattr(PydanticAIProviderFactory, "_provider_cache"):
+                PydanticAIProviderFactory._provider_cache.clear()
+            if hasattr(PydanticAIProviderFactory, "_agent_cache"):
+                PydanticAIProviderFactory._agent_cache.clear()
+
         except ImportError:
             # モジュールがまだロードされていない場合はスキップ
             pass
+
+        # 環境変数のクリーンアップは各テストの@patch.dictに任せる
+        # conftest.pyでの環境変数復元は@patch.dictと競合するため削除
 
 
 resources_dir = Path("tests") / "resources"

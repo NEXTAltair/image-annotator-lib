@@ -171,7 +171,7 @@ def test_create_agent_success(mock_agent_class):
 
 @pytest.mark.unit
 @patch("image_annotator_lib.core.pydantic_ai_factory.Agent")
-@patch.dict(os.environ, {}, clear=True)
+@patch.dict(os.environ, {"ALLOW_MODEL_REQUESTS": "true"}, clear=True)
 def test_create_agent_sets_openai_env_var(mock_agent_class):
     """Test create_agent sets OPENAI_API_KEY environment variable."""
     mock_agent_class.return_value = Mock()
@@ -185,7 +185,7 @@ def test_create_agent_sets_openai_env_var(mock_agent_class):
 
 @pytest.mark.unit
 @patch("image_annotator_lib.core.pydantic_ai_factory.Agent")
-@patch.dict(os.environ, {}, clear=True)
+@patch.dict(os.environ, {"ALLOW_MODEL_REQUESTS": "true"}, clear=True)
 def test_create_agent_sets_anthropic_env_var(mock_agent_class):
     """Test create_agent sets ANTHROPIC_API_KEY environment variable."""
     mock_agent_class.return_value = Mock()
@@ -199,7 +199,7 @@ def test_create_agent_sets_anthropic_env_var(mock_agent_class):
 
 @pytest.mark.unit
 @patch("image_annotator_lib.core.pydantic_ai_factory.Agent")
-@patch.dict(os.environ, {}, clear=True)
+@patch.dict(os.environ, {"ALLOW_MODEL_REQUESTS": "true"}, clear=True)
 def test_create_agent_sets_google_env_var(mock_agent_class):
     """Test create_agent sets GOOGLE_API_KEY environment variable."""
     mock_agent_class.return_value = Mock()
