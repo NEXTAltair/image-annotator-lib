@@ -7,6 +7,28 @@ from PIL import Image
 from image_annotator_lib.core.base.transformers import TransformersBaseAnnotator
 
 
+@pytest.fixture(autouse=True)
+def setup_dummy_model_config():
+    """Setup dummy model configuration for all tests."""
+    from image_annotator_lib.core.config import config_registry
+
+    config = {
+        "model_path": "/path/to/dummy-model",
+        "device": "cpu",
+        "class": "DummyTransformersAnnotator",
+    }
+    for key, value in config.items():
+        config_registry.add_default_setting("dummy-model", key, value)
+
+    yield
+
+    # Cleanup
+    try:
+        config_registry._config.pop("dummy-model", None)
+    except (AttributeError, KeyError):
+        pass
+
+
 # --- テスト用ダミーサブクラス ---
 class DummyTransformersAnnotator(TransformersBaseAnnotator):
     def __init__(self, model_name: str):
