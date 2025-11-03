@@ -309,7 +309,7 @@ class TestGoogleApiAnnotatorIntegration:
     @pytest.mark.fast_integration
     def test_generate_tags_from_response(self, google_annotator):
         """Test tag generation from API responses (UnifiedAnnotationResult)."""
-        from image_annotator_lib.core.types import UnifiedAnnotationResult, TaskCapability
+        from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
 
         # Test with structured UnifiedAnnotationResult with tags
         result_with_tags = UnifiedAnnotationResult(
