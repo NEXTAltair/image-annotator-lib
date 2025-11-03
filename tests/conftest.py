@@ -46,8 +46,8 @@ def reset_global_state(request):
         try:
             from image_annotator_lib.core.config import config_registry
             from image_annotator_lib.core.model_factory import ModelLoad
-            from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
             from image_annotator_lib.core.provider_manager import ProviderManager
+            from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
             from image_annotator_lib.core.registry import _MODEL_CLASS_OBJ_REGISTRY
 
             # レジストリクリア

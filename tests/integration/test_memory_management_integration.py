@@ -194,10 +194,13 @@ class TestMemoryManagementIntegration:
         """Test PydanticAIWebAPIAnnotator memory efficiency."""
         from image_annotator_lib.core.config import config_registry
 
+        # Use unique model name to avoid config conflicts with other tests
+        test_model_name = "test_memory_efficiency_model"
+
         # Setup test model configuration before creating annotator
-        config_registry.add_default_setting("test_model", "class", "PydanticAIWebAPIAnnotator")
-        config_registry.add_default_setting("test_model", "api_model_id", "gpt-4o-mini")
-        config_registry.add_default_setting("test_model", "model_name_on_provider", "gpt-4o-mini")
+        config_registry.add_default_setting(test_model_name, "class", "PydanticAIWebAPIAnnotator")
+        config_registry.add_default_setting(test_model_name, "api_model_id", "gpt-4o-mini")
+        config_registry.add_default_setting(test_model_name, "model_name_on_provider", "gpt-4o-mini")
 
         try:
             with patch("image_annotator_lib.core.base.pydantic_ai_annotator.Agent") as MockAgent:
@@ -209,7 +212,7 @@ class TestMemoryManagementIntegration:
                 MockAgent.return_value = mock_agent
 
                 # Create annotator (now with proper configuration)
-                annotator = PydanticAIWebAPIAnnotator("test_model")
+                annotator = PydanticAIWebAPIAnnotator(test_model_name)
 
                 # Test context manager usage
                 with annotator:
@@ -235,7 +238,7 @@ class TestMemoryManagementIntegration:
         finally:
             # Cleanup test configuration
             try:
-                config_registry._config.pop("test_model", None)
+                config_registry._config.pop(test_model_name, None)
             except (AttributeError, KeyError):
                 pass
 

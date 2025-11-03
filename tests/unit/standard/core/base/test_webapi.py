@@ -168,7 +168,9 @@ class TestWebApiBaseAnnotator:
 
         # 一時的に無効な値を設定
         original_value = config_registry.get("test_model", "max_output_tokens", None)
-        config_registry.add_default_setting("test_model", "max_output_tokens", "invalid_string")  # 不正な文字列
+        config_registry.add_default_setting(
+            "test_model", "max_output_tokens", "invalid_string"
+        )  # 不正な文字列
 
         try:
             annotator = MockWebApiAnnotator()
