@@ -305,33 +305,43 @@ class TestGoogleApiAnnotatorIntegration:
             for result in results:
                 assert result.error is None
 
-    @pytest.mark.skip(reason="Implementation changed to UnifiedAnnotationResult - test needs revision")
     @pytest.mark.integration
     @pytest.mark.fast_integration
     def test_generate_tags_from_response(self, google_annotator):
-        """Test tag generation from API responses."""
-        # Test with structured response object
-        mock_response_obj = MagicMock()
-        mock_response_obj.tags = ["test_tag_1", "test_tag_2"]
+        """Test tag generation from API responses (UnifiedAnnotationResult)."""
+        from image_annotator_lib.core.types import UnifiedAnnotationResult, TaskCapability
 
-        formatted_output = {"response": mock_response_obj, "error": None}
-        tags = google_annotator._generate_tags(formatted_output)
+        # Test with structured UnifiedAnnotationResult with tags
+        result_with_tags = UnifiedAnnotationResult(
+            model_name=google_annotator.model_name,
+            capabilities={TaskCapability.TAGS},
+            tags=["test_tag_1", "test_tag_2"],
+            provider_name="google",
+            framework="api",
+        )
+        tags = google_annotator._generate_tags(result_with_tags)
         assert tags == ["test_tag_1", "test_tag_2"]
 
-        # Test with dict response
-        dict_response = {"tags": ["dict_tag_1", "dict_tag_2"]}
-        formatted_output = {"response": dict_response, "error": None}
-        tags = google_annotator._generate_tags(formatted_output)
-        assert tags == ["dict_tag_1", "dict_tag_2"]
-
-        # Test with error response
-        formatted_output = {"response": None, "error": "API Error"}
-        tags = google_annotator._generate_tags(formatted_output)
+        # Test with UnifiedAnnotationResult with error
+        result_with_error = UnifiedAnnotationResult(
+            model_name=google_annotator.model_name,
+            capabilities={TaskCapability.TAGS},
+            error="API Error",
+            provider_name="google",
+            framework="api",
+        )
+        tags = google_annotator._generate_tags(result_with_error)
         assert tags == []
 
-        # Test with empty response
-        formatted_output = {"response": None, "error": None}
-        tags = google_annotator._generate_tags(formatted_output)
+        # Test with UnifiedAnnotationResult with no tags
+        result_no_tags = UnifiedAnnotationResult(
+            model_name=google_annotator.model_name,
+            capabilities={TaskCapability.TAGS},
+            tags=None,
+            provider_name="google",
+            framework="api",
+        )
+        tags = google_annotator._generate_tags(result_no_tags)
         assert tags == []
 
     @pytest.mark.integration
