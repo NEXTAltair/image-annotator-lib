@@ -4,7 +4,7 @@ Web APIコンポーネント準備のヘルパー関数群をテスト。
 """
 
 import os
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import SecretStr
@@ -17,7 +17,6 @@ from image_annotator_lib.core.model_factory_adapters.webapi_helpers import (
     prepare_web_api_components,
 )
 from image_annotator_lib.exceptions.errors import ApiAuthenticationError, ConfigurationError
-
 
 # ==============================================================================
 # Test _find_model_entry_by_name
@@ -63,7 +62,9 @@ def test_find_model_entry_by_name_not_found():
 def test_get_api_key_openai_from_env():
     """Test _get_api_key for OpenAI from environment variable."""
     with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}):
-        with patch("image_annotator_lib.core.model_factory_adapters.webapi_helpers.dotenv.dotenv_values") as mock_dotenv:
+        with patch(
+            "image_annotator_lib.core.model_factory_adapters.webapi_helpers.dotenv.dotenv_values"
+        ) as mock_dotenv:
             mock_dotenv.return_value = {}
 
             result = _get_api_key("OpenAI", "gpt-4")
@@ -75,7 +76,9 @@ def test_get_api_key_openai_from_env():
 @pytest.mark.fast
 def test_get_api_key_google_from_dotenv():
     """Test _get_api_key for Google from .env file."""
-    with patch("image_annotator_lib.core.model_factory_adapters.webapi_helpers.dotenv.dotenv_values") as mock_dotenv:
+    with patch(
+        "image_annotator_lib.core.model_factory_adapters.webapi_helpers.dotenv.dotenv_values"
+    ) as mock_dotenv:
         mock_dotenv.return_value = {"GOOGLE_API_KEY": "test-google-key-from-env"}
 
         result = _get_api_key("Google", "gemini-1.5-pro")
@@ -88,7 +91,9 @@ def test_get_api_key_google_from_dotenv():
 def test_get_api_key_openrouter_with_colon():
     """Test _get_api_key for OpenRouter model with colon."""
     with patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-or-key"}):
-        with patch("image_annotator_lib.core.model_factory_adapters.webapi_helpers.dotenv.dotenv_values") as mock_dotenv:
+        with patch(
+            "image_annotator_lib.core.model_factory_adapters.webapi_helpers.dotenv.dotenv_values"
+        ) as mock_dotenv:
             mock_dotenv.return_value = {}
 
             result = _get_api_key("Google", "gemma-3-27b-it:free")
@@ -101,7 +106,9 @@ def test_get_api_key_openrouter_with_colon():
 def test_get_api_key_not_found():
     """Test _get_api_key raises error when key not found."""
     with patch.dict(os.environ, {}, clear=True):
-        with patch("image_annotator_lib.core.model_factory_adapters.webapi_helpers.dotenv.dotenv_values") as mock_dotenv:
+        with patch(
+            "image_annotator_lib.core.model_factory_adapters.webapi_helpers.dotenv.dotenv_values"
+        ) as mock_dotenv:
             mock_dotenv.return_value = {}
 
             with pytest.raises(ApiAuthenticationError, match="APIキー 'OPENAI_API_KEY' が.envファイル"):
@@ -185,7 +192,9 @@ def test_initialize_api_client_google():
     """Test _initialize_api_client for Google."""
     model_config = {"api_key": SecretStr("test-google-key"), "system_prompt": "Test", "base_prompt": "Test"}
 
-    with patch("image_annotator_lib.core.model_factory_adapters.webapi_helpers.genai.Client") as mock_genai_class:
+    with patch(
+        "image_annotator_lib.core.model_factory_adapters.webapi_helpers.genai.Client"
+    ) as mock_genai_class:
         mock_client = MagicMock()
         mock_genai_class.return_value = mock_client
 
@@ -275,10 +284,14 @@ def test_prepare_web_api_components_success():
         }
     }
 
-    with patch("image_annotator_lib.core.model_factory_adapters.webapi_helpers.config.load_available_api_models") as mock_load:
+    with patch(
+        "image_annotator_lib.core.model_factory_adapters.webapi_helpers.config.load_available_api_models"
+    ) as mock_load:
         mock_load.return_value = mock_available_models
 
-        with patch("image_annotator_lib.core.model_factory_adapters.webapi_helpers._initialize_api_client") as mock_init:
+        with patch(
+            "image_annotator_lib.core.model_factory_adapters.webapi_helpers._initialize_api_client"
+        ) as mock_init:
             mock_client = MagicMock()
             mock_init.return_value = mock_client
 
@@ -293,14 +306,16 @@ def test_prepare_web_api_components_success():
 @pytest.mark.fast
 def test_prepare_web_api_components_model_not_found():
     """Test prepare_web_api_components when model not found."""
-    mock_available_models = {
-        "gemini-1.5-pro": {"model_name_short": "Gemini Pro", "provider": "Google"}
-    }
+    mock_available_models = {"gemini-1.5-pro": {"model_name_short": "Gemini Pro", "provider": "Google"}}
 
-    with patch("image_annotator_lib.core.model_factory_adapters.webapi_helpers.config.load_available_api_models") as mock_load:
+    with patch(
+        "image_annotator_lib.core.model_factory_adapters.webapi_helpers.config.load_available_api_models"
+    ) as mock_load:
         mock_load.return_value = mock_available_models
 
-        with pytest.raises(ConfigurationError, match="に対応するエントリが available_api_models.toml に見つかりません"):
+        with pytest.raises(
+            ConfigurationError, match="に対応するエントリが available_api_models.toml に見つかりません"
+        ):
             prepare_web_api_components("Unknown Model")
 
 
@@ -310,7 +325,9 @@ def test_prepare_web_api_components_no_provider():
     """Test prepare_web_api_components when provider missing in config."""
     mock_available_models = {"model-id": {"model_name_short": "Test Model"}}
 
-    with patch("image_annotator_lib.core.model_factory_adapters.webapi_helpers.config.load_available_api_models") as mock_load:
+    with patch(
+        "image_annotator_lib.core.model_factory_adapters.webapi_helpers.config.load_available_api_models"
+    ) as mock_load:
         mock_load.return_value = mock_available_models
 
         with pytest.raises(ConfigurationError, match="'provider' が含まれていません"):
@@ -321,7 +338,9 @@ def test_prepare_web_api_components_no_provider():
 @pytest.mark.fast
 def test_prepare_web_api_components_empty_available_models():
     """Test prepare_web_api_components when no models available."""
-    with patch("image_annotator_lib.core.model_factory_adapters.webapi_helpers.config.load_available_api_models") as mock_load:
+    with patch(
+        "image_annotator_lib.core.model_factory_adapters.webapi_helpers.config.load_available_api_models"
+    ) as mock_load:
         mock_load.return_value = {}
 
         with pytest.raises(ConfigurationError, match="利用可能なAPIモデル情報"):

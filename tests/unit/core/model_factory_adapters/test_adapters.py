@@ -5,7 +5,7 @@
 
 import base64
 import io
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image
@@ -16,8 +16,6 @@ from image_annotator_lib.core.model_factory_adapters.adapters import (
     OpenAIAdapter,
 )
 from image_annotator_lib.core.types import AnnotationSchema, WebApiInput
-from image_annotator_lib.exceptions.errors import WebApiError
-
 
 # ==============================================================================
 # Test Helper Functions

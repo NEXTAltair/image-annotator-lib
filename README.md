@@ -14,22 +14,24 @@
 
 本ライブラリは [uv](https://github.com/astral-sh/uv) を使用したパッケージ管理を推奨しています。
 
-1.  **仮想環境の作成 (推奨):**
-    プロジェクトルートで以下を実行します。
-    ```bash
-    uv venv
-    ```
-    作成された仮想環境を有効化します。
-    (Windows: `.venv\Scripts\activate`, Linux/macOS: `source .venv/bin/activate`)
+1. **仮想環境の作成 (推奨):**
+   プロジェクトルートで以下を実行します。
 
-2.  **依存関係のインストール:**
-    ```bash
-    # 通常の利用
-    uv sync
+   ```bash
+   uv venv
+   ```
 
-    # 開発用にソースからインストール
-    uv sync --dev
-    ```
+   作成された仮想環境を有効化します。
+   (Windows: `.venv\Scripts\activate`, Linux/macOS: `source .venv/bin/activate`)
+2. **依存関係のインストール:**
+
+   ```bash
+   # 通常の利用
+   uv sync
+
+   # 開発用にソースからインストール
+   uv sync --dev
+   ```
 
 ## Getting Started / 基本的な使い方
 
@@ -220,17 +222,58 @@ for phash, model_results in results.items():
             print(f"Error processing image {phash} with model {model_name}: {result['error']}")
 ```
 
-## ドキュメント
+## アノテーターの追加方法
 
-より詳細な情報については、`docs/` ディレクトリ内の以下のドキュメントを参照してください。
+新しい画像アノテーションモデルを追加する手順：
 
--   [**製品要求仕様書 (Product Requirement Document)**](./docs/product_requirement_docs.md): プロジェクトの目標、対象ユーザー、主要機能など。
--   [**システムアーキテクチャ (System Architecture)**](./docs/architecture.md): ライブラリの構造、主要コンポーネント、ワークフロー、設計決定など。
--   [**技術仕様書 (Technical Specifications)**](./docs/technical.md): 開発環境、技術スタック、依存関係、コーディング規約、モデル追加･テスト･ロギング手順など。
+### 1. 適切なベースクラスの選択
+
+モデルの種類に応じて、適切なベースクラスを継承してください：
+
+- **Web API モデル** (PydanticAI): `WebApiBaseAnnotator` + `PydanticAIAnnotatorMixin`
+- **ONNX モデル**: `ONNXBaseAnnotator`
+- **Transformers モデル**: `TransformersBaseAnnotator`
+- **TensorFlow モデル**: `TensorflowBaseAnnotator`
+- **CLIP ベースモデル**: `ClipBaseAnnotator`
+
+### 2. 必要なメソッドの実装
+
+実装が必要な抽象メソッド：
+
+- `_generate_tags()`: アノテーション結果からタグを生成
+- `_run_inference()`: モデル推論の実行
+- PydanticAI モデルの場合: `run_with_model()` (プロバイダーレベル実行)
+
+### 3. 設定ファイルへの登録
+
+`config/annotator_config.toml` に新しいモデルの設定を追加：
+
+```toml
+[your-model-name]
+model_path = "huggingface/repo-name"  # または URL、ローカルパス
+class = "YourModelClassName"
+device = "cuda"  # または "cpu"
+estimated_size_gb = 1.5
+
+# Web API モデルの場合
+api_model_id = "provider-model-id"
+model_name_on_provider = "provider-model-name"
+```
+
+### 4. テストの追加
+
+適切なテストカテゴリにテストを追加：
+
+- `tests/unit/` - ユニットテスト
+- `tests/integration/` - 統合テスト（実際のモデル使用）
+- `tests/model_class/` - モデル固有のテスト
+
+詳細な開発ガイドラインは `CLAUDE.md` を参照してください。
 
 ## 開発者向け情報
 
 ### テスト実行
+
 ```bash
 # 全テスト実行
 pytest
@@ -244,6 +287,7 @@ pytest -m tagger      # タガーモデルテストのみ
 ```
 
 ### コード品質チェック
+
 ```bash
 # リンティングとフォーマット
 ruff check

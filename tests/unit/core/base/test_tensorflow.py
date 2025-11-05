@@ -3,16 +3,15 @@
 TensorFlow基底アノテータの主要機能をテスト。
 """
 
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pytest
 import tensorflow as tf
-from pathlib import Path
 from PIL import Image
-from unittest.mock import MagicMock, Mock, patch
 
 from image_annotator_lib.core.base.tensorflow import TensorflowBaseAnnotator
-from image_annotator_lib.exceptions.errors import ModelLoadError, OutOfMemoryError
-
+from image_annotator_lib.exceptions.errors import OutOfMemoryError
 
 # ==============================================================================
 # Test Helper

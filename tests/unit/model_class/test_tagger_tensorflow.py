@@ -3,15 +3,14 @@
 DeepDanbooruタガーの主要機能をテスト。
 """
 
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pytest
 import tensorflow as tf
-from pathlib import Path
 from PIL import Image
-from unittest.mock import MagicMock, patch
 
 from image_annotator_lib.model_class.tagger_tensorflow import DeepDanbooruTagger
-
 
 # ==============================================================================
 # Test Fixtures
@@ -63,14 +62,10 @@ def mock_model_dir(tmp_path, sample_tags, sample_character_tags, sample_general_
     (model_dir / "tags.txt").write_text("\n".join(sample_tags), encoding="utf-8")
 
     # Write tags-character.txt
-    (model_dir / "tags-character.txt").write_text(
-        "\n".join(sample_character_tags), encoding="utf-8"
-    )
+    (model_dir / "tags-character.txt").write_text("\n".join(sample_character_tags), encoding="utf-8")
 
     # Write tags-general.txt
-    (model_dir / "tags-general.txt").write_text(
-        "\n".join(sample_general_tags), encoding="utf-8"
-    )
+    (model_dir / "tags-general.txt").write_text("\n".join(sample_general_tags), encoding="utf-8")
 
     return model_dir
 
@@ -351,7 +346,9 @@ def test_format_predictions_categorizes_tags_correctly(mock_config):
 
 @pytest.mark.unit
 @pytest.mark.fast
-def test_format_predictions_sorts_by_score(mock_config, sample_tags, sample_character_tags, sample_general_tags):
+def test_format_predictions_sorts_by_score(
+    mock_config, sample_tags, sample_character_tags, sample_general_tags
+):
     """Test _format_predictions sorts tags by score in descending order."""
     tagger = DeepDanbooruTagger("deepdanbooru-v3", config=mock_config)
     tagger.components = {
@@ -387,11 +384,13 @@ def test_format_predictions_batch(mock_config):
     }
 
     # Batch of 3 predictions
-    predictions = tf.constant([
-        [0.8, 0.6],
-        [0.7, 0.9],
-        [0.5, 0.4],
-    ])
+    predictions = tf.constant(
+        [
+            [0.8, 0.6],
+            [0.7, 0.9],
+            [0.5, 0.4],
+        ]
+    )
 
     result = tagger._format_predictions(predictions)
 
@@ -464,7 +463,9 @@ def test_preprocess_images_empty_list(mock_config):
 
 @pytest.mark.unit
 @pytest.mark.fast
-def test_format_predictions_with_numpy_array(mock_config, sample_tags, sample_character_tags, sample_general_tags):
+def test_format_predictions_with_numpy_array(
+    mock_config, sample_tags, sample_character_tags, sample_general_tags
+):
     """Test _format_predictions accepts numpy array input."""
     tagger = DeepDanbooruTagger("deepdanbooru-v3", config=mock_config)
     tagger.components = {
