@@ -160,9 +160,7 @@ class TestProviderManagerIntegration:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_batch_processing_with_partial_errors(
-        self, managed_config_registry, lightweight_test_images
-    ):
+    def test_batch_processing_with_partial_errors(self, managed_config_registry, lightweight_test_images):
         """
         Tests batch processing when some images fail processing.
         Verifies that partial failures are handled gracefully and successful results are returned.
@@ -263,9 +261,7 @@ class TestProviderManagerIntegration:
 
         # Setup model configuration with a DIFFERENT api_key in config
         model_name = f"test_api_key_priority_{provider}"
-        managed_config_registry.set(
-            model_name, {"provider": provider, "api_key": "config_registry_key"}
-        )
+        managed_config_registry.set(model_name, {"provider": provider, "api_key": "config_registry_key"})
 
         # Mock calculate_phash
         with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
@@ -304,9 +300,7 @@ class TestProviderManagerIntegration:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_api_key_fallback_to_config_registry(
-        self, managed_config_registry, lightweight_test_images
-    ):
+    def test_api_key_fallback_to_config_registry(self, managed_config_registry, lightweight_test_images):
         """
         Tests that when api_keys parameter is None, the system falls back to config_registry.
         """
@@ -319,9 +313,7 @@ class TestProviderManagerIntegration:
 
         # Setup model configuration with api_key in config
         model_name = "test_api_key_fallback"
-        managed_config_registry.set(
-            model_name, {"provider": "google", "api_key": "config_fallback_key"}
-        )
+        managed_config_registry.set(model_name, {"provider": "google", "api_key": "config_fallback_key"})
 
         # Mock calculate_phash
         with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
