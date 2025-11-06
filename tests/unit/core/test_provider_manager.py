@@ -465,19 +465,13 @@ def test_cleanup_context_nonexistent_model():
 
 
 @pytest.mark.unit
-@pytest.mark.skip(reason="Config mock not working in Provider Instance - needs refactoring")
 @patch("image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory")
-@patch("image_annotator_lib.core.provider_manager.config_registry")
-@patch("image_annotator_lib.core.pydantic_ai_factory._is_test_environment")
-def test_anthropic_provider_instance_run_with_model_success(mock_is_test_env, mock_config, mock_factory):
+def test_anthropic_provider_instance_run_with_model_success(mock_factory):
     """Test AnthropicProviderInstance.run_with_model successful execution."""
     from image_annotator_lib.core.provider_manager import AnthropicProviderInstance
     from image_annotator_lib.core.types import AnnotationSchema
 
     # Setup mocks
-    mock_is_test_env.return_value = False
-    mock_config.get.return_value = "test_api_key"
-
     mock_agent = MagicMock()
     mock_factory.get_cached_agent.return_value = mock_agent
 
@@ -488,11 +482,14 @@ def test_anthropic_provider_instance_run_with_model_success(mock_is_test_env, mo
     with patch("image_annotator_lib.core.provider_manager.ProviderManager._run_agent_safely") as mock_run:
         mock_run.return_value = mock_result
 
-        # Execute
+        # Execute with api_keys to bypass config_registry
         provider = AnthropicProviderInstance()
         test_image = Image.new("RGB", (100, 100))
         results = provider.run_with_model(
-            model_name="test_model", images_list=[test_image], api_model_id="claude-3-opus", api_keys=None
+            model_name="test_model",
+            images_list=[test_image],
+            api_model_id="claude-3-opus",
+            api_keys={"anthropic": "test_api_key"},  # Direct API key injection
         )
 
         # Verify
@@ -565,19 +562,13 @@ def test_anthropic_provider_instance_with_injected_api_keys(mock_is_test_env, mo
 
 
 @pytest.mark.unit
-@pytest.mark.skip(reason="Config mock not working in Provider Instance - needs refactoring")
 @patch("image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory")
-@patch("image_annotator_lib.core.provider_manager.config_registry")
-@patch("image_annotator_lib.core.pydantic_ai_factory._is_test_environment")
-def test_openai_provider_instance_run_with_model_success(mock_is_test_env, mock_config, mock_factory):
+def test_openai_provider_instance_run_with_model_success(mock_factory):
     """Test OpenAIProviderInstance.run_with_model successful execution."""
     from image_annotator_lib.core.provider_manager import OpenAIProviderInstance
     from image_annotator_lib.core.types import AnnotationSchema
 
     # Setup mocks
-    mock_is_test_env.return_value = False
-    mock_config.get.return_value = "test_openai_key"
-
     mock_agent = MagicMock()
     mock_factory.get_cached_agent.return_value = mock_agent
 
@@ -588,11 +579,14 @@ def test_openai_provider_instance_run_with_model_success(mock_is_test_env, mock_
     with patch("image_annotator_lib.core.provider_manager.ProviderManager._run_agent_safely") as mock_run:
         mock_run.return_value = mock_result
 
-        # Execute
+        # Execute with api_keys to bypass config_registry
         provider = OpenAIProviderInstance()
         test_image = Image.new("RGB", (100, 100))
         results = provider.run_with_model(
-            model_name="test_model", images_list=[test_image], api_model_id="gpt-4-vision", api_keys=None
+            model_name="test_model",
+            images_list=[test_image],
+            api_model_id="gpt-4-vision",
+            api_keys={"openai": "test_openai_key"},  # Direct API key injection
         )
 
         # Verify
@@ -602,19 +596,13 @@ def test_openai_provider_instance_run_with_model_success(mock_is_test_env, mock_
 
 
 @pytest.mark.unit
-@pytest.mark.skip(reason="Config mock not working in Provider Instance - needs refactoring")
 @patch("image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory")
-@patch("image_annotator_lib.core.provider_manager.config_registry")
-@patch("image_annotator_lib.core.pydantic_ai_factory._is_test_environment")
-def test_google_provider_instance_run_with_model_success(mock_is_test_env, mock_config, mock_factory):
+def test_google_provider_instance_run_with_model_success(mock_factory):
     """Test GoogleProviderInstance.run_with_model successful execution."""
     from image_annotator_lib.core.provider_manager import GoogleProviderInstance
     from image_annotator_lib.core.types import AnnotationSchema
 
     # Setup mocks
-    mock_is_test_env.return_value = False
-    mock_config.get.return_value = "test_google_key"
-
     mock_agent = MagicMock()
     mock_factory.get_cached_agent.return_value = mock_agent
 
@@ -625,11 +613,14 @@ def test_google_provider_instance_run_with_model_success(mock_is_test_env, mock_
     with patch("image_annotator_lib.core.provider_manager.ProviderManager._run_agent_safely") as mock_run:
         mock_run.return_value = mock_result
 
-        # Execute
+        # Execute with api_keys to bypass config_registry
         provider = GoogleProviderInstance()
         test_image = Image.new("RGB", (100, 100))
         results = provider.run_with_model(
-            model_name="test_model", images_list=[test_image], api_model_id="gemini-1.5-pro", api_keys=None
+            model_name="test_model",
+            images_list=[test_image],
+            api_model_id="gemini-1.5-pro",
+            api_keys={"google": "test_google_key"},  # Direct API key injection
         )
 
         # Verify
@@ -639,19 +630,13 @@ def test_google_provider_instance_run_with_model_success(mock_is_test_env, mock_
 
 
 @pytest.mark.unit
-@pytest.mark.skip(reason="Config mock not working in Provider Instance - needs refactoring")
 @patch("image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory")
-@patch("image_annotator_lib.core.provider_manager.config_registry")
-@patch("image_annotator_lib.core.pydantic_ai_factory._is_test_environment")
-def test_openrouter_provider_instance_run_with_model_success(mock_is_test_env, mock_config, mock_factory):
+def test_openrouter_provider_instance_run_with_model_success(mock_factory):
     """Test OpenRouterProviderInstance.run_with_model successful execution."""
     from image_annotator_lib.core.provider_manager import OpenRouterProviderInstance
     from image_annotator_lib.core.types import AnnotationSchema
 
     # Setup mocks
-    mock_is_test_env.return_value = False
-    mock_config.get.return_value = "test_openrouter_key"
-
     mock_agent = MagicMock()
     mock_factory.get_cached_agent.return_value = mock_agent
 
@@ -662,14 +647,14 @@ def test_openrouter_provider_instance_run_with_model_success(mock_is_test_env, m
     with patch("image_annotator_lib.core.provider_manager.ProviderManager._run_agent_safely") as mock_run:
         mock_run.return_value = mock_result
 
-        # Execute
+        # Execute with api_keys to bypass config_registry
         provider = OpenRouterProviderInstance()
         test_image = Image.new("RGB", (100, 100))
         results = provider.run_with_model(
             model_name="test_model",
             images_list=[test_image],
             api_model_id="openrouter:meta-llama",
-            api_keys=None,
+            api_keys={"openrouter": "test_openrouter_key"},  # Direct API key injection
         )
 
         # Verify
@@ -679,18 +664,12 @@ def test_openrouter_provider_instance_run_with_model_success(mock_is_test_env, m
 
 
 @pytest.mark.unit
-@pytest.mark.skip(reason="Config mock not working in Provider Instance - needs refactoring")
 @patch("image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory")
-@patch("image_annotator_lib.core.provider_manager.config_registry")
-@patch("image_annotator_lib.core.pydantic_ai_factory._is_test_environment")
-def test_provider_instance_agent_execution_error(mock_is_test_env, mock_config, mock_factory):
+def test_provider_instance_agent_execution_error(mock_factory):
     """Test provider instance handling of agent execution errors."""
     from image_annotator_lib.core.provider_manager import OpenAIProviderInstance
 
     # Setup mocks
-    mock_is_test_env.return_value = False
-    mock_config.get.return_value = "test_key"
-
     mock_agent = MagicMock()
     mock_factory.get_cached_agent.return_value = mock_agent
 
@@ -698,14 +677,117 @@ def test_provider_instance_agent_execution_error(mock_is_test_env, mock_config, 
     with patch("image_annotator_lib.core.provider_manager.ProviderManager._run_agent_safely") as mock_run:
         mock_run.side_effect = RuntimeError("Agent execution failed")
 
-        # Execute
+        # Execute with api_keys to bypass config_registry
         provider = OpenAIProviderInstance()
         test_image = Image.new("RGB", (100, 100))
         results = provider.run_with_model(
-            model_name="test_model", images_list=[test_image], api_model_id="gpt-4", api_keys=None
+            model_name="test_model",
+            images_list=[test_image],
+            api_model_id="gpt-4",
+            api_keys={"openai": "test_key"},  # Direct API key injection
         )
 
         # Verify error handling
         assert len(results) == 1
         assert "error" in results[0]
         assert "API Error" in results[0]["error"]
+
+
+@pytest.mark.unit
+def test_run_agent_safely_event_loop_fallback():
+    """Test _run_agent_safely with event loop fallback to new loop execution."""
+    from pydantic_ai import BinaryContent
+
+    from image_annotator_lib.core.provider_manager import ProviderManager
+    from image_annotator_lib.core.types import AnnotationSchema
+
+    # Create mock agent
+    mock_agent = MagicMock()
+    mock_agent.run_sync.side_effect = RuntimeError("Event loop is closed")
+
+    # Mock successful async execution in new loop
+    mock_result = MagicMock()
+    mock_result.data = AnnotationSchema(tags=["fallback_success"], captions=[], score=0.95)
+
+    # Create async mock for agent.run()
+    async def mock_async_run(*args, **kwargs):
+        return mock_result
+
+    mock_agent.run.return_value = mock_async_run()
+
+    # Create binary content
+    binary_content = BinaryContent(data=b"test_image_data", media_type="image/webp")
+
+    # Execute with fallback
+    result = ProviderManager._run_agent_safely(mock_agent, binary_content, "test-model-id")
+
+    # Verify fallback was triggered
+    assert mock_agent.run_sync.called
+    assert mock_agent.run.called
+    assert result.data.tags == ["fallback_success"]
+
+
+@pytest.mark.unit
+def test_run_agent_safely_both_sync_and_async_fail():
+    """Test _run_agent_safely when both sync and async execution fail."""
+    from pydantic_ai import BinaryContent
+
+    from image_annotator_lib.core.provider_manager import ProviderManager
+
+    # Create mock agent
+    mock_agent = MagicMock()
+    mock_agent.run_sync.side_effect = RuntimeError("Event loop is closed")
+
+    # Mock async execution failure
+    async def mock_async_fail(*args, **kwargs):
+        raise RuntimeError("Async execution failed")
+
+    mock_agent.run.return_value = mock_async_fail()
+
+    # Create binary content
+    binary_content = BinaryContent(data=b"test_image_data", media_type="image/webp")
+
+    # Execute and expect RuntimeError
+    with pytest.raises(RuntimeError) as exc_info:
+        ProviderManager._run_agent_safely(mock_agent, binary_content, "test-model-id")
+
+    # Verify error message contains both errors
+    error_msg = str(exc_info.value)
+    assert "Both sync and async execution failed" in error_msg
+    assert "Event loop is closed" in error_msg
+    assert "Async execution failed" in error_msg
+
+
+@pytest.mark.unit
+def test_run_agent_safely_timeout_handling():
+    """Test _run_agent_safely timeout handling in ThreadPoolExecutor."""
+    import concurrent.futures
+
+    from pydantic_ai import BinaryContent
+
+    from image_annotator_lib.core.provider_manager import ProviderManager
+
+    # Create mock agent
+    mock_agent = MagicMock()
+    mock_agent.run_sync.side_effect = RuntimeError("Event loop is closed")
+
+    # Mock async execution that simulates timeout by raising TimeoutError
+    # We patch the executor to raise TimeoutError without actually waiting
+    binary_content = BinaryContent(data=b"test_image_data", media_type="image/webp")
+
+    with patch("concurrent.futures.ThreadPoolExecutor") as mock_executor_class:
+        mock_executor = MagicMock()
+        mock_future = MagicMock()
+        mock_future.result.side_effect = concurrent.futures.TimeoutError(
+            "Execution timed out after 60 seconds"
+        )
+        mock_executor.submit.return_value = mock_future
+        mock_executor_class.return_value.__enter__.return_value = mock_executor
+
+        # Execute and expect RuntimeError wrapping the timeout
+        with pytest.raises(RuntimeError) as exc_info:
+            ProviderManager._run_agent_safely(mock_agent, binary_content, "test-model-id")
+
+        # Verify timeout error was wrapped
+        error_msg = str(exc_info.value)
+        assert "Both sync and async execution failed" in error_msg or "timed out" in error_msg.lower()
