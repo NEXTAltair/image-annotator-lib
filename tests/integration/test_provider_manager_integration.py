@@ -434,7 +434,9 @@ class TestProviderManagerIntegration:
 
             # Mock _run_agent_safely to raise TimeoutError
             with patch.object(ProviderManager, "_run_agent_safely") as mock_run_safely:
-                mock_run_safely.side_effect = concurrent.futures.TimeoutError("Agent execution timed out after 60s")
+                mock_run_safely.side_effect = concurrent.futures.TimeoutError(
+                    "Agent execution timed out after 60s"
+                )
 
                 # Execute - should handle timeout gracefully
                 try:
@@ -607,7 +609,9 @@ class TestProviderManagerIntegration:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_alternative_openrouter_provider_creation(self, managed_config_registry, lightweight_test_images):
+    def test_alternative_openrouter_provider_creation(
+        self, managed_config_registry, lightweight_test_images
+    ):
         """
         Tests creation of OpenRouter provider instance.
         Verifies that OpenRouter provider is correctly instantiated and configured.

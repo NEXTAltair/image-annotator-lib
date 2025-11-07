@@ -281,8 +281,12 @@ class TestPydanticAIFactoryIntegration:
         provider2_new = PydanticAIProviderFactory.get_provider("anthropic", api_key="test_key_2")
 
         # Verify: New provider instances are created (different object IDs)
-        assert id(provider1_new) != provider1_id, "New provider should be different instance after cache clear"
-        assert id(provider2_new) != provider2_id, "New provider should be different instance after cache clear"
+        assert id(provider1_new) != provider1_id, (
+            "New provider should be different instance after cache clear"
+        )
+        assert id(provider2_new) != provider2_id, (
+            "New provider should be different instance after cache clear"
+        )
 
     # ========================================
     # Category 2: Multi-Provider Agent Creation Tests
@@ -314,7 +318,9 @@ class TestPydanticAIFactoryIntegration:
                 # Execute: Create agent for the provider
                 test_api_key = f"test_key_for_{provider_name}"
                 agent = PydanticAIProviderFactory.create_agent(
-                    model_name=f"test_{provider_name}_model", api_model_id=api_model_id, api_key=test_api_key
+                    model_name=f"test_{provider_name}_model",
+                    api_model_id=api_model_id,
+                    api_key=test_api_key,
                 )
 
                 # Verify: Agent was created
@@ -360,7 +366,10 @@ class TestPydanticAIFactoryIntegration:
 
         # Execute: Create OpenRouter agent with custom config
         agent = PydanticAIProviderFactory.create_openrouter_agent(
-            model_name="test_openrouter", api_model_id="openrouter:anthropic/claude-3-opus", api_key="test_or_key", config_data=config_data
+            model_name="test_openrouter",
+            api_model_id="openrouter:anthropic/claude-3-opus",
+            api_key="test_or_key",
+            config_data=config_data,
         )
 
         # Verify: Agent was created

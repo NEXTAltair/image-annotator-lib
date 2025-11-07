@@ -676,7 +676,9 @@ class TestProviderManagerCrossProviderIntegration:
                 )
 
                 # Agent should be reused, not recreated
-                assert agent_creation_count[0] == initial_count, "Agent should be reused for same configuration"
+                assert agent_creation_count[0] == initial_count, (
+                    "Agent should be reused for same configuration"
+                )
 
                 # Phase 3: Clear cache (simulate by clearing our mock cache)
                 agent_cache.clear()
@@ -690,9 +692,9 @@ class TestProviderManagerCrossProviderIntegration:
                 )
 
                 # New agent should be created after cache clear
-                assert (
-                    agent_creation_count[0] == initial_count + 1
-                ), "New agent should be created after cache clear"
+                assert agent_creation_count[0] == initial_count + 1, (
+                    "New agent should be created after cache clear"
+                )
 
     # ========================================
     # Category B: Dynamic Model Switching & Result Consistency
@@ -762,7 +764,9 @@ class TestProviderManagerCrossProviderIntegration:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_cross_provider_result_format_consistency(self, managed_config_registry, lightweight_test_images):
+    def test_cross_provider_result_format_consistency(
+        self, managed_config_registry, lightweight_test_images
+    ):
         """
         Verify that all providers return results in consistent AnnotationResult format.
 
@@ -830,7 +834,9 @@ class TestProviderManagerCrossProviderIntegration:
                     # Check AnnotationResult TypedDict structure
                     assert isinstance(annotation_result, dict), f"{provider} result should be dict"
                     assert "tags" in annotation_result, f"{provider} should have 'tags' field"
-                    assert "formatted_output" in annotation_result, f"{provider} should have 'formatted_output'"
+                    assert "formatted_output" in annotation_result, (
+                        f"{provider} should have 'formatted_output'"
+                    )
                     assert annotation_result.get("error") is None, f"{provider} should not have error"
 
                     # Verify consistent data types
@@ -839,7 +845,9 @@ class TestProviderManagerCrossProviderIntegration:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_provider_specific_configuration_handling(self, managed_config_registry, lightweight_test_images):
+    def test_provider_specific_configuration_handling(
+        self, managed_config_registry, lightweight_test_images
+    ):
         """
         Verify provider-specific configurations are correctly handled (e.g., OpenRouter custom headers).
 
@@ -896,12 +904,12 @@ class TestProviderManagerCrossProviderIntegration:
                 call_args = mock_get_agent.call_args
                 # Check both positional and keyword arguments
                 if call_args.kwargs:
-                    assert (
-                        call_args.kwargs.get("model_name") == model_name
-                    ), "model_name should match in kwargs"
-                    assert (
-                        call_args.kwargs.get("api_model_id") == "openrouter:anthropic/claude-3-opus"
-                    ), "api_model_id should match"
+                    assert call_args.kwargs.get("model_name") == model_name, (
+                        "model_name should match in kwargs"
+                    )
+                    assert call_args.kwargs.get("api_model_id") == "openrouter:anthropic/claude-3-opus", (
+                        "api_model_id should match"
+                    )
                 else:
                     # Check positional arguments
                     assert len(call_args.args) >= 2, "Should have at least model_name and api_model_id"
