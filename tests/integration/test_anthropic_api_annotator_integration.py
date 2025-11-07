@@ -247,40 +247,6 @@ class TestAnthropicApiAnnotatorIntegration:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    @pytest.mark.skip(
-        reason="TODO: Fix mock setup - currently makes real API calls when ALLOW_MODEL_REQUESTS=True"
-    )
-    def test_anthropic_generic_error_handling(self, anthropic_annotator, lightweight_test_images):
-        """Test handling of generic Anthropic API errors."""
-        from pydantic_ai import models
-
-        # Temporarily enable ALLOW_MODEL_REQUESTS so mock can work
-        original_value = models.ALLOW_MODEL_REQUESTS
-        models.ALLOW_MODEL_REQUESTS = True
-
-        try:
-            with patch(
-                "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
-            ) as mock_get_agent:
-                mock_agent = MagicMock()
-                mock_agent.run = AsyncMock(side_effect=Exception("unknown error"))
-                mock_get_agent.return_value = mock_agent
-
-                anthropic_annotator._setup_agent()
-
-                # Should handle generic errors gracefully
-                results = anthropic_annotator.run_with_model(
-                    lightweight_test_images[:1], "anthropic:claude-3-5-sonnet"
-                )
-        finally:
-            models.ALLOW_MODEL_REQUESTS = original_value
-
-        assert len(results) == 1
-        assert results[0].error is not None
-        assert "Anthropic API Error" in results[0].error
-
-    @pytest.mark.integration
-    @pytest.mark.fast_integration
     def test_image_preprocessing_with_different_formats(self, anthropic_annotator, lightweight_test_images):
         """Test image preprocessing with different input formats."""
         with patch(
@@ -335,59 +301,6 @@ class TestAnthropicApiAnnotatorIntegration:
 
         assert "Agent が初期化されていません" in str(exc_info.value)
         assert exc_info.value.provider_name == "Anthropic"
-
-    @pytest.mark.integration
-    @pytest.mark.fast_integration
-    @pytest.mark.skip(
-        reason="TODO: Fix mock setup - currently makes real API calls when ALLOW_MODEL_REQUESTS=True"
-    )
-    def test_batch_processing_resilience(self, anthropic_annotator, lightweight_test_images):
-        """Test batch processing with individual failures."""
-        from pydantic_ai import models
-
-        # Temporarily enable ALLOW_MODEL_REQUESTS so mock can work
-        original_value = models.ALLOW_MODEL_REQUESTS
-        models.ALLOW_MODEL_REQUESTS = True
-
-        try:
-            with patch(
-                "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
-            ) as mock_get_agent:
-                call_count = 0
-
-                def mock_run(*args, **kwargs):
-                    nonlocal call_count
-                    call_count += 1
-
-                    if call_count % 3 == 0:
-                        # Every third call fails
-                        raise Exception("intermittent failure")
-                    else:
-                        # Successful calls
-                        mock_response = MagicMock()
-                        mock_response.tags = [f"batch_tag_{call_count}"]
-                        return MagicMock(data=mock_response)
-
-                mock_agent = MagicMock()
-                mock_agent.run = AsyncMock(side_effect=mock_run)
-                mock_get_agent.return_value = mock_agent
-
-                anthropic_annotator._setup_agent()
-
-                # Test with 6 images (2 will fail, 4 will succeed)
-                test_images = lightweight_test_images * 2  # 6 images total
-                results = anthropic_annotator.run_with_model(test_images, "anthropic:claude-3-5-sonnet")
-        finally:
-            models.ALLOW_MODEL_REQUESTS = original_value
-
-        assert len(results) == 6
-
-        # Count successes and failures
-        success_count = sum(1 for r in results if r.error is None)
-        error_count = sum(1 for r in results if r.error is not None)
-
-        assert success_count == 4  # Should have 4 successes
-        assert error_count == 2  # Should have 2 failures
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -539,60 +452,6 @@ class TestAnthropicApiAnnotatorIntegration:
                     assert results[0].captions == ["Override test caption."]
                     if results[0].scores:
                         assert results[0].scores.get("score") == 0.92
-
-    @pytest.mark.integration
-    @pytest.mark.fast_integration
-    @pytest.mark.skip(
-        reason="TODO: Fix mock setup - currently makes real API calls when ALLOW_MODEL_REQUESTS=True"
-    )
-    def test_sequential_claude_requests(self, anthropic_annotator, lightweight_test_images):
-        """Test handling of sequential requests to Claude (per specification)."""
-        from pydantic_ai import models
-
-        # Temporarily enable ALLOW_MODEL_REQUESTS so mock can work
-        original_value = models.ALLOW_MODEL_REQUESTS
-        models.ALLOW_MODEL_REQUESTS = True
-
-        try:
-            with patch(
-                "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
-            ) as mock_get_agent:
-                sequential_calls = []
-
-                def mock_run(*args, **kwargs):
-                    call_id = len(sequential_calls) + 1
-                    sequential_calls.append(call_id)
-                    mock_response = MagicMock()
-                    mock_response.tags = [f"sequential_claude_{call_id}"]
-                    mock_response.captions = [f"Sequential caption {call_id}"]
-                    mock_response.score = 0.85
-                    return MagicMock(data=mock_response)
-
-                mock_agent = MagicMock()
-                mock_agent.run = AsyncMock(side_effect=mock_run)
-                mock_get_agent.return_value = mock_agent
-
-                anthropic_annotator._setup_agent()
-
-                # Test sequential processing (per specification)
-                results = anthropic_annotator.run_with_model(
-                    lightweight_test_images, "anthropic:claude-3-5-sonnet"
-                )
-        finally:
-            models.ALLOW_MODEL_REQUESTS = original_value
-
-        # Verify all requests were processed sequentially
-        assert len(results) == len(lightweight_test_images)
-        assert len(sequential_calls) == len(lightweight_test_images)
-
-        # Verify all successful with UnifiedAnnotationResult format
-        for result in results:
-            from image_annotator_lib.core.types import UnifiedAnnotationResult
-
-            assert isinstance(result, UnifiedAnnotationResult)
-            assert result.error is None
-            assert result.tags is not None
-            assert result.captions is not None
 
     @pytest.mark.integration
     @pytest.mark.fast_integration

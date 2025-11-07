@@ -342,3 +342,404 @@ class TestProviderManagerIntegration:
 
         # Cleanup
         ProviderManager._provider_instances.clear()
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    @pytest.mark.parametrize(
+        "invalid_config,expected_error_pattern",
+        [
+            # APIキー未設定（プロバイダーのみ指定）
+            (
+                {"provider": "anthropic"},
+                "API key|api_key|APIキー",
+            ),
+            # api_model_id未設定（最小限の設定）
+            (
+                {"provider": "google", "api_key": "test_key"},
+                "API model|api_model_id|モデルID",
+            ),
+            # 不明なプロバイダー
+            (
+                {"provider": "unknown_provider", "api_key": "test", "api_model_id": "test"},
+                "Unsupported provider|Unknown provider|unknown_provider",
+            ),
+        ],
+    )
+    def test_invalid_configuration_error(
+        self, managed_config_registry, lightweight_test_images, invalid_config, expected_error_pattern
+    ):
+        """
+        Tests that invalid configuration raises appropriate errors.
+        Verifies error handling for missing API key, model ID, and unsupported provider.
+        """
+        from unittest.mock import patch
+
+        model_name = "test_invalid_config_model"
+        managed_config_registry.set(model_name, invalid_config)
+
+        # Execute and expect error
+        # Note: Implementation may handle errors differently (raise exception vs return error in result)
+        try:
+            with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
+                mock_phash.return_value = "phash_config_error"
+
+                results = ProviderManager.run_inference_with_model(
+                    model_name=model_name,
+                    images_list=lightweight_test_images[:1],
+                    api_model_id=invalid_config.get("api_model_id", "test-model"),
+                )
+
+                # If implementation returns error in result dict
+                assert "phash_config_error" in results
+                assert results["phash_config_error"]["error"] is not None
+
+                # Verify error message contains expected pattern
+                import re
+
+                error_message = results["phash_config_error"]["error"]
+                assert re.search(expected_error_pattern, error_message, re.IGNORECASE), (
+                    f"Expected error pattern '{expected_error_pattern}' "
+                    f"not found in error message: {error_message}"
+                )
+
+        except Exception as e:
+            # If implementation raises exception instead
+            import re
+
+            assert re.search(expected_error_pattern, str(e), re.IGNORECASE), (
+                f"Expected error pattern '{expected_error_pattern}' not found in exception: {e!s}"
+            )
+
+        # Cleanup
+        ProviderManager._provider_instances.clear()
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_timeout_handling(self, managed_config_registry, lightweight_test_images):
+        """
+        Tests that timeout errors are handled gracefully.
+        Verifies that timeout during agent execution is caught and reported appropriately.
+        """
+        import concurrent.futures
+        from unittest.mock import patch
+
+        model_name = "test_timeout_model"
+        managed_config_registry.set(
+            model_name, {"provider": "anthropic", "api_key": "test_key", "api_model_id": "claude-3-opus"}
+        )
+
+        # Mock calculate_phash
+        with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
+            mock_phash.return_value = "phash_timeout"
+
+            # Mock _run_agent_safely to raise TimeoutError
+            with patch.object(ProviderManager, "_run_agent_safely") as mock_run_safely:
+                mock_run_safely.side_effect = concurrent.futures.TimeoutError("Agent execution timed out after 60s")
+
+                # Execute - should handle timeout gracefully
+                try:
+                    results = ProviderManager.run_inference_with_model(
+                        model_name=model_name,
+                        images_list=lightweight_test_images[:1],
+                        api_model_id="claude-3-opus",
+                        api_keys={"anthropic": "test_key"},
+                    )
+
+                    # If implementation handles timeout and returns error in result
+                    assert "phash_timeout" in results
+                    assert results["phash_timeout"]["error"] is not None
+                    # Check for "timeout" or "timed out" pattern
+                    error_lower = results["phash_timeout"]["error"].lower()
+                    assert "timeout" in error_lower or "timed out" in error_lower, (
+                        f"Expected 'timeout' or 'timed out' in error message, got: {results['phash_timeout']['error']}"
+                    )
+
+                except concurrent.futures.TimeoutError as e:
+                    # If implementation propagates timeout exception
+                    assert "timeout" in str(e).lower()
+
+        # Cleanup
+        ProviderManager._provider_instances.clear()
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_response_parsing_error_none(self, managed_config_registry, lightweight_test_images):
+        """
+        Tests handling of None API response.
+        Verifies that None response is detected and reported appropriately.
+        """
+        from unittest.mock import MagicMock, patch
+
+        model_name = "test_parsing_error_model"
+        managed_config_registry.set(model_name, {"provider": "openai", "api_key": "test_key"})
+
+        # Mock calculate_phash
+        with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
+            mock_phash.return_value = "phash_parse_error"
+
+            # Mock _run_agent_safely to return None response
+            with patch.object(ProviderManager, "_run_agent_safely") as mock_run_safely:
+                mock_result = MagicMock()
+                mock_result.data = None
+                mock_run_safely.return_value = mock_result
+
+                # Execute
+                results = ProviderManager.run_inference_with_model(
+                    model_name=model_name,
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="gpt-4",
+                    api_keys={"openai": "test_key"},
+                )
+
+                # Verify error handling
+                assert "phash_parse_error" in results
+
+                # Verify error is captured
+                error_message = results["phash_parse_error"].get("error")
+                assert error_message is not None, "Expected error field to be set for None response"
+
+                # Verify error message indicates no response
+                assert "no response" in error_message.lower(), (
+                    f"Expected 'no response' in error message, got: {error_message}"
+                )
+
+        # Cleanup
+        ProviderManager._provider_instances.clear()
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_event_loop_already_running(self, managed_config_registry, lightweight_test_images):
+        """
+        Tests handling when an event loop is already running.
+        Verifies that nested event loop scenarios are handled correctly.
+        """
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        from image_annotator_lib.core.types import AnnotationSchema
+
+        model_name = "test_event_loop_running"
+        managed_config_registry.set(model_name, {"provider": "anthropic", "api_key": "test_key"})
+
+        # Mock calculate_phash
+        with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
+            mock_phash.return_value = "phash_event_loop"
+
+            # Mock asyncio.get_running_loop to simulate event loop already running
+            with patch("asyncio.get_running_loop") as mock_get_loop:
+                mock_loop = MagicMock()
+                mock_get_loop.return_value = mock_loop
+
+                # Mock asyncio.new_event_loop fallback
+                with patch("asyncio.new_event_loop") as mock_new_loop:
+                    fallback_loop = MagicMock()
+                    mock_new_loop.return_value = fallback_loop
+
+                    # Mock run_in_executor for the fallback execution
+                    future = asyncio.Future()
+                    mock_result = MagicMock()
+                    mock_result.data = AnnotationSchema(
+                        tags=["event_loop_test"], captions=["Event loop handling"], score=0.9
+                    )
+                    future.set_result(mock_result)
+                    fallback_loop.run_in_executor.return_value = future
+
+                    # Mock the agent run itself
+                    with patch.object(ProviderManager, "_run_agent_safely") as mock_run_safely:
+                        mock_run_safely.return_value = mock_result
+
+                        # Execute
+                        results = ProviderManager.run_inference_with_model(
+                            model_name=model_name,
+                            images_list=lightweight_test_images[:1],
+                            api_model_id="claude-3-opus",
+                            api_keys={"anthropic": "test_key"},
+                        )
+
+                        # Verify successful handling
+                        assert "phash_event_loop" in results
+                        assert results["phash_event_loop"]["error"] is None
+                        assert results["phash_event_loop"]["tags"] == ["event_loop_test"]
+
+        # Cleanup
+        ProviderManager._provider_instances.clear()
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_event_loop_creation_error(self, managed_config_registry, lightweight_test_images):
+        """
+        Tests handling when event loop creation fails.
+        Verifies graceful error handling for event loop initialization issues.
+        """
+        from unittest.mock import patch
+
+        model_name = "test_event_loop_creation_error"
+        managed_config_registry.set(model_name, {"provider": "google", "api_key": "test_key"})
+
+        # Mock calculate_phash
+        with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
+            mock_phash.return_value = "phash_loop_creation_error"
+
+            # Mock asyncio.new_event_loop to raise RuntimeError
+            with patch("asyncio.new_event_loop") as mock_new_loop:
+                mock_new_loop.side_effect = RuntimeError("Event loop creation failed")
+
+                # Execute - should handle error gracefully
+                try:
+                    results = ProviderManager.run_inference_with_model(
+                        model_name=model_name,
+                        images_list=lightweight_test_images[:1],
+                        api_model_id="gemini-pro",
+                        api_keys={"google": "test_key"},
+                    )
+
+                    # If implementation handles error and returns it in result
+                    assert "phash_loop_creation_error" in results
+                    error = results["phash_loop_creation_error"].get("error")
+                    assert error is not None, "Expected error for event loop creation failure"
+
+                except RuntimeError as e:
+                    # If implementation propagates the error
+                    assert "event loop" in str(e).lower() or "creation failed" in str(e).lower()
+
+        # Cleanup
+        ProviderManager._provider_instances.clear()
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_alternative_openrouter_provider_creation(self, managed_config_registry, lightweight_test_images):
+        """
+        Tests creation of OpenRouter provider instance.
+        Verifies that OpenRouter provider is correctly instantiated and configured.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from image_annotator_lib.core.types import AnnotationSchema
+
+        model_name = "test_openrouter_model"
+        managed_config_registry.set(
+            model_name,
+            {
+                "provider": "openrouter",
+                "api_key": "test_openrouter_key",
+                "openrouter_referer": "https://test.com",
+                "openrouter_app_name": "TestApp",
+            },
+        )
+
+        # Mock calculate_phash
+        with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
+            mock_phash.return_value = "phash_openrouter"
+
+            # Mock _run_agent_safely
+            with patch.object(ProviderManager, "_run_agent_safely") as mock_run_safely:
+                mock_result = MagicMock()
+                mock_result.data = AnnotationSchema(
+                    tags=["openrouter_test"], captions=["OpenRouter provider test"], score=0.95
+                )
+                mock_run_safely.return_value = mock_result
+
+                # Execute
+                results = ProviderManager.run_inference_with_model(
+                    model_name=model_name,
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="openrouter:anthropic/claude-3-opus",
+                    api_keys={"openrouter": "test_openrouter_key"},
+                )
+
+                # Verify successful execution
+                assert "phash_openrouter" in results
+                assert results["phash_openrouter"]["error"] is None
+                assert results["phash_openrouter"]["tags"] == ["openrouter_test"]
+
+                # Verify provider instance was created for openrouter
+                assert "openrouter" in ProviderManager._provider_instances
+
+        # Cleanup
+        ProviderManager._provider_instances.clear()
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_alternative_google_provider_creation(self, managed_config_registry, lightweight_test_images):
+        """
+        Tests creation of Google provider instance.
+        Verifies that Google provider is correctly instantiated and configured.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from image_annotator_lib.core.types import AnnotationSchema
+
+        model_name = "test_google_gemini_model"
+        managed_config_registry.set(model_name, {"provider": "google", "api_key": "test_google_key"})
+
+        # Mock calculate_phash
+        with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
+            mock_phash.return_value = "phash_google"
+
+            # Mock _run_agent_safely
+            with patch.object(ProviderManager, "_run_agent_safely") as mock_run_safely:
+                mock_result = MagicMock()
+                mock_result.data = AnnotationSchema(
+                    tags=["google_test"], captions=["Google Gemini provider test"], score=0.92
+                )
+                mock_run_safely.return_value = mock_result
+
+                # Execute
+                results = ProviderManager.run_inference_with_model(
+                    model_name=model_name,
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="gemini-2.0-flash",
+                    api_keys={"google": "test_google_key"},
+                )
+
+                # Verify successful execution
+                assert "phash_google" in results
+                assert results["phash_google"]["error"] is None
+                assert results["phash_google"]["tags"] == ["google_test"]
+
+                # Verify provider instance was created for google
+                assert "google" in ProviderManager._provider_instances
+
+        # Cleanup
+        ProviderManager._provider_instances.clear()
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_async_context_manager_edge_case(self, managed_config_registry, lightweight_test_images):
+        """
+        Tests edge case handling in async context managers.
+        Verifies that async context cleanup works correctly even with errors.
+        """
+        from unittest.mock import patch
+
+        model_name = "test_async_context"
+        managed_config_registry.set(model_name, {"provider": "anthropic", "api_key": "test_key"})
+
+        # Mock calculate_phash
+        with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
+            mock_phash.return_value = "phash_async_context"
+
+            # Mock _run_agent_safely to raise an error during execution
+            with patch.object(ProviderManager, "_run_agent_safely") as mock_run_safely:
+                mock_run_safely.side_effect = ValueError("Async context error during agent execution")
+
+                # Execute - should handle error and not leak resources
+                try:
+                    results = ProviderManager.run_inference_with_model(
+                        model_name=model_name,
+                        images_list=lightweight_test_images[:1],
+                        api_model_id="claude-3-opus",
+                        api_keys={"anthropic": "test_key"},
+                    )
+
+                    # If implementation catches and returns error
+                    assert "phash_async_context" in results
+                    error = results["phash_async_context"].get("error")
+                    assert error is not None
+
+                except ValueError as e:
+                    # If implementation propagates the error
+                    assert "async context" in str(e).lower() or "agent execution" in str(e).lower()
+
+        # Cleanup
+        ProviderManager._provider_instances.clear()

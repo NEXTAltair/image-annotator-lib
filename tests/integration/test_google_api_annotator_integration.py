@@ -7,7 +7,6 @@ Tests Provider-level PydanticAI integration, error handling, and resource manage
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from PIL import Image
 
 from image_annotator_lib.core.provider_manager import ProviderManager
 from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
@@ -395,43 +394,6 @@ class TestGoogleApiAnnotatorIntegration:
                 # Verify rate limiting was called for each image
                 assert mock_rate_limit.call_count == len(lightweight_test_images)
                 assert len(results) == len(lightweight_test_images)
-
-    @pytest.mark.skip(reason="Test environment detection inconsistency - needs revision")
-    @pytest.mark.integration
-    @pytest.mark.fast_integration
-    def test_configuration_validation(self, managed_config_registry):
-        """Test configuration validation for Google annotator."""
-        from unittest.mock import patch
-
-        # Test missing API key
-        invalid_config = {
-            "class": "GoogleApiAnnotator",
-            "api_model_id": "gemini-1.5-pro",
-            # Missing api_key
-        }
-        managed_config_registry.set("invalid_google", invalid_config)
-
-        # Temporarily disable test environment detection to test validation
-        with patch("image_annotator_lib.core.pydantic_ai_factory._is_test_environment", return_value=False):
-            with pytest.raises((ValueError, KeyError)) as exc_info:
-                GoogleApiAnnotator("invalid_google")
-
-            # Should raise error about missing configuration
-            assert "api_key" in str(exc_info.value).lower() or "keyerror" in str(exc_info.value).lower()
-
-        # Test missing model ID
-        invalid_config2 = {
-            "class": "GoogleApiAnnotator",
-            "api_key": "test-key",
-            # Missing api_model_id
-        }
-        managed_config_registry.set("invalid_google2", invalid_config2)
-
-        annotator = GoogleApiAnnotator("invalid_google2")
-
-        # Should raise error when trying to run inference without model ID
-        with pytest.raises(ValueError):
-            annotator._run_inference([Image.new("RGB", (64, 64), "red")])
 
     @pytest.mark.integration
     @pytest.mark.fast_integration

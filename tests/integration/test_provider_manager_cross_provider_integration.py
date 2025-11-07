@@ -490,3 +490,418 @@ class TestProviderManagerCrossProviderIntegration:
                 except Exception:
                     # Configuration validation errors are acceptable
                     pass
+
+    # ========================================
+    # Category A: Agent Cache & Provider Instance Management
+    # ========================================
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_agent_cache_reuse_across_same_provider(self, managed_config_registry, lightweight_test_images):
+        """
+        Verify that agents are reused when using the same provider with identical configuration.
+
+        Tests PydanticAIProviderFactory's caching logic to ensure Agent instances
+        are properly reused across multiple inference calls with same model_name, api_model_id, and api_key.
+        """
+        from unittest.mock import MagicMock, patch
+
+        model_name = "test_cache_reuse"
+        managed_config_registry.set(model_name, {"provider": "openai", "api_key": "test_cache_key"})
+
+        with patch(
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+        ) as mock_get_agent:
+            # Create single mock agent that will be reused
+            mock_agent = MagicMock()
+            mock_get_agent.return_value = mock_agent
+
+            # Call twice with same configuration
+            with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
+                mock_phash.return_value = "phash_cache_test"
+
+                # First call
+                ProviderManager.run_inference_with_model(
+                    model_name=model_name,
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="openai:gpt-4",
+                    api_keys={"openai": "test_cache_key"},
+                )
+
+                # Second call with same configuration
+                ProviderManager.run_inference_with_model(
+                    model_name=model_name,
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="openai:gpt-4",
+                    api_keys={"openai": "test_cache_key"},
+                )
+
+                # Verify get_cached_agent was called twice with same parameters
+                assert mock_get_agent.call_count == 2
+                call_args_list = mock_get_agent.call_args_list
+
+                # Both calls should have identical parameters
+                assert call_args_list[0] == call_args_list[1]
+                assert call_args_list[0].kwargs["model_name"] == model_name
+                assert call_args_list[0].kwargs["api_model_id"] == "openai:gpt-4"
+                assert call_args_list[0].kwargs["api_key"] == "test_cache_key"
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_agent_creation_for_different_configurations(
+        self, managed_config_registry, lightweight_test_images
+    ):
+        """
+        Verify that different configurations create separate Agent instances.
+
+        Tests that changing any of the key parameters (model_name, api_model_id, or api_key)
+        results in different Agent instances being requested from the factory.
+        """
+        from unittest.mock import MagicMock, patch
+
+        # Setup multiple model configurations
+        managed_config_registry.set("model_a", {"provider": "openai", "api_key": "key_a"})
+        managed_config_registry.set("model_b", {"provider": "openai", "api_key": "key_b"})
+
+        with patch(
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+        ) as mock_get_agent:
+            # Create new mock agent for each call
+            mock_get_agent.side_effect = lambda **kwargs: MagicMock()
+
+            with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
+                mock_phash.return_value = "phash_diff_config"
+
+                # Test 1: Different model_name
+                ProviderManager.run_inference_with_model(
+                    model_name="model_a",
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="openai:gpt-4",
+                    api_keys={"openai": "key_a"},
+                )
+
+                ProviderManager.run_inference_with_model(
+                    model_name="model_b",
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="openai:gpt-4",
+                    api_keys={"openai": "key_b"},
+                )
+
+                # Test 2: Different api_model_id (same model_name)
+                ProviderManager.run_inference_with_model(
+                    model_name="model_a",
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="openai:gpt-3.5-turbo",
+                    api_keys={"openai": "key_a"},
+                )
+
+                # Verify factory was called with different parameters
+                assert mock_get_agent.call_count >= 3
+                call_args_list = mock_get_agent.call_args_list
+
+                # First two calls should have different model_name and api_key
+                assert call_args_list[0].kwargs["model_name"] != call_args_list[1].kwargs["model_name"]
+                assert call_args_list[0].kwargs["api_key"] != call_args_list[1].kwargs["api_key"]
+
+                # First and third calls should have different api_model_id
+                assert call_args_list[0].kwargs["api_model_id"] != call_args_list[2].kwargs["api_model_id"]
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_provider_instance_lifecycle_management(self, managed_config_registry, lightweight_test_images):
+        """
+        Verify provider instance lifecycle management including creation, reuse, and cleanup.
+
+        Tests the full lifecycle of provider instances: initial creation, reuse across calls,
+        cache clearing, and recreation after clear.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from image_annotator_lib.core.types import AnnotationSchema
+
+        model_name = "test_lifecycle"
+        managed_config_registry.set(model_name, {"provider": "anthropic", "api_key": "test_lifecycle_key"})
+
+        # Track agent creation and simulate caching
+        agent_cache = {}
+        agent_creation_count = [0]  # Use list to allow modification in nested function
+
+        def mock_get_cached_agent_impl(model_name, api_model_id, api_key, config_data=None):
+            """Simulate agent caching behavior"""
+            # Create cache key from parameters
+            cache_key = f"{model_name}:{api_model_id}:{api_key}"
+
+            # Check if agent is in cache
+            if cache_key in agent_cache:
+                # Return cached agent (no increment)
+                return agent_cache[cache_key]
+
+            # Create new agent (increment count)
+            agent_creation_count[0] += 1
+            mock_agent = MagicMock()
+            mock_result = MagicMock()
+            mock_result.data = AnnotationSchema(
+                tags=["lifecycle_tag"], captions=["Test caption"], score=0.9, metadata={}
+            )
+            mock_agent.run_sync.return_value = mock_result
+
+            # Cache the agent
+            agent_cache[cache_key] = mock_agent
+            return mock_agent
+
+        with patch(
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent",
+            side_effect=mock_get_cached_agent_impl,
+        ):
+            with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
+                mock_phash.return_value = "phash_lifecycle"
+
+                # Phase 1: Initial agent creation
+                ProviderManager.run_inference_with_model(
+                    model_name=model_name,
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="anthropic:claude-3-opus",
+                    api_keys={"anthropic": "test_lifecycle_key"},
+                )
+
+                initial_count = agent_creation_count[0]
+                assert initial_count == 1, "Agent should be created once on first call"
+
+                # Phase 2: Agent reuse (same configuration)
+                ProviderManager.run_inference_with_model(
+                    model_name=model_name,
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="anthropic:claude-3-opus",
+                    api_keys={"anthropic": "test_lifecycle_key"},
+                )
+
+                # Agent should be reused, not recreated
+                assert agent_creation_count[0] == initial_count, "Agent should be reused for same configuration"
+
+                # Phase 3: Clear cache (simulate by clearing our mock cache)
+                agent_cache.clear()
+
+                # Phase 4: Agent recreation after clear
+                ProviderManager.run_inference_with_model(
+                    model_name=model_name,
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="anthropic:claude-3-opus",
+                    api_keys={"anthropic": "test_lifecycle_key"},
+                )
+
+                # New agent should be created after cache clear
+                assert (
+                    agent_creation_count[0] == initial_count + 1
+                ), "New agent should be created after cache clear"
+
+    # ========================================
+    # Category B: Dynamic Model Switching & Result Consistency
+    # ========================================
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_api_model_id_override_functionality(self, managed_config_registry, lightweight_test_images):
+        """
+        Verify that the same model_name can dynamically switch to different api_model_id.
+
+        Tests the flexibility of ProviderManager to handle model ID overrides,
+        allowing the same configured model to use different underlying API models.
+        """
+        from unittest.mock import MagicMock, patch
+
+        model_name = "flexible_model"
+        managed_config_registry.set(model_name, {"provider": "openai", "api_key": "test_override_key"})
+
+        with patch(
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+        ) as mock_get_agent:
+            # Track which api_model_id was used for each call
+            api_model_ids_used = []
+
+            def track_model_id(**kwargs):
+                api_model_ids_used.append(kwargs.get("api_model_id"))
+                return MagicMock()
+
+            mock_get_agent.side_effect = track_model_id
+
+            with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
+                mock_phash.return_value = "phash_override"
+
+                # Call 1: Use GPT-4
+                ProviderManager.run_inference_with_model(
+                    model_name=model_name,
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="openai:gpt-4",
+                    api_keys={"openai": "test_override_key"},
+                )
+
+                # Call 2: Use GPT-3.5-turbo (same model_name, different api_model_id)
+                ProviderManager.run_inference_with_model(
+                    model_name=model_name,
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="openai:gpt-3.5-turbo",
+                    api_keys={"openai": "test_override_key"},
+                )
+
+                # Call 3: Use GPT-4o-mini (another override)
+                ProviderManager.run_inference_with_model(
+                    model_name=model_name,
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="openai:gpt-4o-mini",
+                    api_keys={"openai": "test_override_key"},
+                )
+
+                # Verify different api_model_id values were used
+                assert len(api_model_ids_used) == 3
+                assert api_model_ids_used[0] == "openai:gpt-4"
+                assert api_model_ids_used[1] == "openai:gpt-3.5-turbo"
+                assert api_model_ids_used[2] == "openai:gpt-4o-mini"
+
+                # Verify all three model IDs are different
+                assert len(set(api_model_ids_used)) == 3, "All api_model_id values should be unique"
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_cross_provider_result_format_consistency(self, managed_config_registry, lightweight_test_images):
+        """
+        Verify that all providers return results in consistent AnnotationResult format.
+
+        Tests that regardless of provider (OpenAI, Anthropic, Google),
+        the result structure adheres to AnnotationResult TypedDict specification.
+        """
+        from unittest.mock import MagicMock, patch
+
+        # Setup configurations for multiple providers
+        providers = ["openai", "anthropic", "google"]
+        for i, provider in enumerate(providers):
+            model_name = f"test_{provider}_model"
+            managed_config_registry.set(model_name, {"provider": provider, "api_key": f"key_{provider}"})
+
+        with patch(
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+        ) as mock_get_agent:
+            # Create consistent AnnotationSchema response
+            from image_annotator_lib.core.types import AnnotationSchema
+
+            def create_consistent_agent(model_name, api_model_id, api_key, config_data=None):
+                mock_agent = MagicMock()
+
+                # Create consistent response structure
+                mock_result = MagicMock()
+                mock_result.data = AnnotationSchema(
+                    tags=["test_tag_1", "test_tag_2"],
+                    captions=["Test caption"],
+                    score=0.95,
+                    metadata={"provider": api_model_id.split(":")[0]},
+                )
+                mock_agent.run_sync.return_value = mock_result
+                return mock_agent
+
+            mock_get_agent.side_effect = create_consistent_agent
+
+            results = {}
+
+            with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
+                mock_phash.return_value = "phash_consistency"
+
+                # Call each provider
+                for provider in providers:
+                    model_name = f"test_{provider}_model"
+                    api_model_id = f"{provider}:test-model"
+
+                    result = ProviderManager.run_inference_with_model(
+                        model_name=model_name,
+                        images_list=lightweight_test_images[:1],
+                        api_model_id=api_model_id,
+                        api_keys={provider: f"key_{provider}"},
+                    )
+
+                    results[provider] = result
+
+                # Verify all providers returned results
+                assert len(results) == 3
+
+                # Verify consistent result structure across all providers
+                for provider, result in results.items():
+                    assert "phash_consistency" in result, f"{provider} should return phash key"
+
+                    annotation_result = result["phash_consistency"]
+
+                    # Check AnnotationResult TypedDict structure
+                    assert isinstance(annotation_result, dict), f"{provider} result should be dict"
+                    assert "tags" in annotation_result, f"{provider} should have 'tags' field"
+                    assert "formatted_output" in annotation_result, f"{provider} should have 'formatted_output'"
+                    assert annotation_result.get("error") is None, f"{provider} should not have error"
+
+                    # Verify consistent data types
+                    assert isinstance(annotation_result["tags"], list), f"{provider} tags should be list"
+                    assert len(annotation_result["tags"]) > 0, f"{provider} should return non-empty tags"
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_provider_specific_configuration_handling(self, managed_config_registry, lightweight_test_images):
+        """
+        Verify provider-specific configurations are correctly handled (e.g., OpenRouter custom headers).
+
+        Tests that providers with special configuration requirements (like OpenRouter's
+        referer and app_name headers) are properly configured and validated.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from image_annotator_lib.core.types import AnnotationSchema
+
+        # Setup OpenRouter model with custom headers
+        model_name = "test_openrouter_custom"
+        managed_config_registry.set(
+            model_name,
+            {
+                "provider": "openrouter",
+                "api_key": "test_or_key",
+                "referer": "https://test-app.example.com",
+                "app_name": "Test Application v1.0",
+            },
+        )
+
+        with patch(
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+        ) as mock_get_agent:
+            # Mock agent with proper structure
+            mock_agent = MagicMock()
+            mock_result = MagicMock()
+            mock_result.data = AnnotationSchema(
+                tags=["openrouter_tag"], captions=["Test caption"], score=0.9, metadata={}
+            )
+            mock_agent.run_sync.return_value = mock_result
+            mock_get_agent.return_value = mock_agent
+
+            with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
+                mock_phash.return_value = "phash_or_custom"
+
+                # Execute with OpenRouter-specific configuration
+                result = ProviderManager.run_inference_with_model(
+                    model_name=model_name,
+                    images_list=lightweight_test_images[:1],
+                    api_model_id="openrouter:anthropic/claude-3-opus",
+                    api_keys={"openrouter": "test_or_key"},
+                )
+
+                # Verify get_cached_agent was called
+                assert mock_get_agent.called, "get_cached_agent should be called for OpenRouter"
+
+                # Verify result structure (confirms OpenRouter provider was used)
+                assert "phash_or_custom" in result
+                assert result["phash_or_custom"]["error"] is None
+
+                # Verify get_cached_agent was called with correct parameters
+                call_args = mock_get_agent.call_args
+                # Check both positional and keyword arguments
+                if call_args.kwargs:
+                    assert (
+                        call_args.kwargs.get("model_name") == model_name
+                    ), "model_name should match in kwargs"
+                    assert (
+                        call_args.kwargs.get("api_model_id") == "openrouter:anthropic/claude-3-opus"
+                    ), "api_model_id should match"
+                else:
+                    # Check positional arguments
+                    assert len(call_args.args) >= 2, "Should have at least model_name and api_model_id"
