@@ -36,7 +36,7 @@ uv run pytest -m webapi local_packages/image-annotator-lib/tests/
 uv run pytest local_packages/image-annotator-lib/tests/unit/core/test_config.py
 
 # Run with coverage
-uv run pytest --cov=local_packages/image-annotator-lib/src --cov-report=term-missing local_packages/image-annotator-lib/tests/
+uv run pytest --cov=image_annotator_lib --cov-report=term-missing local_packages/image-annotator-lib/tests/
 ```
 
 ### Code Quality

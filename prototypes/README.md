@@ -15,8 +15,8 @@
 PydanticAI統合による WebApiBaseAnnotator の置き換え概念実装。
 
 - **目標**: PydanticAI Agent を使用した新しい WebAPI アノテーター基底クラス
-- **関連RFC**: `tasks/rfc/pydanticai_integration_plan.md`
-- **実装段階**: 概念検証フェーズ
+- **関連記録**: MCP Cipher memory `pydanticai_implementation_complete_history_2025`
+- **実装段階**: ✅ 完了・本番統合済み（2025年10月）
 
 ## 使用方針
 

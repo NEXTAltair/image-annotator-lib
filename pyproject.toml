@@ -132,7 +132,7 @@ addopts = [
     "--tb=short",
     "--maxfail=5",
     "-ra",
-    "--cov=src",
+    "--cov=image_annotator_lib",
     "--cov-report=xml"
 ]
 markers = [
@@ -153,7 +153,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src"]
+source = ["image_annotator_lib"]
 branch = true
 omit = [
     "*/__init__.py",

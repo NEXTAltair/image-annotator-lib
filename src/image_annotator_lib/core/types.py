@@ -221,7 +221,7 @@ class BaseAnnotationResult(BaseModel):
 
 
 class WebApiAnnotationResult(BaseAnnotationResult):
-    """Web APIモデル用（PydanticAIベース）
+    """Web APIモデル用(PydanticAIベース)
 
     OpenAI、Anthropic、Google等のWeb APIからの結果を格納。
     AI生成タグ、キャプション、信頼度スコア等を含む。
@@ -236,7 +236,7 @@ class WebApiAnnotationResult(BaseAnnotationResult):
 
 
 class TaggerAnnotationResult(BaseAnnotationResult):
-    """ローカルMLタガー用（ONNX/Transformers）
+    """ローカルMLタガー用(ONNX/Transformers)
 
     WD-Tagger、DeepDanbooru等のローカルMLモデルからの結果を格納。
     カテゴリ別のスコア、閾値情報、フレームワーク情報等を含む。
@@ -252,7 +252,7 @@ class TaggerAnnotationResult(BaseAnnotationResult):
 
 
 class ScorerAnnotationResult(BaseAnnotationResult):
-    """スコアラー用（CLIPベース）
+    """スコアラー用(CLIPベース)
 
     美的スコア、品質スコア等の数値評価モデルからの結果を格納。
     数値スコアがメインデータで、tagsフィールドは持たない。
@@ -264,11 +264,11 @@ class ScorerAnnotationResult(BaseAnnotationResult):
     score_format: str = "numeric"  # "numeric" | "tag_based"
     base_model: str  # "clip-vit-large-patch14"
     raw_scores: list[float] | None = None  # 元のテンソルデータ
-    # tagsフィールドなし（数値スコアがメインデータ）
+    # tagsフィールドなし(数値スコアがメインデータ)
 
 
 class CaptionerAnnotationResult(BaseAnnotationResult):
-    """キャプション生成用（BLIP、CLIP-Caption等）
+    """キャプション生成用(BLIP、CLIP-Caption等)
 
     BLIP、GIT等のキャプション生成モデルからの結果を格納。
     生成キャプションがメインデータで、tagsフィールドは持たない。
@@ -280,7 +280,7 @@ class CaptionerAnnotationResult(BaseAnnotationResult):
     generation_params: dict[str, Any] | None = None  # beam_size, temperature等
     base_model: str  # "blip-large", "clip-interrogator"
     raw_output: Any | None = None  # 元の生成結果
-    # tagsフィールドなし（キャプションがメインデータ）
+    # tagsフィールドなし(キャプションがメインデータ)
 
 
 # Union型で型安全性確保
@@ -298,7 +298,7 @@ from enum import Enum
 
 
 class TaskCapability(str, Enum):
-    """サポートするタスク能力（3つに限定）"""
+    """サポートするタスク能力(3つに限定)"""
 
     TAGS = "tags"
     CAPTIONS = "captions"
@@ -306,22 +306,22 @@ class TaskCapability(str, Enum):
 
 
 class UnifiedAnnotationResult(BaseModel):
-    """統一アノテーション結果（capability-based validation対応）
+    """統一アノテーション結果(capability-based validation対応)
 
     マルチモーダルLLM対応のcapability-based統一スキーマ。
-    1つのモデルが複数タスク（tags, captions, scores）を実行可能。
+    1つのモデルが複数タスク(tags, captions, scores)を実行可能。
     """
 
     model_name: str
     capabilities: set[TaskCapability]
     error: str | None = None
 
-    # マルチタスク対応フィールド（capabilityに応じて使用）
+    # マルチタスク対応フィールド(capabilityに応じて使用)
     tags: list[str] | None = None
     captions: list[str] | None = None
     scores: dict[str, float] | None = None
 
-    # メタデータ（Optional）
+    # メタデータ(Optional)
     provider_name: str | None = None
     framework: str | None = None
     raw_output: dict[str, Any] | None = None

@@ -10,8 +10,8 @@ This document provides essential context about the `image-annotator-lib` project
 
 These rules, derived from `.cursor/rules/`, must be strictly followed at all times.
 
-- **Reference Documentation:** Always reference documents in the `docs/` and `tasks/` directories, as well as rule files (`.mdc`) in `.cursor/rules/` before responding.
-- **Follow Plans and Memory:** Adhere to the planning and memory management workflows defined in `.cursor/rules/plan.mdc` and `.cursor/rules/memory.mdc`. This includes updating `tasks/tasks_plan.md` and `tasks/active_context.md` to reflect the current state of work.
+- **Reference Documentation:** Always reference documents in the `docs/` directory and rule files (`.mdc`) in `.cursor/rules/` before responding.
+- **Follow Plans and Memory:** Adhere to the planning and memory management workflows defined in `.cursor/rules/plan.mdc` and `.cursor/rules/memory.mdc`. Use MCP Serena/Cipher memory for all task tracking and development records.
 - **YAGNI (You Ain't Gonna Need It):** Do not implement features that might be needed later. Only implement the minimum required functionality for the current task.
 - **No Full-Width Characters:** Never use full-width alphanumeric characters or symbols in code, comments, or documentation.
 - **Record Changes:** If you alter the existing design, you must check related documentation and record the change and its reasoning in the appropriate location.
@@ -93,8 +93,8 @@ Commands should be run from the project root (`C:\LoRAIro\local_packages\image-a
     - **`.cursor/rules/implement.mdc`**: For rules regarding implementation.
     - **`.cursor/rules/debug.mdc`**: For debugging procedures.
 - **Task Management:**
-    - **`tasks/tasks_plan.md`**: The detailed task backlog and overall project plan.
-    - **`tasks/active_context.md`**: The current development focus and next steps.
+    - **MCP Serena Memory**: All task tracking, project status, and development records
+    - **MCP Cipher Memory**: Long-term design decisions and architectural knowledge
 - **Project Configuration:**
     - **`pyproject.toml`**: Project metadata, dependencies, and tool configurations (`ruff`, `pytest`, `mypy`).
 - **Core Logic:**
