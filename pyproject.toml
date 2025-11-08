@@ -132,8 +132,6 @@ addopts = [
     "--tb=short",
     "--maxfail=5",
     "-ra",
-    "--cov=image_annotator_lib",
-    "--cov-report=xml"
 ]
 markers = [
     "unit: ユニットテスト（全体）",
@@ -155,6 +153,7 @@ markers = [
 [tool.coverage.run]
 source = ["image_annotator_lib"]
 branch = true
+parallel = true
 omit = [
     "*/__init__.py",
     "src/image_annotator_lib/exceptions/*",

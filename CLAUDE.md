@@ -35,8 +35,10 @@ uv run pytest -m webapi local_packages/image-annotator-lib/tests/
 # Run single test file
 uv run pytest local_packages/image-annotator-lib/tests/unit/core/test_config.py
 
-# Run with coverage
-uv run pytest --cov=image_annotator_lib --cov-report=term-missing local_packages/image-annotator-lib/tests/
+# Run with coverage (use coverage run to avoid torch reload issues)
+uv run coverage run -m pytest local_packages/image-annotator-lib/tests/
+uv run coverage report -m
+uv run coverage xml  # For CI integration
 ```
 
 ### Code Quality
