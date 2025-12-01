@@ -626,7 +626,8 @@ class ModelLoad:
                 device: The target device (e.g., "cuda", "cpu").
             """
             self.model_name = model_name
-            self.device = device
+            # CUDA利用可否を検証し、利用不可ならCPUにフォールバック
+            self.device = utils.determine_effective_device(device, model_name)
 
         @abstractmethod
         def _calculate_specific_size(self, model_path: str, **kwargs) -> float:

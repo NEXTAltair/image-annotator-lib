@@ -70,6 +70,12 @@ class LocalMLModelConfig(BaseModelConfig):
     """
 
     model_path: str = Field(description="モデルパス(HuggingFace repo/URL/local path)")
+    model_type: str | None = Field(
+        default=None,
+        description="モデルタイプ (scorer/tagger/captioner)",
+        alias="type",
+        serialization_alias="type",
+    )
     base_model: str | None = Field(default=None, description="CLIPベースモデル(CLIP系のみ)")
     activation_type: str | None = Field(default=None, description="活性化関数(一部モデルのみ)")
     final_activation_type: str | None = Field(default=None, description="最終層活性化関数(一部モデルのみ)")

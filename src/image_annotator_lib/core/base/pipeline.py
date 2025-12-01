@@ -45,7 +45,7 @@ class PipelineBaseAnnotator(BaseAnnotator):
 
         # 型の問題を回避するため、一時的にcast使用
         restored_components = ModelLoad.restore_model_to_cuda(
-            self.model_name, self.device, cast(dict[str, Any], self.components)
+            self.model_name, cast(dict[str, Any], self.components), self.device
         )
         self.components = cast(TransformersPipelineComponents, restored_components)
         return self

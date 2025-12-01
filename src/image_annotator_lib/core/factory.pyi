@@ -190,8 +190,8 @@ class ModelLoad:
     @staticmethod
     def restore_model_to_cuda(
         model_name: str,
-        device: str,
         components: dict[str, Any],  # 'model' arg name changed to 'components'
+        device: str,
     ) -> dict[str, Any] | None:  # Implementation returns None on failure
         """キャッシュされたモデルを指定された CUDA デバイスに復元します。
         Restores a cached model to the specified CUDA device.
