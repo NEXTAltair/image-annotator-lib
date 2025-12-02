@@ -94,7 +94,6 @@ def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None 
         return PydanticAIWebAPIWrapper(effective_model_name, Annotator_class, api_keys=api_keys)
     else:
         # 従来通りのインスタンス作成(正規化されたモデル名を使用)
-        # TODO: レガシーアノテーターでもAPIキー対応が必要な場合は、ここでapi_keysを渡す
         instance = Annotator_class(model_name=effective_model_name)
         logger.debug(
             f"モデル '{model_name}' -> '{effective_model_name}' の新しいインスタンスを作成しました (クラス: {Annotator_class.__name__})"
@@ -293,6 +292,7 @@ def _process_model_results(
     model_name: str,
     annotation_results: list[UnifiedAnnotationResult],
     results_by_phash: PHashAnnotationResults,
+    phash_map: dict[int, str],
 ) -> None:
     """モデルの結果を pHash ベースの構造に変換します（統一バリデーションスキーマ対応）。
 
@@ -300,10 +300,15 @@ def _process_model_results(
         model_name: モデルの名前
         annotation_results: 統一スキーマでのモデル予測結果リスト
         results_by_phash: pHash をキーとする結果辞書(更新対象)
+        phash_map: インデックスから実際のpHashへのマッピング
     """
     for i, result in enumerate(annotation_results):
-        # pHashは結果に含まれていないため、インデックスベースで生成
-        phash_key = f"image_{i}"  # 簡素化したキー（実際のpHashは呼び出し元で管理）
+        # phash_mapから実際のpHashを取得
+        phash_key = phash_map.get(i)
+
+        if phash_key is None:
+            logger.warning(f"pHash取得失敗: index={i}, model={model_name}")
+            continue
 
         # 結果辞書の初期化
         if phash_key not in results_by_phash:
@@ -312,7 +317,7 @@ def _process_model_results(
         # 統一スキーマの結果をそのまま格納
         results_by_phash[phash_key][model_name] = result
 
-        logger.debug(f"モデル '{model_name}' の結果を pHash '{phash_key}' に格納しました")
+        logger.debug(f"モデル '{model_name}' の結果を pHash '{phash_key[:8]}...' に格納しました")
 
 
 def _handle_error(
@@ -431,7 +436,7 @@ def annotate(
             logger.debug(f"モデル '{model_name}' の評価完了。結果件数: {len(annotation_results)}")
 
             # 結果を pHash ベースの構造に処理
-            _process_model_results(model_name, annotation_results, results_by_phash)
+            _process_model_results(model_name, annotation_results, results_by_phash, phash_map)
 
             # 結果リストの長さが画像数と一致しない場合のエラーハンドリング
             # (predict が必ず画像数と同じ長さのリストを返す想定だが念のため)
@@ -484,7 +489,7 @@ def annotate(
                 )
                 for _ in phash_list
             ]
-            _process_model_results(model_name, error_results, results_by_phash)
+            _process_model_results(model_name, error_results, results_by_phash, phash_map)
 
     logger.info(f"全モデル ({len(model_name_list)}個) の評価完了。画像キー数: {len(results_by_phash)}")
     return results_by_phash

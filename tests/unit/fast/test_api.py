@@ -695,8 +695,8 @@ def test_annotate_model_context_manager():
 
 
 @pytest.mark.unit
-def test_process_model_results():
-    """Test _process_model_results() converts results to pHash structure."""
+def test_process_model_results_uses_actual_phash():
+    """Test _process_model_results() uses actual pHash from phash_map."""
     from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
 
     # Create mock results
@@ -708,20 +708,70 @@ def test_process_model_results():
     )
     annotation_results = [mock_result1, mock_result2]
 
+    # Create phash_map with actual pHash values
+    phash_map = {
+        0: "abc123def456",
+        1: "xyz789ghi012",
+    }
+
     # Create empty results dict
     results_by_phash = api.PHashAnnotationResults()
 
     # Execute
-    api._process_model_results("test-model", annotation_results, results_by_phash)
+    api._process_model_results("test-model", annotation_results, results_by_phash, phash_map)
 
-    # Verify results were added
+    # Verify results use actual pHash keys
     assert len(results_by_phash) == 2
-    assert "image_0" in results_by_phash
-    assert "image_1" in results_by_phash
-    assert "test-model" in results_by_phash["image_0"]
-    assert "test-model" in results_by_phash["image_1"]
-    assert results_by_phash["image_0"]["test-model"] == mock_result1
-    assert results_by_phash["image_1"]["test-model"] == mock_result2
+    assert "abc123def456" in results_by_phash
+    assert "xyz789ghi012" in results_by_phash
+    assert "test-model" in results_by_phash["abc123def456"]
+    assert "test-model" in results_by_phash["xyz789ghi012"]
+    assert results_by_phash["abc123def456"]["test-model"] == mock_result1
+    assert results_by_phash["xyz789ghi012"]["test-model"] == mock_result2
+
+    # Verify old image_{i} keys are NOT present
+    assert "image_0" not in results_by_phash
+    assert "image_1" not in results_by_phash
+
+
+@pytest.mark.unit
+def test_process_model_results_missing_phash():
+    """Test _process_model_results() skips results when pHash is missing from map."""
+    from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
+
+    # Create mock results (3 results)
+    mock_result1 = UnifiedAnnotationResult(
+        model_name="test-model", capabilities={TaskCapability.TAGS}, tags=["tag1"], error=None
+    )
+    mock_result2 = UnifiedAnnotationResult(
+        model_name="test-model", capabilities={TaskCapability.TAGS}, tags=["tag2"], error=None
+    )
+    mock_result3 = UnifiedAnnotationResult(
+        model_name="test-model", capabilities={TaskCapability.TAGS}, tags=["tag3"], error=None
+    )
+    annotation_results = [mock_result1, mock_result2, mock_result3]
+
+    # Create phash_map with only 2 entries (index 1 missing)
+    phash_map = {
+        0: "abc123def456",
+        2: "mno345pqr678",
+    }
+
+    # Create empty results dict
+    results_by_phash = api.PHashAnnotationResults()
+
+    # Execute
+    api._process_model_results("test-model", annotation_results, results_by_phash, phash_map)
+
+    # Verify only results with valid pHash are added
+    assert len(results_by_phash) == 2
+    assert "abc123def456" in results_by_phash
+    assert "mno345pqr678" in results_by_phash
+    assert results_by_phash["abc123def456"]["test-model"] == mock_result1
+    assert results_by_phash["mno345pqr678"]["test-model"] == mock_result3
+
+    # Result at index 1 should be skipped (no warning assertion, just verify it's not in dict)
+    # We can't easily assert log warnings in this simple test, but the behavior is correct
 
 
 @pytest.mark.unit
