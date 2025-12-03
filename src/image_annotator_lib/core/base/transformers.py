@@ -7,7 +7,7 @@ from PIL import Image
 from transformers.models.clip import CLIPProcessor
 
 # --- ローカルインポート ---
-from ...exceptions.errors import ConfigurationError, OutOfMemoryError
+from ...exceptions.errors import ConfigurationError, ModelLoadError, OutOfMemoryError
 from ..config import config_registry
 from ..model_factory import ModelLoad
 from ..types import TransformersComponents
@@ -41,32 +41,46 @@ class TransformersBaseAnnotator(BaseAnnotator):
         try:
             if self.model_path is None:
                 raise ConfigurationError(f"モデル '{self.model_name}' の model_path が設定されていません。")
+
             # --- モデルロード処理 ---
             logger.info(f"モデルコンポーネントのロード試行: {self.model_name} をデバイス {self.device} へ")
-            loaded_model = ModelLoad.load_transformers_components(
+            loaded_components = ModelLoad.load_transformers_components(
                 self.model_name,
                 str(self.model_path),
                 str(self.device),
             )
-            if loaded_model:
-                self.components = loaded_model
-                logger.info(f"モデルコンポーネントのロード成功: {self.model_name}")
+
+            # Load Failure Detection (致命的エラー)
+            if not loaded_components:
+                error_msg = f"Failed to load components for model '{self.model_name}'."
+                logger.error(error_msg)
+                raise ModelLoadError(error_msg, model_path=self.model_path)
+
+            self.components = loaded_components  # ← 必ず有効な components が代入される
+            logger.info(f"モデルコンポーネントのロード成功: {self.model_name}")
 
             # --- CUDAへの復元処理 ---
             logger.debug(f"モデル {self.model_name} を {self.device} へ復元試行")
-            if not self.components or not isinstance(self.components, dict):
-                raise ConfigurationError("componentsがロードされていません。")
-            # restore_model_to_cudaの引数順序修正
-            # TransformersComponentsはTypedDictなのでdictへ明示的に変換
+            # Restoration Attempt (失敗しても継続可能)
             restored_components = ModelLoad.restore_model_to_cuda(
                 self.model_name,
                 dict(self.components),
                 str(self.device),
             )
-            if not isinstance(restored_components, dict):
-                raise TypeError("restored_componentsはdict型である必要があります。")
-            self.components = cast(TransformersComponents, restored_components)
-            logger.debug(f"モデル {self.model_name} の {self.device} への復元成功")
+
+            # Restoration Failure Handling (警告のみ、CPU で継続)
+            if restored_components is not None:
+                if not isinstance(restored_components, dict):
+                    raise TypeError("restored_componentsはdict型である必要があります。")
+                self.components = cast(TransformersComponents, restored_components)
+                logger.debug(f"モデル {self.model_name} の {self.device} への復元成功")
+            else:
+                # restore_model_to_cuda() は既に CPU フォールバック済み（None 返却）
+                # self.components は CPU 版を維持したまま継続
+                logger.warning(
+                    f"Model '{self.model_name}' will run on CPU. "
+                    f"CUDA restoration failed but CPU fallback is already complete."
+                )
         except (OutOfMemoryError, MemoryError, OSError) as mem_e:
             # メモリ関連エラーはそのまま上位に伝播させる
             raise mem_e

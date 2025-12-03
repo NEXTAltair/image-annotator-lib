@@ -5,6 +5,7 @@ from typing import Any, cast
 from PIL import Image
 
 # --- ローカルインポート ---
+from ...exceptions.errors import ModelLoadError
 from ..config import config_registry
 from ..model_factory import ModelLoad
 from ..types import TransformersPipelineComponents
@@ -40,14 +41,30 @@ class PipelineBaseAnnotator(BaseAnnotator):
             self.device,
             self.batch_size,
         )
-        if loaded_components:
-            self.components = loaded_components
 
-        # 型の問題を回避するため、一時的にcast使用
+        # Load Failure Detection (致命的エラー)
+        if not loaded_components:
+            error_msg = f"Failed to load pipeline components for model '{self.model_name}'."
+            logger.error(error_msg)
+            raise ModelLoadError(error_msg, model_path=self.model_path)
+
+        self.components = loaded_components  # ← 必ず有効な components が代入される
+
+        # Restoration Attempt (失敗しても継続可能)
         restored_components = ModelLoad.restore_model_to_cuda(
             self.model_name, cast(dict[str, Any], self.components), self.device
         )
-        self.components = cast(TransformersPipelineComponents, restored_components)
+
+        # Restoration Failure Handling (警告のみ、CPU で継続)
+        if restored_components is not None:
+            self.components = cast(TransformersPipelineComponents, restored_components)
+        else:
+            # restore_model_to_cuda() は既に CPU フォールバック済み（None 返却）
+            # self.components は CPU 版を維持したまま継続
+            logger.warning(
+                f"Model '{self.model_name}' will run on CPU. "
+                f"CUDA restoration failed but CPU fallback is already complete."
+            )
         return self
 
     def __exit__(
