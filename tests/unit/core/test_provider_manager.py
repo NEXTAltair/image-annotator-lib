@@ -9,10 +9,10 @@ from image_annotator_lib.exceptions.errors import WebApiError
 
 @pytest.fixture(autouse=True)
 def clear_provider_instances():
-    """Clear provider instances before each test."""
-    ProviderManager._provider_instances.clear()
+    """Clear provider instances before and after each test."""
+    ProviderManager.clear_cache()
     yield
-    ProviderManager._provider_instances.clear()
+    ProviderManager.clear_cache()
 
 
 @pytest.mark.unit
@@ -791,3 +791,184 @@ def test_run_agent_safely_timeout_handling():
         # Verify timeout error was wrapped
         error_msg = str(exc_info.value)
         assert "Both sync and async execution failed" in error_msg or "timed out" in error_msg.lower()
+
+
+# ==============================================================================
+# Phase A Task 3: Provider Cache Management and Edge Cases (2025-12-03)
+# ==============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_provider_cache_clear():
+    """Test that provider cache can be cleared.
+
+    Scenario:
+    - Create multiple provider instances
+    - Clear the cache
+    - Verify cache is empty
+
+    Tests:
+    - Cache clearing functionality
+    - Complete cache removal
+    """
+    # Create multiple providers
+    ProviderManager.get_provider_instance("anthropic")
+    ProviderManager.get_provider_instance("openai")
+    ProviderManager.get_provider_instance("google")
+
+    # Verify cache populated
+    assert len(ProviderManager._provider_instances) == 3
+
+    # Clear cache using proper API
+    ProviderManager.clear_cache()
+
+    # Verify cache empty
+    assert len(ProviderManager._provider_instances) == 0
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_provider_instance_recreation_after_clear():
+    """Test that provider instances can be recreated after cache clear.
+
+    Scenario:
+    - Create provider instance
+    - Store reference to instance
+    - Clear cache
+    - Create new provider instance with same parameters
+    - Verify new instance is created (different object)
+
+    Tests:
+    - Provider recreation after cache clear
+    - Instance independence
+    """
+    # Create initial provider
+    provider1 = ProviderManager.get_provider_instance("anthropic")
+    provider1_id = id(provider1)
+
+    # Clear cache using proper API
+    ProviderManager.clear_cache()
+
+    # Create provider again with same parameters
+    provider2 = ProviderManager.get_provider_instance("anthropic")
+    provider2_id = id(provider2)
+
+    # Verify new instance created
+    assert provider1_id != provider2_id
+    assert provider1 is not provider2
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_multiple_provider_types_coexist():
+    """Test that multiple provider types can coexist in cache.
+
+    Scenario:
+    - Create instances of all provider types
+    - Verify all are cached separately
+    - Verify each has correct type
+
+    Tests:
+    - Multi-provider cache management
+    - Provider type differentiation
+    - Cache key uniqueness
+    """
+    # Clear cache first
+    ProviderManager.clear_cache()
+
+    # Create all provider types
+    anthropic = ProviderManager.get_provider_instance("anthropic")
+    openai = ProviderManager.get_provider_instance("openai")
+    google = ProviderManager.get_provider_instance("google")
+    openrouter = ProviderManager.get_provider_instance("openrouter")
+
+    # Verify all cached
+    assert len(ProviderManager._provider_instances) == 4
+
+    # Verify correct types
+    from image_annotator_lib.core.provider_manager import (
+        AnthropicProviderInstance,
+        GoogleProviderInstance,
+        OpenAIProviderInstance,
+        OpenRouterProviderInstance,
+    )
+
+    assert isinstance(anthropic, AnthropicProviderInstance)
+    assert isinstance(openai, OpenAIProviderInstance)
+    assert isinstance(google, GoogleProviderInstance)
+    assert isinstance(openrouter, OpenRouterProviderInstance)
+
+    # Cleanup
+    ProviderManager.clear_cache()
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_provider_cache_key_generation():
+    """Test that cache keys are generated correctly for different provider types.
+
+    Scenario:
+    - Create different provider types
+    - Verify they are cached with correct keys
+
+    Tests:
+    - Cache key uniqueness per provider type
+    - Provider type differentiation in cache
+    """
+    # Clear cache first
+    ProviderManager.clear_cache()
+
+    # Create different providers
+    provider1 = ProviderManager.get_provider_instance("anthropic")
+    provider2 = ProviderManager.get_provider_instance("openai")
+
+    # Verify both are cached (different providers = different cache entries)
+    assert len(ProviderManager._provider_instances) == 2
+
+    # Verify different instances
+    assert provider1 is not provider2
+    assert id(provider1) != id(provider2)
+
+    # Verify correct cache keys exist
+    assert "anthropic" in ProviderManager._provider_instances
+    assert "openai" in ProviderManager._provider_instances
+
+    # Cleanup
+    ProviderManager.clear_cache()
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_provider_instance_state_persistence():
+    """Test that provider instance state persists across retrievals.
+
+    Scenario:
+    - Get provider instance and set custom attribute
+    - Retrieve same provider from cache
+    - Verify custom attribute still exists
+
+    Tests:
+    - Provider instance state persistence
+    - Cache returns same object
+    - Instance state is not reset
+    """
+    # Clear cache first
+    ProviderManager.clear_cache()
+
+    # Get provider and set custom attribute
+    provider1 = ProviderManager.get_provider_instance("anthropic")
+    provider1._test_attribute = "test_value"
+
+    # Get provider again (should be same instance from cache)
+    provider2 = ProviderManager.get_provider_instance("anthropic")
+
+    # Verify same instance
+    assert provider1 is provider2
+
+    # Verify custom attribute persists
+    assert hasattr(provider2, "_test_attribute")
+    assert provider2._test_attribute == "test_value"
+
+    # Cleanup
+    ProviderManager.clear_cache()

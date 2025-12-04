@@ -107,3 +107,100 @@ def load_image_files() -> Callable[[int], list[Image.Image]]:
         return [Image.open(file) for file in files if file.exists()]
 
     return _load_images
+
+
+# ==============================================================================
+# Phase A Task 0: Test Infrastructure Fixtures (2025-12-03)
+# ==============================================================================
+
+
+@pytest.fixture
+def managed_config_registry():
+    """テスト用設定レジストリfixture
+
+    テスト用のモデル設定を一時的に登録し、テスト終了時に自動クリーンアップする。
+    グローバルな config_registry インスタンスを操作するため、並列実行には注意が必要。
+
+    API:
+        registry.set(model_name: str, config_dict: dict)
+            指定されたモデル名で設定を一括登録
+            Example: registry.set("test_model", {"model_path": "path/to/model", "device": "cpu"})
+
+        registry.get(model_name: str, key: str, default: Any) -> Any
+            設定値を取得（config_registry.get()の wrapper）
+
+    Usage:
+        def test_foo(managed_config_registry):
+            managed_config_registry.set("test_model", {
+                "model_path": "test/path",
+                "device": "cpu",
+                "estimated_size_gb": 1.0,
+            })
+            # Test with registered config
+            annotator = ConcreteAnnotator("test_model")
+            assert annotator.device == "cpu"
+    """
+    # テスト開始前のユーザー設定データを保存（Deep Copy）
+    import copy
+
+    from image_annotator_lib.core.config import config_registry
+
+    original_user_config = copy.deepcopy(config_registry._user_config_data)
+    original_merged_config = copy.deepcopy(config_registry._merged_config_data)
+
+    # Registry wrapper with convenient API
+    class ConfigRegistryWrapper:
+        """config_registry への便利なラッパー"""
+
+        def set(self, model_name: str, config_dict: dict) -> None:
+            """モデル設定を一括登録（内部的には各キーを個別に set）"""
+            for key, value in config_dict.items():
+                config_registry.set(model_name, key, value)
+
+        def get(self, model_name: str, key: str, default: object = None) -> object:
+            """設定値を取得"""
+            return config_registry.get(model_name, key, default)
+
+    wrapper = ConfigRegistryWrapper()
+
+    yield wrapper
+
+    # テスト終了後: ユーザー設定データを元に戻す
+    config_registry._user_config_data = original_user_config
+    config_registry._merged_config_data = original_merged_config
+
+
+@pytest.fixture
+def mock_model_components():
+    """モックモデルコンポーネント（Pipeline/Transformers用）
+
+    Returns:
+        dict: モックされた model, processor, pipeline コンポーネント
+    """
+    from unittest.mock import MagicMock
+
+    return {
+        "model": MagicMock(),
+        "processor": MagicMock(),
+        "pipeline": MagicMock(),
+    }
+
+
+@pytest.fixture
+def mock_cuda_available(monkeypatch):
+    """CUDA利用可能環境のモック
+
+    torch.cuda.is_available() が True を返すようにモンキーパッチ。
+    """
+    monkeypatch.setattr("torch.cuda.is_available", lambda: True)
+    monkeypatch.setattr("torch.cuda.device_count", lambda: 1)
+
+
+@pytest.fixture
+def mock_cuda_unavailable(monkeypatch):
+    """CUDA利用不可環境のモック
+
+    torch.cuda.is_available() が False を返すようにモンキーパッチ。
+    """
+    monkeypatch.setattr("torch.cuda.is_available", lambda: False)
+    monkeypatch.setattr("torch.cuda.device_count", lambda: 0)

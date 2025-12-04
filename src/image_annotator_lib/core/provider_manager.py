@@ -88,6 +88,16 @@ class ProviderManager:
         return results
 
     @classmethod
+    def clear_cache(cls) -> None:
+        """Clear all cached provider instances.
+        
+        This method clears the internal provider instance cache, forcing new
+        provider instances to be created on subsequent get_provider_instance() calls.
+        """
+        cls._provider_instances.clear()
+        logger.debug("Cleared provider instance cache")
+
+    @classmethod
     def _run_agent_safely(cls, agent: Any, binary_content: Any, api_model_id: str) -> Any:
         """Safely run PydanticAI agent with simplified event loop management"""
         logger.debug(f"Attempting to run agent with model_id: {api_model_id}")

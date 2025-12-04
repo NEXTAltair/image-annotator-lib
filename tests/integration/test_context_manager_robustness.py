@@ -48,8 +48,10 @@ class TestContextManagerRobustness:
             "model_path": "shadowlilac/aesthetic-shadow",
             "device": "cuda",
             "estimated_size_gb": 4.0,
+            "batch_size": 8,
         }
-        # Note: task and batch_size are accessed via config_registry.get() in PipelineBaseAnnotator.__init__()
+        # Note: 'task' is not part of LocalMLModelConfig, but is retrieved dynamically
+        # by PipelineBaseAnnotator.__init__() via config_registry.get() with default value
         managed_config_registry.set("test_pipeline_model", config)
         return config
 
@@ -122,9 +124,7 @@ class TestContextManagerRobustness:
             mock_load.assert_called_once()
 
     @pytest.mark.integration
-    def test_pipeline_restoration_failure_continues_on_cpu(
-        self, pipeline_model_config
-    ):
+    def test_pipeline_restoration_failure_continues_on_cpu(self, pipeline_model_config):
         """Test that pipeline restoration failure allows CPU continuation.
 
         Scenario:
@@ -142,11 +142,12 @@ class TestContextManagerRobustness:
             "processor": MagicMock(),
         }
 
-        with patch(
-            "image_annotator_lib.core.base.pipeline.ModelLoad.load_transformers_pipeline_components"
-        ) as mock_load, patch(
-            "image_annotator_lib.core.base.pipeline.ModelLoad.restore_model_to_cuda"
-        ) as mock_restore:
+        with (
+            patch(
+                "image_annotator_lib.core.base.pipeline.ModelLoad.load_transformers_pipeline_components"
+            ) as mock_load,
+            patch("image_annotator_lib.core.base.pipeline.ModelLoad.restore_model_to_cuda") as mock_restore,
+        ):
             # Mock successful load (CPU)
             mock_load.return_value = mock_cpu_components
 
@@ -174,9 +175,7 @@ class TestContextManagerRobustness:
             mock_restore.assert_called_once()
 
     @pytest.mark.integration
-    def test_transformers_restoration_failure_continues_on_cpu(
-        self, transformers_model_config
-    ):
+    def test_transformers_restoration_failure_continues_on_cpu(self, transformers_model_config):
         """Test that transformers restoration failure allows CPU continuation.
 
         Scenario:
@@ -193,11 +192,14 @@ class TestContextManagerRobustness:
             "processor": MagicMock(),
         }
 
-        with patch(
-            "image_annotator_lib.core.base.transformers.ModelLoad.load_transformers_components"
-        ) as mock_load, patch(
-            "image_annotator_lib.core.base.transformers.ModelLoad.restore_model_to_cuda"
-        ) as mock_restore:
+        with (
+            patch(
+                "image_annotator_lib.core.base.transformers.ModelLoad.load_transformers_components"
+            ) as mock_load,
+            patch(
+                "image_annotator_lib.core.base.transformers.ModelLoad.restore_model_to_cuda"
+            ) as mock_restore,
+        ):
             # Mock successful load (CPU)
             mock_load.return_value = mock_cpu_components
 

@@ -97,7 +97,7 @@ def test_deepdanbooru_tagger_init(mock_config):
 
 @pytest.mark.unit
 @pytest.mark.fast
-def test_deepdanbooru_tagger_init_default_threshold():
+def test_deepdanbooru_tagger_init_default_threshold(mock_config):
     """Test DeepDanbooruTagger initialization with default threshold."""
     config = MagicMock()
     config.model_name = "deepdanbooru-v3"

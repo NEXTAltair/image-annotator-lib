@@ -132,7 +132,7 @@ class TestConfigObjectInjection:
 class TestBackwardCompatibility:
     """後方互換性のテスト"""
 
-    def test_none_config_loads_from_registry(self, managed_config_registry):
+    def test_none_config_loads_from_registry(self, managed_config_registry, mock_cuda_available):
         """config=Noneの場合、config_registryから読み込むことを確認"""
         # config_registryにテストデータを設定
         managed_config_registry._merged_config_data["test-model"] = {
@@ -207,7 +207,7 @@ class TestErrorHandling:
 class TestMultipleInstances:
     """複数インスタンスのテスト"""
 
-    def test_multiple_annotators_with_different_configs(self):
+    def test_multiple_annotators_with_different_configs(self, mock_cuda_available):
         """異なるConfig Objectで複数のアノテーターを生成できることを確認"""
         config1 = LocalMLModelConfig(
             model_name="model-1",
@@ -247,3 +247,163 @@ class TestMultipleInstances:
         # 両方のアノテーターが同じConfig Objectを参照していることを確認
         assert annotator1._config is annotator2._config
         assert annotator1.model_path == annotator2.model_path
+
+
+# ==============================================================================
+# Phase A Task 4: BaseAnnotator DI Edge Cases (2025-12-03)
+# ==============================================================================
+
+
+class TestConfigOverrideScenarios:
+    """Config override and precedence tests."""
+
+    def test_direct_config_overrides_registry(self, managed_config_registry, mock_cuda_available):
+        """Test that directly injected config takes precedence over registry.
+
+        Scenario:
+        - Set config in registry
+        - Inject different config directly
+        - Verify direct config is used
+
+        Tests:
+        - Config injection precedence
+        - Direct config override
+        """
+        # Setup registry config
+        managed_config_registry._merged_config_data["test-model"] = {
+            "class": "ConcreteTestAnnotator",
+            "model_path": "/registry/path",
+            "device": "cpu",
+        }
+
+        # Create direct config with different settings
+        direct_config = LocalMLModelConfig(
+            model_name="test-model",
+            class_name="ConcreteTestAnnotator",
+            model_path="/direct/path",
+            device="cuda",
+        )
+
+        # Create annotator with direct config
+        annotator = ConcreteTestAnnotator(model_name="test-model", config=direct_config)
+
+        # Verify direct config was used (not registry)
+        assert annotator.model_path == "/direct/path"
+        assert annotator.device == "cuda"
+
+    def test_config_device_fallback_to_cpu(self, managed_config_registry, mock_cuda_unavailable):
+        """Test device fallback to CPU when CUDA unavailable.
+
+        Scenario:
+        - Config specifies CUDA
+        - CUDA not available
+        - Verify fallback to CPU
+
+        Tests:
+        - Device availability checking
+        - Automatic CPU fallback
+        """
+        config = LocalMLModelConfig(
+            model_name="test-model",
+            class_name="ConcreteTestAnnotator",
+            model_path="/path/to/model",
+            device="cuda",
+        )
+
+        # Create annotator (should fallback to CPU)
+        annotator = ConcreteTestAnnotator(model_name="test-model", config=config)
+
+        # Verify device fallback
+        assert annotator.device == "cpu"
+
+
+class TestConfigValidationEdgeCases:
+    """Edge cases for config validation."""
+
+    def test_config_with_minimal_fields(self):
+        """Test config with only required fields.
+
+        Scenario:
+        - Create config with minimal required fields
+        - Create annotator
+        - Verify defaults are applied
+
+        Tests:
+        - Minimal config acceptance
+        - Default value application
+        """
+        config = LocalMLModelConfig(
+            model_name="minimal-model",
+            class_name="ConcreteTestAnnotator",
+            model_path="/minimal/path",
+        )
+
+        annotator = ConcreteTestAnnotator(model_name="minimal-model", config=config)
+
+        # Verify required fields set
+        assert annotator.model_name == "minimal-model"
+        assert annotator.model_path == "/minimal/path"
+
+        # Verify device default applied
+        assert annotator.device in ["cpu", "cuda"]  # Should have a device
+
+    def test_config_immutability_after_annotator_creation(self):
+        """Test that config remains immutable after annotator creation.
+
+        Scenario:
+        - Create annotator with config
+        - Attempt to modify config attributes
+        - Verify modifications fail
+
+        Tests:
+        - Config immutability
+        - Attribute protection
+        """
+        config = LocalMLModelConfig(
+            model_name="immutable-test",
+            class_name="ConcreteTestAnnotator",
+            model_path="/immutable/path",
+            device="cpu",
+        )
+
+        annotator = ConcreteTestAnnotator(model_name="immutable-test", config=config)
+
+        # Attempt to modify config
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            annotator._config.model_path = "/modified/path"
+
+        # Verify original value unchanged
+        assert annotator.model_path == "/immutable/path"
+
+    def test_multiple_annotators_with_same_config_object(self):
+        """Test creating multiple annotators sharing same config object.
+
+        Scenario:
+        - Create single config object
+        - Create multiple annotators with same config
+        - Verify all share config reference
+
+        Tests:
+        - Config object reusability
+        - Shared config reference
+        """
+        shared_config = LocalMLModelConfig(
+            model_name="shared-model",
+            class_name="ConcreteTestAnnotator",
+            model_path="/shared/path",
+            device="cpu",
+        )
+
+        # Create multiple annotators
+        annotator1 = ConcreteTestAnnotator(model_name="shared-model", config=shared_config)
+        annotator2 = ConcreteTestAnnotator(model_name="shared-model", config=shared_config)
+        annotator3 = ConcreteTestAnnotator(model_name="shared-model", config=shared_config)
+
+        # Verify all share same config object
+        assert annotator1._config is annotator2._config
+        assert annotator2._config is annotator3._config
+        assert id(annotator1._config) == id(annotator2._config) == id(annotator3._config)
+
+        # Verify all have same settings
+        assert annotator1.model_path == annotator2.model_path == annotator3.model_path
+        assert annotator1.device == annotator2.device == annotator3.device

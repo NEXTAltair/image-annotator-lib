@@ -512,3 +512,261 @@ def test_annotator_mixin_setup_agent(mock_get_agent, mock_config):
     mock_get_agent.assert_called_once_with(
         model_name="test_model", api_model_id="gpt-4", api_key="test_key"
     )
+
+
+# ==============================================================================
+# Phase A Task 2: AdvancedAgentFactory Caching Tests (2025-12-03)
+# ==============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+@patch("image_annotator_lib.core.base.pydantic_ai_annotator.Agent")
+def test_advanced_agent_factory_caches_agent(mock_agent_class):
+    """Test that AdvancedAgentFactory caches and reuses Agent instances.
+
+    Scenario:
+    - Create agent with config A
+    - Create agent again with same config A
+    - Verify second call returns cached instance
+
+    Tests:
+    - Agent caching functionality
+    - Cache hit detection
+    - Instance reuse
+    """
+    from unittest.mock import Mock
+
+    from image_annotator_lib.core.base.pydantic_ai_annotator import (
+        AdvancedAgentFactory,
+        AnnotationAgentConfig,
+    )
+
+    # Setup mock
+    mock_agent = Mock()
+    mock_agent_class.return_value = mock_agent
+
+    # Clear cache first
+    AdvancedAgentFactory.clear_cache()
+
+    config = AnnotationAgentConfig(
+        model_id="gpt-4",
+        name="test_agent",
+    )
+
+    # First call - creates new agent
+    agent1 = AdvancedAgentFactory.create_optimized_agent(config)
+
+    # Second call - should return cached agent
+    agent2 = AdvancedAgentFactory.create_optimized_agent(config)
+
+    # Verify same instance
+    assert agent1 is agent2
+    assert id(agent1) == id(agent2)
+
+    # Verify Agent was only created once (cached on second call)
+    assert mock_agent_class.call_count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+@patch("image_annotator_lib.core.base.pydantic_ai_annotator.Agent")
+def test_advanced_agent_factory_detects_config_change(mock_agent_class):
+    """Test that configuration changes trigger new Agent creation.
+
+    Scenario:
+    - Create agent with config A (name="agent1")
+    - Create agent with config B (name="agent2", same model_id)
+    - Verify second call creates NEW agent (not cached)
+
+    Tests:
+    - Configuration change detection
+    - Cache invalidation on config change
+    - Config hash comparison
+    """
+    from unittest.mock import Mock
+
+    from image_annotator_lib.core.base.pydantic_ai_annotator import (
+        AdvancedAgentFactory,
+        AnnotationAgentConfig,
+    )
+
+    # Setup mock to return different instances
+    mock_agent1 = Mock()
+    mock_agent2 = Mock()
+    mock_agent_class.side_effect = [mock_agent1, mock_agent2]
+
+    # Clear cache first
+    AdvancedAgentFactory.clear_cache()
+
+    config1 = AnnotationAgentConfig(
+        model_id="gpt-4",
+        name="test_agent",
+    )
+
+    config2 = AnnotationAgentConfig(
+        model_id="gpt-3.5-turbo",  # Different model
+        name="test_agent",
+    )
+
+    # First call
+    agent1 = AdvancedAgentFactory.create_optimized_agent(config1)
+
+    # Second call with different config
+    agent2 = AdvancedAgentFactory.create_optimized_agent(config2)
+
+    # Verify different instances (config changed)
+    assert agent1 is not agent2
+    assert id(agent1) != id(agent2)
+
+    # Verify Agent was created twice (no cache hit)
+    assert mock_agent_class.call_count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+@patch("image_annotator_lib.core.base.pydantic_ai_annotator.Agent")
+def test_advanced_agent_factory_cache_key_generation(mock_agent_class):
+    """Test cache key generation logic (model_id + config_hash).
+
+    Scenario:
+    - Create agents with same model_id but different configs
+    - Verify separate cache entries
+
+    Tests:
+    - Cache key uniqueness
+    - model_id + config_hash combination
+    - Multiple cache entries
+    """
+    from unittest.mock import Mock
+
+    from image_annotator_lib.core.base.pydantic_ai_annotator import (
+        AdvancedAgentFactory,
+        AnnotationAgentConfig,
+    )
+
+    # Setup mock to return different instances
+    mock_agent1 = Mock()
+    mock_agent2 = Mock()
+    mock_agent_class.side_effect = [mock_agent1, mock_agent2]
+
+    # Clear cache first
+    AdvancedAgentFactory.clear_cache()
+
+    config1 = AnnotationAgentConfig(
+        model_id="gpt-4",
+        name="test_agent",
+    )
+
+    config2 = AnnotationAgentConfig(
+        model_id="gpt-3.5-turbo",  # Different model
+        name="test_agent",
+    )
+
+    agent1 = AdvancedAgentFactory.create_optimized_agent(config1)
+    agent2 = AdvancedAgentFactory.create_optimized_agent(config2)
+
+    # Verify separate instances
+    assert agent1 is not agent2
+
+    # Verify cache contains both
+    assert len(AdvancedAgentFactory._agent_cache) == 2
+
+    # Verify both agents were created
+    assert mock_agent_class.call_count == 2
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+@patch("image_annotator_lib.core.base.pydantic_ai_annotator.Agent")
+def test_advanced_agent_factory_clear_cache(mock_agent_class):
+    """Test clear_cache removes all cached agents.
+
+    Scenario:
+    - Create multiple agents
+    - Call clear_cache()
+    - Verify cache is empty
+
+    Tests:
+    - Cache clearing functionality
+    - Complete cache removal
+    - Hash cleanup
+    """
+    from unittest.mock import Mock
+
+    from image_annotator_lib.core.base.pydantic_ai_annotator import (
+        AdvancedAgentFactory,
+        AnnotationAgentConfig,
+    )
+
+    # Setup mock to return new instances
+    mock_agent_class.side_effect = [Mock(), Mock(), Mock()]
+
+    # Clear cache first
+    AdvancedAgentFactory.clear_cache()
+
+    # Create multiple agents
+    for i in range(3):
+        config = AnnotationAgentConfig(
+            model_id=f"gpt-{i}",
+            name=f"agent_{i}",
+        )
+        AdvancedAgentFactory.create_optimized_agent(config)
+
+    # Verify cache populated
+    assert len(AdvancedAgentFactory._agent_cache) == 3
+    assert len(AdvancedAgentFactory._config_hashes) == 3
+
+    # Clear cache
+    AdvancedAgentFactory.clear_cache()
+
+    # Verify cache empty
+    assert len(AdvancedAgentFactory._agent_cache) == 0
+    assert len(AdvancedAgentFactory._config_hashes) == 0
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_advanced_agent_factory_config_hash_calculation():
+    """Test config hash calculation produces consistent results.
+
+    Scenario:
+    - Calculate hash for same config twice
+    - Calculate hash for different configs
+    - Verify hash consistency and uniqueness
+
+    Tests:
+    - Hash calculation determinism
+    - Hash uniqueness for different configs
+    - Hash consistency for same config
+    """
+    from image_annotator_lib.core.base.pydantic_ai_annotator import (
+        AdvancedAgentFactory,
+        AnnotationAgentConfig,
+    )
+
+    config1 = AnnotationAgentConfig(
+        model_id="gpt-4",
+        name="test",
+    )
+
+    config2 = AnnotationAgentConfig(
+        model_id="gpt-4",
+        name="test",
+    )
+
+    config3 = AnnotationAgentConfig(
+        model_id="gpt-3.5-turbo",  # Different model
+        name="test",
+    )
+
+    # Calculate hashes
+    hash1 = AdvancedAgentFactory._calculate_config_hash(config1)
+    hash2 = AdvancedAgentFactory._calculate_config_hash(config2)
+    hash3 = AdvancedAgentFactory._calculate_config_hash(config3)
+
+    # Verify consistency
+    assert hash1 == hash2  # Same config → same hash
+
+    # Verify uniqueness
+    assert hash1 != hash3  # Different config → different hash

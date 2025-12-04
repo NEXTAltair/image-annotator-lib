@@ -56,7 +56,10 @@ initialize_registry()
 
 
 def annotate(
-    images_list: list[Image.Image], model_name_list: list[str], phash_list: list[str] | None = None
+    images_list: list[Image.Image],
+    model_name_list: list[str],
+    phash_list: list[str] | None = None,
+    api_keys: dict[str, str] | None = None,
 ) -> PHashAnnotationResults:
     """
     指定されたモデルを使用して画像のリストにアノテーションを付けます。
@@ -65,6 +68,9 @@ def annotate(
         images_list: アノテーションを付けるPIL Imageオブジェクトのリスト。
         model_name_list: 使用するアノテーターモデル名のリスト。
         phash_list: 画像のpHash値のリスト。
+        api_keys: WebAPIモデル用のAPIキー辞書（オプション）。
+                 例: {"openai": "sk-...", "anthropic": "sk-ant-..."}
+                 指定された場合、環境変数より優先されます。
 
     Returns:
         pHash をキーとし、その値がモデル名をキーとする ModelResultDict の辞書。
@@ -77,7 +83,7 @@ def annotate(
 
         _cached_annotate = _annotate_impl
 
-    return _cached_annotate(images_list, model_name_list, phash_list)
+    return _cached_annotate(images_list, model_name_list, phash_list, api_keys)
 
 
 # You might want to add version information here later

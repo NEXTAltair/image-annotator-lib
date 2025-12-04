@@ -11,6 +11,7 @@ from PIL import Image
 # --- ローカルインポート ---
 from ...exceptions.errors import ModelLoadError, OutOfMemoryError
 from ..config import config_registry
+from ..model_config import BaseModelConfig
 from ..model_factory import ModelLoad
 from ..types import TensorFlowComponents
 from ..utils import logger
@@ -20,8 +21,8 @@ from .annotator import BaseAnnotator
 class TensorflowBaseAnnotator(BaseAnnotator):
     """TensorFlow モデルを使用するモデル用の基底クラス。"""
 
-    def __init__(self, model_name: str):
-        super().__init__(model_name=model_name)
+    def __init__(self, model_name: str, config: BaseModelConfig | None = None):
+        super().__init__(model_name=model_name, config=config)
         if tf is None:
             raise ImportError("TensorFlow がインストールされていません。")
         try:

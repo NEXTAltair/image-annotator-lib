@@ -40,8 +40,29 @@ class BaseAnnotator(ABC):
 
         # model_pathはLocalMLModelConfig専用(WebAPIModelConfigにはない)
         self.model_path = getattr(self._config, "model_path", None)
-        self.device = self._config.device
+        self.device = self._validate_device(self._config.device)
         self.components: LoaderComponents | None = None
+
+    def _validate_device(self, requested_device: str) -> str:
+        """要求されたデバイスを検証し、CUDA利用不可の場合はCPUにフォールバック。
+
+        このメソッドは、アノテーターのデバイス設定と実際のデバイス機能の
+        一貫性を保証します。ModelLoad.Loaderと同じ検証ロジックを使用して、
+        デバイスの不一致問題を防止します。
+
+        Args:
+            requested_device: 設定ファイルからのデバイス文字列 ("cuda", "cpu" など)
+
+        Returns:
+            検証されたデバイス文字列（CUDA利用不可の場合は "cpu"）
+
+        Note:
+            一貫した検証ロジックのため determine_effective_device() を使用。
+            パフォーマンス影響: アノテーター初期化あたり <1ms。
+        """
+        from ..utils import determine_effective_device
+
+        return determine_effective_device(requested_device, self.model_name)
 
     @abstractmethod
     def __enter__(self) -> Self:
