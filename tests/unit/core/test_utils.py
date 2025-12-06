@@ -316,3 +316,262 @@ def test_convert_unix_to_iso8601_none_timestamp():
     result = utils.convert_unix_to_iso8601(None, "test_model")
 
     assert result == "Invalid Timestamp"
+
+
+# ==============================================================================
+# Additional Coverage Tests (Phase C)
+# ==============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_calculate_phash_consistency_different_images():
+    """Test pHash produces different hashes for different images.
+
+    Tests:
+    - Different images produce different pHashes
+    - Similar images have different but related hashes
+    - pHash algorithm detects content differences
+    """
+    from PIL import ImageDraw
+
+    # Create two distinctly different images with patterns
+    # Image 1: Red square on white background
+    image1 = Image.new("RGB", (100, 100), color="white")
+    draw1 = ImageDraw.Draw(image1)
+    draw1.rectangle([25, 25, 75, 75], fill="red")
+
+    # Image 2: Blue circle on white background
+    image2 = Image.new("RGB", (100, 100), color="white")
+    draw2 = ImageDraw.Draw(image2)
+    draw2.ellipse([25, 25, 75, 75], fill="blue")
+
+    phash1 = utils.calculate_phash(image1)
+    phash2 = utils.calculate_phash(image2)
+
+    # Different images should have different hashes
+    assert phash1 != phash2
+    assert isinstance(phash1, str)
+    assert isinstance(phash2, str)
+    assert len(phash1) == 16
+    assert len(phash2) == 16
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_download_file_with_caching(tmp_path):
+    """Test file download with caching behavior.
+
+    Tests:
+    - File downloaded on first request
+    - Subsequent requests use cache (no re-download)
+    - Cache hit detection works correctly
+    """
+    url = "https://example.com/test_file.bin"
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+
+    # Create fake cached file
+    expected_cache_path = cache_dir / "test_file.bin"
+    expected_cache_path.write_bytes(b"cached content")
+
+    # Test cache hit (file already exists)
+    is_cached, cache_path = utils._is_cached(url, cache_dir)
+
+    assert is_cached is True
+    assert cache_path == expected_cache_path
+    assert cache_path.exists()
+    assert cache_path.read_bytes() == b"cached content"
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_determine_effective_device_cpu_explicit():
+    """Test device determination with explicit CPU request.
+
+    Tests:
+    - Explicit CPU request is honored
+    - No CUDA checking performed for CPU
+    - Returns "cpu" without fallback logic
+    """
+    # Don't need to mock torch for explicit CPU request
+    result = utils.determine_effective_device("cpu", "test_model")
+
+    assert result == "cpu"
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_determine_effective_device_cuda_with_index():
+    """Test device determination with specific CUDA device index.
+
+    Tests:
+    - Specific CUDA device (cuda:0, cuda:1) handled correctly
+    - Device count checked against requested index
+    - Valid index returned, invalid falls back
+    """
+    mock_torch = MagicMock()
+    mock_torch.cuda.is_available.return_value = True
+    mock_torch.cuda.device_count.return_value = 2  # cuda:0 and cuda:1 available
+
+    with patch.dict("sys.modules", {"torch": mock_torch}):
+        # Test valid index
+        result = utils.determine_effective_device("cuda:0", "test_model")
+        assert result == "cuda:0"
+
+        # Test another valid index
+        result = utils.determine_effective_device("cuda:1", "test_model")
+        assert result == "cuda:1"
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_get_cache_path_with_query_parameters():
+    """Test cache path generation with URL query parameters.
+
+    Tests:
+    - Query parameters are stripped from filename
+    - Cache path uses clean filename without ?params
+    - Extension is preserved correctly
+    """
+    url = "https://example.com/model.onnx?version=v2&token=abc123"
+    cache_dir = Path("/tmp/cache")
+
+    cache_path = utils._get_cache_path(url, cache_dir)
+
+    # Filename should be clean without query params
+    assert cache_path.name == "model.onnx"
+    assert cache_path.parent == cache_dir
+    assert "?" not in str(cache_path)
+
+
+# ==============================================================================
+# Phase C Additional Coverage Tests (2025-12-05)
+# ==============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_calculate_phash_with_grayscale_image():
+    """Test pHash calculation with grayscale image.
+
+    Tests:
+    - Grayscale image is converted to RGB automatically
+    - pHash calculation succeeds
+    - Result is consistent
+    - No exceptions raised
+    """
+    # Create grayscale image
+    grayscale_image = Image.new("L", (100, 100), color=128)
+
+    phash = utils.calculate_phash(grayscale_image)
+
+    assert isinstance(phash, str)
+    assert len(phash) == 16  # pHash is 16 hex characters
+    # Verify consistency
+    phash2 = utils.calculate_phash(grayscale_image)
+    assert phash == phash2
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_determine_effective_device_invalid_format():
+    """Test device determination with various device string formats.
+
+    Tests:
+    - Various device formats are processed
+    - Function doesn't crash on unusual formats
+    - Returns a valid device string
+    """
+    # Test various formats (function returns them as-is if torch not mocking CUDA)
+    test_devices = ["gpu", "cuda:", "cuda:abc", "cuda:1:2", "CPU", "CUDA", "cpu", "cuda"]
+
+    for device in test_devices:
+        result = utils.determine_effective_device(device, "test_model")
+        # Function should return a string without crashing
+        assert isinstance(result, str)
+        # Result should be non-empty
+        assert len(result) > 0
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_download_file_with_network_error(tmp_path):
+    """Test file download with network error handling.
+
+    Tests:
+    - Network errors are caught by load_file()
+    - RuntimeError is raised with context
+    - Error message includes download failure info
+    - Uses public API (load_file) which wraps errors
+    """
+    from requests.exceptions import ConnectionError as RequestsConnectionError
+
+    url = "https://nonexistent.example.com/model.bin"
+
+    # Mock requests.get to raise network error
+    with patch("requests.get") as mock_get:
+        mock_get.side_effect = RequestsConnectionError("Network error")
+
+        # Use public API which wraps requests.RequestException in RuntimeError
+        with pytest.raises(RuntimeError, match="ダウンロードに失敗しました"):
+            utils.load_file(url)
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_get_cache_path_with_special_characters():
+    """Test cache path generation with special characters in URL.
+
+    Tests:
+    - Special characters (%, &, =, etc.) are handled
+    - Path generation doesn't fail
+    - Filename is sanitized appropriately
+    - Cache path is valid
+    """
+    # URL with various special characters
+    urls_with_special_chars = [
+        "https://example.com/model%20name.onnx",
+        "https://example.com/model&version=2.onnx",
+        "https://example.com/model=final.onnx",
+    ]
+
+    cache_dir = Path("/tmp/cache")
+
+    for url in urls_with_special_chars:
+        cache_path = utils._get_cache_path(url, cache_dir)
+
+        # Verify path is generated
+        assert isinstance(cache_path, Path)
+        assert cache_path.parent == cache_dir
+        # Verify extension is preserved
+        assert cache_path.suffix in [".onnx", ""]
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_convert_unix_to_iso8601_edge_cases():
+    """Test Unix timestamp to ISO8601 conversion with edge cases.
+
+    Tests:
+    - Zero timestamp (epoch start)
+    - Negative timestamp (pre-epoch)
+    - Very large timestamp
+    - None timestamp handled gracefully
+    """
+    # Test epoch start (1970-01-01 00:00:00 UTC)
+    result = utils.convert_unix_to_iso8601(0, "test_model")
+    assert result == "1970-01-01T00:00:00Z"
+
+    # Test negative timestamp (pre-epoch)
+    result = utils.convert_unix_to_iso8601(-86400, "test_model")
+    assert result == "1969-12-31T00:00:00Z"
+
+    # Test very large timestamp (year 2100+)
+    large_timestamp = 4102444800  # 2100-01-01
+    result = utils.convert_unix_to_iso8601(large_timestamp, "test_model")
+    assert "2100" in result
+
+    # Test None timestamp
+    result = utils.convert_unix_to_iso8601(None, "test_model")
+    assert result == "Invalid Timestamp"

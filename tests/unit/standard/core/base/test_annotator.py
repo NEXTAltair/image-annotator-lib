@@ -93,7 +93,7 @@ class TestBaseAnnotator:
 
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.config_registry")
-    def test_init_with_custom_device(self, mock_config):
+    def test_init_with_custom_device(self, mock_config, mock_cuda_available):
         """初期化テスト - カスタムデバイス"""
         # Mock get_all_config to return full model config dict with custom device
         mock_config.get_all_config.return_value = {

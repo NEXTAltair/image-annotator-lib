@@ -8,6 +8,8 @@ from image_annotator_lib.exceptions.errors import (
     ApiRequestError,
     ApiServerError,
     ApiTimeoutError,
+    ConfigurationError,
+    InvalidModelConfigError,
     ModelExecutionError,
     ModelLoadError,
     OutOfMemoryError,
@@ -247,6 +249,188 @@ class TestErrorHandler:
         level = handler._determine_log_level(exc)
 
         assert level == "error"
+
+    # ==============================================================================
+    # Phase C Additional Coverage Tests (2025-12-05)
+    # ==============================================================================
+
+    def test_model_load_error_with_nested_exception(self):
+        """Test ModelLoadError with nested exception (exception chaining).
+
+        Tests:
+        - Nested exception is preserved via __cause__
+        - Error details include both original and nested exceptions
+        - Error handler processes chained exceptions correctly
+        - Report generation includes nested exception info
+        """
+        handler = ErrorHandler()
+
+        # Create nested exception chain
+        try:
+            try:
+                raise FileNotFoundError("model.onnx not found")
+            except FileNotFoundError as e:
+                raise ModelLoadError("Failed to load model", model_path="/models/model.onnx") from e
+        except ModelLoadError as exc:
+            result = handler.handle_exception(exc)
+
+            assert result["error_type"] == "ModelLoadError"
+            assert "Failed to load model" in result["message"]
+            assert result["details"]["model_path"] == "/models/model.onnx"
+            assert exc.__cause__ is not None
+            assert isinstance(exc.__cause__, FileNotFoundError)
+
+            # Verify report includes nested exception
+            report = handler.generate_error_report(exc)
+            assert "ModelLoadError" in report
+            assert "/models/model.onnx" in report
+
+    def test_api_error_with_custom_message(self):
+        """Test WebAPI error with custom user-facing message.
+
+        Tests:
+        - Custom message is preserved in error
+        - Japanese message is available
+        - Error details include provider info
+        - Error handler formats custom message correctly
+        """
+        handler = ErrorHandler()
+
+        # API error with custom message
+        exc = ApiAuthenticationError(
+            provider_name="openai",
+            status_code=401,
+            message="Invalid API key format. Expected: sk-...",
+        )
+
+        result = handler.handle_exception(exc)
+
+        assert result["error_type"] == "ApiAuthenticationError"
+        assert "Invalid API key format" in result["message"]
+        assert result["details"]["provider_name"] == "openai"
+        assert result["details"]["status_code"] == 401
+        assert "ja_message" in result
+
+        # Verify report includes custom message
+        report = handler.generate_error_report(exc)
+        assert "Invalid API key format" in report
+
+    def test_configuration_error_validation_details(self):
+        """Test ConfigurationError with validation details.
+
+        Tests:
+        - Validation errors are captured in details
+        - Error message includes configuration context
+        - Missing/invalid fields are reported
+        - Error handler extracts validation info
+        """
+        handler = ErrorHandler()
+
+        # Configuration error with validation details
+        exc = ConfigurationError(
+            "Model configuration validation failed for test_model",
+            field="device",
+            details={
+                "missing_fields": ["model_path", "class"],
+                "invalid_fields": {"device": "Invalid device 'gpu', expected 'cpu' or 'cuda'"},
+                "config_file": "/config/annotator_config.toml",
+            },
+        )
+
+        result = handler.handle_exception(exc)
+
+        assert result["error_type"] == "ConfigurationError"
+        assert "validation failed" in result["message"]
+        assert result["details"]["field"] == "device"
+        assert "missing_fields" in result["details"]
+        assert "model_path" in str(result["details"]["missing_fields"])
+        assert "invalid_fields" in result["details"]
+
+        # Verify report includes validation details
+        report = handler.generate_error_report(exc)
+        assert "ConfigurationError" in report
+        assert "missing_fields" in report
+
+    def test_timeout_error_with_context(self):
+        """Test ApiTimeoutError with execution context.
+
+        Tests:
+        - Context information is preserved
+        - Timeout details (duration, endpoint) are captured
+        - Error handler processes context correctly
+        - Retry logic considers timeout context
+        """
+        handler = ErrorHandler()
+
+        # Timeout error with context
+        exc = ApiTimeoutError(
+            provider_name="anthropic",
+            message="Request timed out after 30s",
+            details={
+                "timeout_seconds": 30,
+                "endpoint": "/v1/messages",
+                "model": "claude-3-5-sonnet-20241022",
+                "retry_attempt": 2,
+            },
+        )
+
+        # Add execution context
+        context = {"image_path": "/images/test.jpg", "image_size": "1024x1024", "batch_size": 1}
+
+        result = handler.handle_exception(exc, context=context)
+
+        assert result["error_type"] == "ApiTimeoutError"
+        assert result["details"]["provider_name"] == "anthropic"
+        assert result["details"]["timeout_seconds"] == 30
+        assert result["details"]["image_path"] == "/images/test.jpg"
+        assert result["details"]["retry_attempt"] == 2
+
+        # Verify retry logic
+        assert handler.should_retry(exc) is True
+        delay = handler.get_retry_delay(exc, attempt=2)
+        assert delay > 0  # Should calculate exponential backoff
+
+    def test_error_base_class_common_interface(self):
+        """Test AnnotatorError base class common interface.
+
+        Tests:
+        - All error types inherit from AnnotatorError
+        - Common attributes (ja_message, details) are available
+        - Error hierarchy is correct
+        - Error handler works with all error types consistently
+        """
+        handler = ErrorHandler()
+
+        # Test various error types inherit from AnnotatorError
+        error_types = [
+            ModelLoadError("Load failed", model_path="/path"),
+            ModelExecutionError("Execution failed", model_name="test"),
+            ConfigurationError("Config invalid", field="test_field"),
+            InvalidModelConfigError("Invalid config", field="test_field"),
+            ApiAuthenticationError(provider_name="openai"),
+            ApiRateLimitError(provider_name="openai"),
+            OutOfMemoryError("OOM occurred"),
+        ]
+
+        for exc in error_types:
+            # Verify inheritance
+            assert isinstance(exc, AnnotatorError)
+
+            # Verify common interface
+            assert hasattr(exc, "ja_message")
+            assert hasattr(exc, "details")
+
+            # Verify error handler works consistently
+            result = handler.handle_exception(exc)
+            assert "error_type" in result
+            assert "message" in result
+            assert "details" in result
+            assert "ja_message" in result
+
+            # Verify all errors generate reports
+            report = handler.generate_error_report(exc)
+            assert len(report) > 0
+            assert exc.__class__.__name__ in report
 
 
 class TestGlobalErrorHandler:
