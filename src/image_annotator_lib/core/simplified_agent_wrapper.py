@@ -194,20 +194,45 @@ class SimplifiedAgentWrapper(BaseAnnotator):
 
     def run_inference(self, image: Image.Image) -> AnnotationResult:
         """
-        Run inference on an image.
+        Run inference on an image following the complete BaseAnnotator pipeline.
 
         Args:
             image: PIL Image to annotate
 
         Returns:
             AnnotationResult with tags and formatted output
+
+        Note:
+            Implements the full pipeline:
+            1. Preprocess: PIL Image → BinaryContent
+            2. Inference: BinaryContent → Agent result
+            3. Format: Agent result → structured dict
+            4. Extract: dict → tags list
         """
         try:
-            tags = self._generate_tags(image)
-            formatted_output = self._format_output(image, tags)
+            # Step 1: Preprocess image to BinaryContent
+            processed = self._preprocess_images([image])
 
-            return AnnotationResult(tags=tags, formatted_output=formatted_output, error=None)
+            # Step 2: Run inference with agent
+            raw_outputs = self._run_inference(processed)
+
+            # Step 3: Format agent results
+            formatted_outputs = self._format_predictions(raw_outputs)
+
+            # Step 4: Extract tags from formatted output
+            formatted_output = formatted_outputs[0] if formatted_outputs else {}
+            tags = self._generate_tags(formatted_output)
+
+            return AnnotationResult(
+                tags=tags,
+                formatted_output=formatted_output,
+                error=None
+            )
         except Exception as e:
             error_msg = f"Inference failed for {self.model_id}: {e}"
             logger.error(error_msg)
-            return AnnotationResult(tags=[], formatted_output={"error": error_msg}, error=error_msg)
+            return AnnotationResult(
+                tags=[],
+                formatted_output={"error": error_msg},
+                error=error_msg
+            )
