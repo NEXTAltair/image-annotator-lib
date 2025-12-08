@@ -8,8 +8,6 @@ Test Strategy:
 - Safety: Mock asyncio.new_event_loop() to prevent OS-level threading issues
 """
 
-import asyncio
-from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,8 +15,6 @@ from PIL import Image
 from pydantic_ai.messages import BinaryContent
 
 from image_annotator_lib.core.simplified_agent_wrapper import SimplifiedAgentWrapper
-from image_annotator_lib.core.types import AnnotationResult
-
 
 # ==============================================================================
 # Fixtures
@@ -88,9 +84,7 @@ class TestSimplifiedWrapperInitialization:
         )
 
         # Mock agent factory
-        with patch(
-            "image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory"
-        ) as mock_factory:
+        with patch("image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory") as mock_factory:
             mock_factory_instance = MagicMock()
             mock_factory_instance.get_cached_agent.return_value = mock_pydantic_ai_agent
             mock_factory.return_value = mock_factory_instance
@@ -113,9 +107,7 @@ class TestSimplifiedWrapperContextManager:
     """Context manager tests for SimplifiedAgentWrapper."""
 
     @pytest.mark.unit
-    def test_simplified_wrapper_context_manager(
-        self, mock_pydantic_ai_agent, managed_config_registry
-    ):
+    def test_simplified_wrapper_context_manager(self, mock_pydantic_ai_agent, managed_config_registry):
         """Test context manager __enter__/__exit__ flow.
 
         Coverage: Lines 43-52 (__enter__/__exit__)
@@ -147,9 +139,7 @@ class TestSimplifiedWrapperContextManager:
             },
         )
 
-        with patch(
-            "image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory"
-        ) as mock_factory:
+        with patch("image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory") as mock_factory:
             mock_factory_instance = MagicMock()
             mock_factory_instance.get_cached_agent.return_value = mock_pydantic_ai_agent
             mock_factory.return_value = mock_factory_instance
@@ -206,9 +196,7 @@ class TestSimplifiedWrapperImagePreprocessing:
             },
         )
 
-        with patch(
-            "image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory"
-        ) as mock_factory:
+        with patch("image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory") as mock_factory:
             mock_factory_instance = MagicMock()
             mock_factory_instance.get_cached_agent.return_value = mock_pydantic_ai_agent
             mock_factory.return_value = mock_factory_instance
@@ -271,9 +259,7 @@ class TestSimplifiedWrapperInference:
             },
         )
 
-        with patch(
-            "image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory"
-        ) as mock_factory:
+        with patch("image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory") as mock_factory:
             mock_factory_instance = MagicMock()
             mock_factory_instance.get_cached_agent.return_value = mock_pydantic_ai_agent
             mock_factory.return_value = mock_factory_instance
@@ -297,7 +283,6 @@ class TestSimplifiedWrapperInference:
             assert results[0] is mock_agent_result_with_tags, "run_syncの結果返却"
 
     @pytest.mark.unit
-    @pytest.mark.skip(reason="FIXME: Async fallback mock setup needs debugging - Week 1 deferral")
     def test_simplified_wrapper_run_inference_async_fallback(
         self, mock_pydantic_ai_agent, mock_agent_result_with_tags, managed_config_registry
     ):
@@ -344,17 +329,13 @@ class TestSimplifiedWrapperInference:
             },
         )
 
-        with patch(
-            "image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory"
-        ) as mock_factory:
+        with patch("image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory") as mock_factory:
             mock_factory_instance = MagicMock()
             mock_factory_instance.get_cached_agent.return_value = mock_pydantic_ai_agent
             mock_factory.return_value = mock_factory_instance
 
             # Mock run_sync to fail with event loop error
-            mock_pydantic_ai_agent.run_sync.side_effect = RuntimeError(
-                "Event loop is already running"
-            )
+            mock_pydantic_ai_agent.run_sync.side_effect = RuntimeError("Event loop is already running")
 
             # Mock async path to succeed
             mock_pydantic_ai_agent.run.return_value = mock_agent_result_with_tags
@@ -366,14 +347,24 @@ class TestSimplifiedWrapperInference:
             mock_loop.run_until_complete.return_value = mock_agent_result_with_tags
 
             # Mock ThreadPoolExecutor to execute function synchronously
-            with patch("asyncio.new_event_loop", return_value=mock_loop):
-                with patch("asyncio.set_event_loop") as mock_set_loop:
+            with patch(
+                "image_annotator_lib.core.simplified_agent_wrapper.asyncio.new_event_loop",
+                return_value=mock_loop,
+            ) as mock_new_loop:
+                with patch(
+                    "image_annotator_lib.core.simplified_agent_wrapper.asyncio.set_event_loop"
+                ) as mock_set_loop:
                     with patch("concurrent.futures.ThreadPoolExecutor") as mock_executor_class:
                         # Make executor.submit() execute function immediately
+                        def submit_side_effect(func):
+                            """Execute the submitted function and return a mock future."""
+                            result = func()  # Actually execute the function
+                            future = MagicMock()
+                            future.result.return_value = result
+                            return future
+
                         mock_executor = MagicMock()
-                        mock_future = MagicMock()
-                        mock_future.result.return_value = mock_agent_result_with_tags
-                        mock_executor.submit.return_value = mock_future
+                        mock_executor.submit.side_effect = submit_side_effect
                         mock_executor.__enter__.return_value = mock_executor
                         mock_executor.__exit__.return_value = None
                         mock_executor_class.return_value = mock_executor
@@ -386,23 +377,20 @@ class TestSimplifiedWrapperInference:
                         result = wrapper._run_agent_inference(binary_content)
 
                         # Assert: new_event_loop called
-                        import asyncio as asyncio_module
-
-                        # Note: We patched at module level, but wrapper imports it
-                        # Verify through mock_loop operations
+                        mock_new_loop.assert_called_once_with()
 
                         # Assert: set_event_loop called with new loop
                         mock_set_loop.assert_called_once_with(mock_loop)
 
                         # Assert: run_until_complete called
-                        assert mock_loop.run_until_complete.called, "loop.run_until_complete()呼び出し"
+                        mock_loop.run_until_complete.assert_called_once()
 
                         # Assert: loop.close called
-                        assert mock_loop.close.called, "loop.close()呼び出し（finally block）"
+                        mock_loop.close.assert_called_once()
 
                         # Assert: ThreadPoolExecutor used
-                        assert mock_executor_class.called, "ThreadPoolExecutor使用"
-                        assert mock_executor.submit.called, "executor.submit()呼び出し"
+                        mock_executor_class.assert_called_once()
+                        mock_executor.submit.assert_called_once()
 
                         # Assert: Result returned
                         assert result is mock_agent_result_with_tags, "非同期パスの結果返却"
@@ -449,9 +437,7 @@ class TestSimplifiedWrapperFormatting:
             },
         )
 
-        with patch(
-            "image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory"
-        ) as mock_factory:
+        with patch("image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory") as mock_factory:
             mock_factory_instance = MagicMock()
             mock_factory_instance.get_cached_agent.return_value = mock_pydantic_ai_agent
             mock_factory.return_value = mock_factory_instance
@@ -482,7 +468,9 @@ class TestSimplifiedWrapperFormatting:
             assert tags == ["mock_tag_1", "mock_tag_2", "mock_tag_3"], "_generate_tagsでタグ抽出"
 
     @pytest.mark.unit
-    def test_simplified_wrapper_format_output_no_tags(self, mock_pydantic_ai_agent, managed_config_registry):
+    def test_simplified_wrapper_format_output_no_tags(
+        self, mock_pydantic_ai_agent, managed_config_registry
+    ):
         """Test formatting when result has no tags.
 
         Coverage: Lines 98-111 (_format_predictions edge case)
@@ -514,9 +502,7 @@ class TestSimplifiedWrapperFormatting:
             },
         )
 
-        with patch(
-            "image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory"
-        ) as mock_factory:
+        with patch("image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory") as mock_factory:
             mock_factory_instance = MagicMock()
             mock_factory_instance.get_cached_agent.return_value = mock_pydantic_ai_agent
             mock_factory.return_value = mock_factory_instance
@@ -576,9 +562,7 @@ class TestSimplifiedWrapperRunInference:
             },
         )
 
-        with patch(
-            "image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory"
-        ) as mock_factory:
+        with patch("image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory") as mock_factory:
             mock_factory_instance = MagicMock()
             mock_factory_instance.get_cached_agent.return_value = mock_pydantic_ai_agent
             mock_factory.return_value = mock_factory_instance
