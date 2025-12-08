@@ -204,3 +204,21 @@ def mock_cuda_unavailable(monkeypatch):
     """
     monkeypatch.setattr("torch.cuda.is_available", lambda: False)
     monkeypatch.setattr("torch.cuda.device_count", lambda: 0)
+
+
+@pytest.fixture
+def lightweight_test_images():
+    """軽量テスト画像セット（ユニット・統合テスト共通）
+
+    各画像は異なる色を持ち、一意の pHash を保証する。
+
+    Returns:
+        list[Image.Image]: 3つの RGB テスト画像 (64x64)
+    """
+    images = []
+    for i, color in enumerate(["red", "green", "blue"]):
+        img = Image.new("RGB", (64, 64), color)
+        # Add a single different pixel to each image to ensure unique phash
+        img.putpixel((i, i), (255, 255, 255))
+        images.append(img)
+    return images

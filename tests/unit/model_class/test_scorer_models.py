@@ -8,14 +8,13 @@ Mock Strategy (Phase C Level 1-2):
 - Level 3 (Real): Score normalization, batch processing, tag generation
 """
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 import torch
 from PIL import Image
 
-from image_annotator_lib.model_class.pipeline_scorers import AestheticShadow, AestheticShadowV2, CafePredictor
+from image_annotator_lib.model_class.pipeline_scorers import AestheticShadow, CafePredictor
 from image_annotator_lib.model_class.scorer_clip import ImprovedAesthetic, WaifuAesthetic
 
 
@@ -403,3 +402,258 @@ def test_scorer_batch_processing(
                 assert "lq" in result
                 assert 0.0 <= result["hq"] <= 1.0
                 assert 0.0 <= result["lq"] <= 1.0
+
+
+# ==============================================================================
+# Phase C Week 2: CLIP Scorer Models Tests (2025-12-07)
+# ==============================================================================
+
+
+@pytest.mark.unit
+def test_clip_scorer_inference_flow(
+    mock_clip_scorer_config, mock_clip_components, test_image, mock_capabilities_scorer
+):
+    """Test CLIP scorer complete inference flow: encode → normalize → MLP.
+
+    Coverage: Lines 93-119 in core/base/clip.py (_run_inference)
+
+    REAL components:
+    - Real tensor normalization (L2 norm)
+    - Real tensor shape handling
+    - Real score extraction from raw_outputs
+
+    MOCKED:
+    - CLIP model.get_image_features()
+    - Classifier head (MLP) forward pass
+
+    Scenario:
+    1. Preprocess image with CLIP processor
+    2. Extract image features via CLIP encoder
+    3. Normalize features with L2 norm
+    4. Pass through classifier head to get aesthetic score
+    5. Format output to UnifiedAnnotationResult
+
+    Assertions:
+    - get_image_features called with preprocessed inputs
+    - Feature normalization applied correctly
+    - Classifier head receives normalized features
+    - Raw score extracted and formatted
+    - UnifiedAnnotationResult contains score in valid range
+    """
+    import torch
+
+    with patch(
+        "image_annotator_lib.core.model_factory.ModelLoad.load_clip_components"
+    ) as mock_load:
+        # Setup mock CLIP components with realistic tensor flow
+        mock_clip_model = MagicMock()
+        mock_classifier = MagicMock()
+
+        # Mock image features (512-dim, unnormalized)
+        mock_features = torch.randn(1, 512) * 10  # Unnormalized (large magnitude)
+        mock_clip_model.get_image_features.return_value = mock_features
+
+        # Mock classifier output (aesthetic score)
+        mock_score = torch.tensor([[7.5]])
+        mock_classifier.return_value = mock_score
+
+        mock_components = {
+            "clip_model": mock_clip_model,
+            "model": mock_classifier,
+            "processor": mock_clip_components["processor"],
+            "model_path": "/fake/clip/path",
+        }
+        mock_load.return_value = mock_components
+
+        scorer = ImprovedAesthetic(mock_clip_scorer_config)
+
+        with scorer:
+            # Preprocess image
+            processed = scorer._preprocess_images([test_image])
+
+            # Run inference (REAL normalization logic)
+            raw_outputs = scorer._run_inference(processed)
+
+            # Format predictions
+            formatted = scorer._format_predictions(raw_outputs)
+
+            # Assert: CLIP encoder called with processed inputs
+            mock_clip_model.get_image_features.assert_called_once()
+            call_kwargs = mock_clip_model.get_image_features.call_args[1]
+            assert "pixel_values" in call_kwargs
+
+            # Assert: Classifier head called (features were normalized)
+            mock_classifier.assert_called_once()
+
+            # Assert: Score extracted correctly
+            assert raw_outputs.shape == torch.Size([1])  # Batch size 1, squeezed
+            assert raw_outputs.item() == 7.5  # Mock score value
+
+            # Assert: UnifiedAnnotationResult formatted correctly
+            assert len(formatted) == 1
+            result = formatted[0]
+            assert result.scores is not None
+            assert "aesthetic" in result.scores
+            assert result.scores["aesthetic"] == 7.5
+            assert result.framework == "pytorch"
+            assert result.raw_output is not None
+            assert result.raw_output["base_model"] == "ViT-B/32"
+
+
+@pytest.mark.unit
+def test_waifu_aesthetic_tag_generation_edge_scores(
+    managed_config_registry, mock_clip_components, mock_capabilities_scorer
+):
+    """Test WaifuAesthetic tag generation with edge case scores.
+
+    Coverage: Lines 34-38 in model_class/scorer_clip.py (_get_score_tag)
+
+    REAL components:
+    - Real score rounding logic
+    - Real min/max clamping (0-10 range)
+    - Real tag prefix formatting
+
+    MOCKED:
+    - CLIP model loading
+    - Inference execution
+
+    Scenario:
+    Test _get_score_tag() with various edge case scores:
+    - 0.0 → [WAIFU]score_0
+    - 0.4 → [WAIFU]score_0 (rounds down)
+    - 0.5 → [WAIFU]score_1 (rounds up due to round())
+    - 5.6 → [WAIFU]score_6
+    - 9.7 → [WAIFU]score_10
+    - 10.0 → [WAIFU]score_10
+    - 11.0 → [WAIFU]score_10 (clamped)
+    - -1.0 → [WAIFU]score_0 (clamped)
+
+    Assertions:
+    - Score rounded correctly with round()
+    - Score clamped to [0, 10] range
+    - Tag format is [WAIFU]score_{int}
+    - Different from ImprovedAesthetic prefix ([IAP])
+    """
+    # Register WaifuAesthetic config
+    config = {
+        "class": "WaifuAesthetic",
+        "model_path": "model_name/waifu-aesthetic",
+        "device": "cpu",
+        "estimated_size_gb": 1.0,
+        "type": "scorer",
+        "base_model": "ViT-B/32",
+    }
+    managed_config_registry.set("test_waifu", config)
+
+    with patch(
+        "image_annotator_lib.core.model_factory.ModelLoad.load_clip_components"
+    ) as mock_load:
+        mock_load.return_value = mock_clip_components
+
+        scorer = WaifuAesthetic("test_waifu")
+
+        with scorer:
+            # Test edge case scores
+            test_cases = [
+                (0.0, "[WAIFU]score_0"),  # Min score
+                (0.4, "[WAIFU]score_0"),  # Rounds down
+                (0.5, "[WAIFU]score_0"),  # Python round() rounds to even (0.5 → 0)
+                (1.5, "[WAIFU]score_2"),  # Python round() rounds to even (1.5 → 2)
+                (5.6, "[WAIFU]score_6"),  # Normal rounding
+                (9.7, "[WAIFU]score_10"),  # Rounds to max
+                (10.0, "[WAIFU]score_10"),  # Exact max
+                (11.0, "[WAIFU]score_10"),  # Clamped to max
+                (-1.0, "[WAIFU]score_0"),  # Clamped to min
+            ]
+
+            for score, expected_tag in test_cases:
+                result_tag = scorer._get_score_tag(score)
+                assert (
+                    result_tag == expected_tag
+                ), f"Score {score} → expected {expected_tag}, got {result_tag}"
+
+
+@pytest.mark.unit
+def test_clip_scorer_feature_normalization(
+    mock_clip_scorer_config, mock_clip_components, test_image, mock_capabilities_scorer
+):
+    """Test CLIP feature L2 normalization in inference flow.
+
+    Coverage: Lines 108-112 in core/base/clip.py (feature normalization)
+
+    REAL components:
+    - Real L2 normalization computation
+    - Real tensor operations (norm, division)
+
+    MOCKED:
+    - CLIP model feature extraction
+    - Classifier head forward pass
+
+    Scenario:
+    1. Mock CLIP returns unnormalized features with large magnitude
+    2. _run_inference() applies L2 normalization
+    3. Normalized features passed to classifier
+    4. Verify normalization: ||features||₂ = 1.0
+
+    Assertions:
+    - Features are L2 normalized before classifier
+    - Normalized feature magnitude is 1.0
+    - Classifier receives normalized inputs
+    - No NaN or Inf values after normalization
+    """
+    import torch
+
+    with patch(
+        "image_annotator_lib.core.model_factory.ModelLoad.load_clip_components"
+    ) as mock_load:
+        # Setup mock with unnormalized features
+        mock_clip_model = MagicMock()
+        mock_classifier = MagicMock()
+
+        # Create unnormalized features (large magnitude)
+        unnormalized_features = torch.randn(1, 512) * 100  # Scale by 100
+        mock_clip_model.get_image_features.return_value = unnormalized_features
+
+        # Mock classifier to return normalized features for inspection
+        def classifier_side_effect(features):
+            # Store normalized features for verification
+            classifier_side_effect.normalized_features = features.clone()
+            return torch.tensor([[6.5]])
+
+        mock_classifier.side_effect = classifier_side_effect
+
+        mock_components = {
+            "clip_model": mock_clip_model,
+            "model": mock_classifier,
+            "processor": mock_clip_components["processor"],
+            "model_path": "/fake/clip/path",
+        }
+        mock_load.return_value = mock_components
+
+        scorer = ImprovedAesthetic(mock_clip_scorer_config)
+
+        with scorer:
+            # Preprocess and run inference
+            processed = scorer._preprocess_images([test_image])
+            raw_outputs = scorer._run_inference(processed)
+
+            # Verify classifier was called
+            assert mock_classifier.called
+
+            # Verify normalization was applied
+            normalized_features = classifier_side_effect.normalized_features
+
+            # Check L2 norm is 1.0 (within floating point tolerance)
+            feature_norm = torch.norm(normalized_features, p=2, dim=-1)
+            assert torch.allclose(
+                feature_norm, torch.tensor([1.0]), atol=1e-6
+            ), f"Feature norm should be 1.0, got {feature_norm.item()}"
+
+            # Verify no NaN or Inf values
+            assert not torch.isnan(normalized_features).any(), "Normalized features contain NaN"
+            assert not torch.isinf(normalized_features).any(), "Normalized features contain Inf"
+
+            # Verify output is valid
+            assert raw_outputs.shape == torch.Size([1])
+            assert not torch.isnan(raw_outputs).any()
+            assert not torch.isinf(raw_outputs).any()

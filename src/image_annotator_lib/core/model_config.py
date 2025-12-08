@@ -158,6 +158,7 @@ class ModelConfigFactory:
                 # Filter out api_key and other fields not in WebAPIModelConfig
                 # api_key is retrieved separately from config_registry for security
                 # api_model_id is aliased as model_name_on_provider, so filter it out to avoid duplication
+                # referer/app_name are OpenRouter-specific, retrieved via config_registry.get()
                 filtered_dict = {
                     k: v
                     for k, v in config_dict.items()
@@ -168,6 +169,8 @@ class ModelConfigFactory:
                         "capabilities",
                         "max_retries",
                         "rate_limit_requests_per_minute",
+                        "referer",
+                        "app_name",
                     )
                 }
                 return WebAPIModelConfig(**filtered_dict)

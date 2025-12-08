@@ -575,3 +575,171 @@ def test_convert_unix_to_iso8601_edge_cases():
     # Test None timestamp
     result = utils.convert_unix_to_iso8601(None, "test_model")
     assert result == "Invalid Timestamp"
+
+
+# ==============================================================================
+# Phase C Week 2: Utils Edge Cases Tests (2025-12-07)
+# ==============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_perform_download_with_progress_tracking(tmp_path):
+    """Test _perform_download internal logic with stream and progress display.
+
+    Coverage: Lines 125-139 (_perform_download implementation)
+
+    REAL components:
+    - Real file writing to target_path
+    - Real chunk processing logic
+
+    MOCKED:
+    - requests.get() with streaming response
+    - tqdm progress bar (to avoid terminal output)
+
+    Scenario:
+    1. Mock requests.get to return streaming response with chunks
+    2. Call _perform_download() with target path
+    3. Verify file written correctly with all chunks
+    4. Verify progress bar updated for each chunk
+
+    Assertions:
+    - File created at target path
+    - File content matches all chunks combined
+    - requests.get called with stream=True and timeout
+    - tqdm progress bar created with correct total size
+    - Progress bar updated for each chunk
+    """
+
+    url = "https://example.com/model.bin"
+    target_path = tmp_path / "downloaded_model.bin"
+
+    # Mock response with streaming chunks
+    mock_response = MagicMock()
+    mock_response.headers.get.return_value = "16"  # content-length: 16 bytes
+    mock_response.raise_for_status = MagicMock()
+
+    # Simulate 2 chunks of 8 bytes each
+    chunk1 = b"12345678"
+    chunk2 = b"abcdefgh"
+    mock_response.iter_content.return_value = iter([chunk1, chunk2])
+
+    with patch("requests.get", return_value=mock_response) as mock_get:
+        with patch("image_annotator_lib.core.utils.tqdm") as mock_tqdm_class:
+            # Mock tqdm context manager
+            mock_pbar = MagicMock()
+            mock_tqdm_class.return_value.__enter__.return_value = mock_pbar
+
+            # Act: Perform download
+            utils._perform_download(url, target_path)
+
+            # Assert: requests.get called with correct parameters
+            mock_get.assert_called_once_with(url, stream=True, timeout=utils.DEFAULT_TIMEOUT)
+            mock_response.raise_for_status.assert_called_once()
+
+            # Assert: File created with correct content
+            assert target_path.exists(), "Target file created"
+            assert target_path.read_bytes() == chunk1 + chunk2, "File content matches chunks"
+
+            # Assert: tqdm progress bar created with correct total
+            assert mock_tqdm_class.called, "tqdm progress bar created"
+            call_kwargs = mock_tqdm_class.call_args[1]
+            assert call_kwargs["total"] == 16, "Progress bar total matches content-length"
+            assert call_kwargs["unit"] == "B", "Progress bar unit is bytes"
+            assert call_kwargs["unit_scale"] is True, "Progress bar uses unit scaling"
+
+            # Assert: Progress bar updated for each chunk
+            assert mock_pbar.update.call_count == 2, "Progress bar updated twice (2 chunks)"
+            mock_pbar.update.assert_any_call(len(chunk1))
+            mock_pbar.update.assert_any_call(len(chunk2))
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_get_file_path_comprehensive_url_vs_local(tmp_path):
+    """Test get_file_path with comprehensive URL vs local path scenarios.
+
+    Coverage: Lines 151-165 (get_file_path branch logic)
+
+    REAL components:
+    - Real urlparse() for URL detection
+    - Real path resolution for local files
+    - Real cache_dir handling (None default, string conversion)
+
+    MOCKED:
+    - _download_from_url for HTTP/HTTPS URLs
+    - File existence check bypassed with tmp_path
+
+    Scenario:
+    1. Test HTTP URL → triggers _download_from_url
+    2. Test HTTPS URL → triggers _download_from_url
+    3. Test local file path → triggers _get_local_file_path
+    4. Test cache_dir=None → uses default cache_dir
+    5. Test cache_dir as string → converts to Path
+
+    Assertions:
+    - HTTP/HTTPS URLs call _download_from_url
+    - Local paths call _get_local_file_path
+    - cache_dir handled correctly (None, string, Path)
+    - Correct Path objects returned
+    """
+    # Setup: Create real local file
+    local_file = tmp_path / "local_model.onnx"
+    local_file.write_bytes(b"local content")
+
+    # Test 1: HTTP URL triggers download
+    http_url = "http://example.com/model.onnx"
+    cache_dir = tmp_path / "cache"
+
+    with patch.object(utils, "_download_from_url") as mock_download:
+        mock_download.return_value = cache_dir / "model.onnx"
+
+        result = utils.get_file_path(http_url, cache_dir=cache_dir)
+
+        mock_download.assert_called_once_with(http_url, cache_dir)
+        assert result == cache_dir / "model.onnx", "HTTP URL returns download result"
+
+    # Test 2: HTTPS URL triggers download
+    https_url = "https://example.com/model.onnx"
+
+    with patch.object(utils, "_download_from_url") as mock_download:
+        mock_download.return_value = cache_dir / "model_https.onnx"
+
+        result = utils.get_file_path(https_url, cache_dir=cache_dir)
+
+        mock_download.assert_called_once_with(https_url, cache_dir)
+        assert result == cache_dir / "model_https.onnx", "HTTPS URL returns download result"
+
+    # Test 3: Local file path triggers _get_local_file_path
+    with patch.object(utils, "_get_local_file_path") as mock_get_local:
+        mock_get_local.return_value = local_file
+
+        result = utils.get_file_path(str(local_file), cache_dir=cache_dir)
+
+        mock_get_local.assert_called_once_with(str(local_file))
+        assert result == local_file, "Local path returns resolved file path"
+
+    # Test 4: cache_dir=None uses default
+    with patch.object(utils, "_download_from_url") as mock_download:
+        # Mock DEFAULT_PATHS access
+        with patch.dict(utils.DEFAULT_PATHS, {"cache_dir": Path("/default/cache")}):
+            mock_download.return_value = Path("/default/cache/model.onnx")
+
+            result = utils.get_file_path(http_url, cache_dir=None)
+
+            # Verify default cache_dir was used
+            call_args = mock_download.call_args[0]
+            assert call_args[1] == Path("/default/cache"), "Default cache_dir used when None"
+
+    # Test 5: cache_dir as string is converted to Path
+    cache_str = str(tmp_path / "string_cache")
+
+    with patch.object(utils, "_download_from_url") as mock_download:
+        mock_download.return_value = Path(cache_str) / "model.onnx"
+
+        result = utils.get_file_path(http_url, cache_dir=cache_str)
+
+        # Verify cache_dir was converted to Path
+        call_args = mock_download.call_args[0]
+        assert isinstance(call_args[1], Path), "String cache_dir converted to Path"
+        assert call_args[1] == Path(cache_str), "Correct Path object passed"
