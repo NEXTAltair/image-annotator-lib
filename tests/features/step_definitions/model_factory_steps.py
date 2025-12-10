@@ -1,7 +1,6 @@
 """Step definitions for ModelLoad Factory Pattern BDD scenarios."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pytest_bdd import given, parsers, then, when
@@ -30,9 +29,10 @@ def mock_model_instance():
 def mock_transformers_loader(mock_model_instance):
     """Mock Transformers model loader."""
     # Mock the actual transformers imports used in _TransformersLoader
-    with patch(
-        "transformers.models.auto.modeling_auto.AutoModelForVision2Seq"
-    ) as mock_auto_model, patch("transformers.models.auto.processing_auto.AutoProcessor") as mock_auto_processor:
+    with (
+        patch("transformers.models.auto.modeling_auto.AutoModelForVision2Seq") as mock_auto_model,
+        patch("transformers.models.auto.processing_auto.AutoProcessor") as mock_auto_processor,
+    ):
         # Configure mocks
         mock_auto_model.from_pretrained.return_value.to.return_value = mock_model_instance
         mock_auto_processor.from_pretrained.return_value = MagicMock()
@@ -59,9 +59,10 @@ def mock_torch_cuda():
     except ImportError:
         cuda_available = False
 
-    with patch("torch.cuda.is_available") as mock_cuda_check, patch(
-        "torch.cuda.get_device_name"
-    ) as mock_device_name:
+    with (
+        patch("torch.cuda.is_available") as mock_cuda_check,
+        patch("torch.cuda.get_device_name") as mock_device_name,
+    ):
         mock_cuda_check.return_value = cuda_available if cuda_available else False
         mock_device_name.return_value = "Mock CUDA Device"
         yield mock_cuda_check, mock_device_name
@@ -184,7 +185,9 @@ def three_models_cached(managed_config_registry, mock_transformers_loader):
 def memory_usage_near_limit(mock_psutil_memory):
     """Simulate memory usage near limit."""
     # Reduce available memory to 1GB
-    mock_psutil_memory.return_value = MagicMock(available=1 * 1024 * 1024 * 1024, total=8 * 1024 * 1024 * 1024)
+    mock_psutil_memory.return_value = MagicMock(
+        available=1 * 1024 * 1024 * 1024, total=8 * 1024 * 1024 * 1024
+    )
 
 
 @given('モデル設定で device = "cuda" が指定されている')
@@ -291,14 +294,18 @@ def call_load_model(managed_config_registry, mock_transformers_loader, mock_psut
 
         # ModelLoad returns None on error instead of raising exception
         if result is None:
-            return {"success": False, "result": None, "error": FileNotFoundError("Model load returned None")}
+            return {
+                "success": False,
+                "result": None,
+                "error": FileNotFoundError("Model load returned None"),
+            }
 
         return {"success": True, "result": result, "error": None}
     except Exception as e:
         return {"success": False, "result": None, "error": e}
 
 
-@when(parsers.parse('同じモデルをload_model で要求する'), target_fixture="load_result")
+@when(parsers.parse("同じモデルをload_model で要求する"), target_fixture="load_result")
 def call_load_model_again(managed_config_registry, mock_transformers_loader, cache_inspector):
     """Call load_model for already cached model."""
     try:

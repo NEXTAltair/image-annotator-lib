@@ -6,14 +6,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from PIL import Image
-from pydantic_ai.messages import BinaryContent, ModelResponse, TextPart
+from pydantic_ai.messages import BinaryContent
 from pytest_bdd import given, parsers, then, when
 
 from image_annotator_lib.core.simplified_agent_wrapper import SimplifiedAgentWrapper
-from image_annotator_lib.core.types import AnnotationResult
 
 # Step definitions for SimplifiedAgentWrapper BDD scenarios
 # Scenarios are loaded in tests/features/test_simplified_agent_wrapper.py
+
 
 # Mock agent fixture
 @pytest.fixture
@@ -161,7 +161,9 @@ def initialize_wrapper(model_id: str, mock_pydantic_ai_agent):
             mock_factory_instance = MagicMock()
             if "invalid" in model_id:
                 # For invalid model, make agent setup fail
-                mock_factory_instance.get_cached_agent.side_effect = Exception(f"Failed to get agent for {model_id}")
+                mock_factory_instance.get_cached_agent.side_effect = Exception(
+                    f"Failed to get agent for {model_id}"
+                )
             else:
                 mock_factory_instance.get_cached_agent.return_value = mock_pydantic_ai_agent
             mock_factory.return_value = mock_factory_instance
@@ -208,7 +210,9 @@ def trigger_event_loop_error(wrapper: SimplifiedAgentWrapper, load_image_files):
     """Event loop エラーを発生させてasync fallback をトリガー"""
     images = load_image_files(1)
     # This should trigger the async fallback path
-    with patch.object(wrapper._agent, "run_sync", side_effect=RuntimeError("Event loop is already running")):
+    with patch.object(
+        wrapper._agent, "run_sync", side_effect=RuntimeError("Event loop is already running")
+    ):
         result = wrapper.run_inference(images)
     return result
 
@@ -237,15 +241,15 @@ def log_message_recorded(log_message: str, caplog):
     """ログに指定メッセージが記録される"""
     # Check if any log record contains the expected message
     matches = [record for record in caplog.records if log_message in record.message]
-    assert len(matches) > 0, f"Expected log message '{log_message}' not found. Logs: {[r.message for r in caplog.records]}"
+    assert len(matches) > 0, (
+        f"Expected log message '{log_message}' not found. Logs: {[r.message for r in caplog.records]}"
+    )
 
 
 @then(parsers.parse('ログに "{log_message}" エラーが記録される'))
 def error_log_recorded(log_message: str, caplog):
     """エラーログに指定メッセージが記録される"""
-    assert any(
-        log_message in record.message and record.levelname == "ERROR" for record in caplog.records
-    )
+    assert any(log_message in record.message and record.levelname == "ERROR" for record in caplog.records)
 
 
 @then("Exception が発生する")
@@ -342,9 +346,7 @@ def annotation_result_has_error(run_inference_result):
 @then(parsers.parse('ログに "{log_message}" エラーが記録される'))
 def error_logged(log_message: str, caplog):
     """エラーログが記録される"""
-    assert any(
-        log_message in record.message and record.levelname == "ERROR" for record in caplog.records
-    )
+    assert any(log_message in record.message and record.levelname == "ERROR" for record in caplog.records)
 
 
 @then("tagsは空リストである")

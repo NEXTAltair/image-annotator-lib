@@ -1,12 +1,11 @@
 """Step definitions for API Model Discovery BDD scenarios."""
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
-from pytest_bdd import given, parsers, then, when
+from pytest_bdd import given, then, when
 
 from image_annotator_lib.core.api_model_discovery import discover_available_vision_models
 
@@ -79,7 +78,9 @@ def openrouter_api_available(mock_openrouter_response):
 def cached_results_exist(mock_toml_file, mock_openrouter_response):
     """Create cached TOML file with previous results."""
     # Mock the TOML file path
-    with patch("image_annotator_lib.core.api_model_discovery.AVAILABLE_API_MODELS_CONFIG_PATH", mock_toml_file):
+    with patch(
+        "image_annotator_lib.core.api_model_discovery.AVAILABLE_API_MODELS_CONFIG_PATH", mock_toml_file
+    ):
         # Write a simple TOML structure
         mock_toml_file.write_text(
             """
@@ -131,9 +132,12 @@ def call_discover_vision_models(request, mock_openrouter_response, mock_toml_fil
         pass
 
     # Patch the TOML file path
-    with patch(
-        "image_annotator_lib.core.api_model_discovery.AVAILABLE_API_MODELS_CONFIG_PATH", mock_toml_file
-    ), patch("image_annotator_lib.core.config.AVAILABLE_API_MODELS_CONFIG_PATH", mock_toml_file):
+    with (
+        patch(
+            "image_annotator_lib.core.api_model_discovery.AVAILABLE_API_MODELS_CONFIG_PATH", mock_toml_file
+        ),
+        patch("image_annotator_lib.core.config.AVAILABLE_API_MODELS_CONFIG_PATH", mock_toml_file),
+    ):
         if unexpected_format:
             # Test unexpected API response format
             with patch("requests.get") as mock_get:
@@ -188,11 +192,13 @@ def call_discover_vision_models(request, mock_openrouter_response, mock_toml_fil
 )
 def call_discover_with_force_refresh(mock_openrouter_response, mock_toml_file):
     """Call discover_available_vision_models with force_refresh=True."""
-    with patch(
-        "image_annotator_lib.core.api_model_discovery.AVAILABLE_API_MODELS_CONFIG_PATH", mock_toml_file
-    ), patch("image_annotator_lib.core.config.AVAILABLE_API_MODELS_CONFIG_PATH", mock_toml_file), patch(
-        "requests.get"
-    ) as mock_get:
+    with (
+        patch(
+            "image_annotator_lib.core.api_model_discovery.AVAILABLE_API_MODELS_CONFIG_PATH", mock_toml_file
+        ),
+        patch("image_annotator_lib.core.config.AVAILABLE_API_MODELS_CONFIG_PATH", mock_toml_file),
+        patch("requests.get") as mock_get,
+    ):
         # Mock successful API response
         mock_response = MagicMock()
         mock_response.json.return_value = mock_openrouter_response(5)
