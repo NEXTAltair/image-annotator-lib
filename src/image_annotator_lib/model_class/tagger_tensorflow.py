@@ -115,7 +115,7 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
         except Exception as e:
             logger.exception(f"TensorFlow テンソルの NumPy 変換中にエラー: {e}")
             # エラーが発生した場合、エラー情報を含む辞書を返す
-            return [{"error": f"NumPy変換エラー: {str(e)}"}]
+            return [{"error": f"NumPy変換エラー: {e!s}"}]
 
         batch_size = predictions_np.shape[0]
         logger.debug(f"Formatting predictions for batch size: {batch_size}")

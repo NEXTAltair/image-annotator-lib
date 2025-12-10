@@ -7,12 +7,9 @@ Mock Strategy (Phase C):
 - Mock: File paths, file existence
 """
 
-from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-
-from image_annotator_lib.exceptions.errors import ConfigurationError, ModelLoadError
 
 
 @pytest.fixture
@@ -59,9 +56,7 @@ def test_missing_model_file_error(managed_config_registry):
     }
     managed_config_registry.set("test_missing_file", config)
 
-    with patch(
-        "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-    ) as mock_load:
+    with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
         # Simulate file not found during model loading
         mock_load.side_effect = FileNotFoundError(
             "[Errno 2] No such file or directory: '/nonexistent/path/model.onnx'"
@@ -103,13 +98,9 @@ def test_corrupted_model_file_error(managed_config_registry, tmp_path):
     }
     managed_config_registry.set("test_corrupted", config)
 
-    with patch(
-        "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-    ) as mock_load:
+    with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
         # Simulate ONNX load error for corrupted file
-        mock_load.side_effect = RuntimeError(
-            "Failed to load model: Invalid ONNX format"
-        )
+        mock_load.side_effect = RuntimeError("Failed to load model: Invalid ONNX format")
 
         tagger = WDTagger("test_corrupted")
 
@@ -157,9 +148,7 @@ def test_missing_csv_file_error(managed_config_registry, tmp_path):
     mock_session.get_outputs.return_value = [mock_output]
 
     # Return components without csv_path to trigger error
-    with patch(
-        "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-    ) as mock_load:
+    with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
         mock_load.return_value = {
             "session": mock_session,
             "csv_path": "",  # Empty csv_path triggers error

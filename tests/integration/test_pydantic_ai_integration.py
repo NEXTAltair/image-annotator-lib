@@ -13,12 +13,9 @@ Test Strategy:
 - MOCKED: Agent.run API calls (external dependencies)
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 
 from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
-
 
 # ==============================================================================
 # Phase B Task 4.1: Agent Caching Flow Tests
@@ -59,7 +56,9 @@ class TestAgentCachingFlow:
         provider2 = PydanticAIProviderFactory.get_provider("openai", api_key="test_key_123")
 
         # Assert: Same Provider instance returned (cache hit)
-        assert provider1 is provider2, "同じprovider名とAPI keyでは同じProviderインスタンスが返されるべき（キャッシュヒット）"
+        assert provider1 is provider2, (
+            "同じprovider名とAPI keyでは同じProviderインスタンスが返されるべき（キャッシュヒット）"
+        )
         assert id(provider1) == id(provider2), "Provider Instance IDが同じであることを確認"
 
         # Assert: Provider cache contains entry
@@ -137,7 +136,9 @@ class TestCacheInvalidation:
 
         # Assert: Providers cached
         initial_cache_size = len(PydanticAIProviderFactory._providers)
-        assert initial_cache_size >= 3, f"少なくとも3つのProviderがキャッシュされているべき（実際: {initial_cache_size}）"
+        assert initial_cache_size >= 3, (
+            f"少なくとも3つのProviderがキャッシュされているべき（実際: {initial_cache_size}）"
+        )
 
         # Act: Explicit cache clear
         PydanticAIProviderFactory.clear_cache()
@@ -169,7 +170,9 @@ class TestCacheInvalidation:
         NOTE: Cache清空は fixture によって次のテスト開始前に自動実行される
         """
         # Assert: Cache starts empty (fixture cleared before this test)
-        assert len(PydanticAIProviderFactory._providers) == 0, "テスト開始時はキャッシュが空であるべき（fixture自動クリア）"
+        assert len(PydanticAIProviderFactory._providers) == 0, (
+            "テスト開始時はキャッシュが空であるべき（fixture自動クリア）"
+        )
 
         # Act: Add provider to cache
         PydanticAIProviderFactory.get_provider("openai", api_key="isolation_test_key")
@@ -217,7 +220,9 @@ class TestProviderInstanceSharing:
         provider2 = PydanticAIProviderFactory.get_provider("openai", api_key="shared_key_123")
 
         # Assert: Same provider instance returned (shared)
-        assert provider1 is provider2, "同じprovider名と同じAPI keyでは同じProviderインスタンスが共有されるべき"
+        assert provider1 is provider2, (
+            "同じprovider名と同じAPI keyでは同じProviderインスタンスが共有されるべき"
+        )
         assert id(provider1) == id(provider2), "Provider instance IDが同じであることを確認"
 
         # Act: Get provider with DIFFERENT key

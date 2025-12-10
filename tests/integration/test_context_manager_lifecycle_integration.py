@@ -15,7 +15,7 @@ Test Strategy:
 """
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from PIL import Image
@@ -23,8 +23,6 @@ from PIL import Image
 from image_annotator_lib.core.base.pipeline import PipelineBaseAnnotator
 from image_annotator_lib.core.base.transformers import TransformersBaseAnnotator
 from image_annotator_lib.core.base.webapi import WebApiBaseAnnotator
-from image_annotator_lib.core.model_factory import ModelLoad
-from image_annotator_lib.core.types import AnnotationSchema
 
 
 # Test-specific concrete implementations
@@ -83,9 +81,7 @@ class TestFullLifecycle:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_pipeline_full_lifecycle_success(
-        self, managed_config_registry, lightweight_test_images_local
-    ):
+    def test_pipeline_full_lifecycle_success(self, managed_config_registry, lightweight_test_images_local):
         """Test complete pipeline lifecycle: __init__ → __enter__ → annotate → __exit__
 
         REAL components:
@@ -142,7 +138,9 @@ class TestFullLifecycle:
 
                 # Assert: Components loaded
                 assert annotator.components is not None, "__enter__後はコンポーネントがロード済み"
-                assert annotator.components == {"pipeline": mock_pipeline}, "コンポーネントが正しくロードされている"
+                assert annotator.components == {"pipeline": mock_pipeline}, (
+                    "コンポーネントが正しくロードされている"
+                )
 
                 # Assert: Device set correctly
                 assert annotator.device == "cpu", "デバイスがCPUに設定されている"
@@ -342,9 +340,7 @@ class TestDeviceFallback:
                 # Components loaded successfully on CPU (inference not tested here)
 
     @pytest.mark.integration
-    def test_cpu_explicit_no_fallback_needed(
-        self, managed_config_registry, lightweight_test_images_local
-    ):
+    def test_cpu_explicit_no_fallback_needed(self, managed_config_registry, lightweight_test_images_local):
         """Test explicit CPU configuration with no fallback.
 
         Verifies CPU-only path works independently without fallback logic.
@@ -455,9 +451,7 @@ class TestErrorRecovery:
             assert annotator.components is None, "ロード失敗時はcomponentsがNoneのまま"
 
     @pytest.mark.integration
-    def test_restoration_failure_continues_with_warning(
-        self, managed_config_registry, mock_cuda_available
-    ):
+    def test_restoration_failure_continues_with_warning(self, managed_config_registry, mock_cuda_available):
         """Test CUDA restoration failure allows CPU continuation.
 
         REAL components:

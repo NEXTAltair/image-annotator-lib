@@ -48,10 +48,12 @@ def mock_pipeline():
 
     # Configure pipeline to return classification results
     # AestheticShadow format: [{'label': 'hq', 'score': 0.9}, {'label': 'lq', 'score': 0.1}]
-    mock_pipe.return_value = [[
-        {"label": "hq", "score": 0.85},
-        {"label": "lq", "score": 0.15},
-    ]]
+    mock_pipe.return_value = [
+        [
+            {"label": "hq", "score": 0.85},
+            {"label": "lq", "score": 0.15},
+        ]
+    ]
 
     return mock_pipe
 
@@ -66,10 +68,12 @@ def mock_cafe_pipeline():
     mock_pipe = MagicMock()
 
     # CafePredictor format: [{'label': 'aesthetic', 'score': 0.67}, {'label': 'not_aesthetic', 'score': 0.33}]
-    mock_pipe.return_value = [[
-        {"label": "aesthetic", "score": 0.67},
-        {"label": "not_aesthetic", "score": 0.33},
-    ]]
+    mock_pipe.return_value = [
+        [
+            {"label": "aesthetic", "score": 0.67},
+            {"label": "not_aesthetic", "score": 0.33},
+        ]
+    ]
 
     return mock_pipe
 
@@ -276,9 +280,7 @@ def test_pipeline_scorer_prediction(
 
 
 @pytest.mark.unit
-def test_cafe_scorer_prediction(
-    mock_cafe_config, mock_cafe_pipeline, test_image, mock_capabilities_scorer
-):
+def test_cafe_scorer_prediction(mock_cafe_config, mock_cafe_pipeline, test_image, mock_capabilities_scorer):
     """Test CafePredictor score extraction and tag generation.
 
     Mock Strategy:
@@ -331,9 +333,7 @@ def test_clip_scorer_initialization(
     - clip_model config parameter used
     - MLP head for aesthetic scoring initialized
     """
-    with patch(
-        "image_annotator_lib.core.model_factory.ModelLoad.load_clip_components"
-    ) as mock_load:
+    with patch("image_annotator_lib.core.model_factory.ModelLoad.load_clip_components") as mock_load:
         mock_load.return_value = mock_clip_components
 
         scorer = ImprovedAesthetic(mock_clip_scorer_config)
@@ -442,9 +442,7 @@ def test_clip_scorer_inference_flow(
     """
     import torch
 
-    with patch(
-        "image_annotator_lib.core.model_factory.ModelLoad.load_clip_components"
-    ) as mock_load:
+    with patch("image_annotator_lib.core.model_factory.ModelLoad.load_clip_components") as mock_load:
         # Setup mock CLIP components with realistic tensor flow
         mock_clip_model = MagicMock()
         mock_classifier = MagicMock()
@@ -545,9 +543,7 @@ def test_waifu_aesthetic_tag_generation_edge_scores(
     }
     managed_config_registry.set("test_waifu", config)
 
-    with patch(
-        "image_annotator_lib.core.model_factory.ModelLoad.load_clip_components"
-    ) as mock_load:
+    with patch("image_annotator_lib.core.model_factory.ModelLoad.load_clip_components") as mock_load:
         mock_load.return_value = mock_clip_components
 
         scorer = WaifuAesthetic("test_waifu")
@@ -568,9 +564,9 @@ def test_waifu_aesthetic_tag_generation_edge_scores(
 
             for score, expected_tag in test_cases:
                 result_tag = scorer._get_score_tag(score)
-                assert (
-                    result_tag == expected_tag
-                ), f"Score {score} → expected {expected_tag}, got {result_tag}"
+                assert result_tag == expected_tag, (
+                    f"Score {score} → expected {expected_tag}, got {result_tag}"
+                )
 
 
 @pytest.mark.unit
@@ -603,9 +599,7 @@ def test_clip_scorer_feature_normalization(
     """
     import torch
 
-    with patch(
-        "image_annotator_lib.core.model_factory.ModelLoad.load_clip_components"
-    ) as mock_load:
+    with patch("image_annotator_lib.core.model_factory.ModelLoad.load_clip_components") as mock_load:
         # Setup mock with unnormalized features
         mock_clip_model = MagicMock()
         mock_classifier = MagicMock()
@@ -645,9 +639,9 @@ def test_clip_scorer_feature_normalization(
 
             # Check L2 norm is 1.0 (within floating point tolerance)
             feature_norm = torch.norm(normalized_features, p=2, dim=-1)
-            assert torch.allclose(
-                feature_norm, torch.tensor([1.0]), atol=1e-6
-            ), f"Feature norm should be 1.0, got {feature_norm.item()}"
+            assert torch.allclose(feature_norm, torch.tensor([1.0]), atol=1e-6), (
+                f"Feature norm should be 1.0, got {feature_norm.item()}"
+            )
 
             # Verify no NaN or Inf values
             assert not torch.isnan(normalized_features).any(), "Normalized features contain NaN"

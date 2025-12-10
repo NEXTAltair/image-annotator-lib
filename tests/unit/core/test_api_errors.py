@@ -10,8 +10,6 @@ Mock Strategy:
 - Real: Error handling logic in annotator classes
 """
 
-import asyncio
-from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -117,9 +115,7 @@ def test_api_rate_limit_429(managed_config_registry):
     # Create mock Agent with AsyncMock.run() that raises 429 error
     mock_agent = MagicMock()
     mock_agent.run = AsyncMock(
-        side_effect=ModelHTTPError(
-            status_code=429, model_name="test_rate_limit", body="Too many requests"
-        )
+        side_effect=ModelHTTPError(status_code=429, model_name="test_rate_limit", body="Too many requests")
     )
 
     with patch(
@@ -178,7 +174,7 @@ def test_api_timeout_error(managed_config_registry):
 
     # Create mock Agent with AsyncMock.run() that raises TimeoutError
     mock_agent = MagicMock()
-    mock_agent.run = AsyncMock(side_effect=asyncio.TimeoutError("Request timed out"))
+    mock_agent.run = AsyncMock(side_effect=TimeoutError("Request timed out"))
 
     with patch(
         "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent",
@@ -235,9 +231,7 @@ def test_unexpected_model_behavior_error(managed_config_registry):
 
     # Create mock Agent with AsyncMock.run() that raises UnexpectedModelBehavior
     mock_agent = MagicMock()
-    mock_agent.run = AsyncMock(
-        side_effect=UnexpectedModelBehavior("Model returned invalid structure")
-    )
+    mock_agent.run = AsyncMock(side_effect=UnexpectedModelBehavior("Model returned invalid structure"))
 
     with patch(
         "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent",
@@ -276,10 +270,10 @@ def test_api_error_with_multiple_images(managed_config_registry):
     - Partial results returned (error for first, success for second)
     - Both images processed independently
     """
+    from image_annotator_lib.core.types import AnnotationSchema
     from image_annotator_lib.model_class.annotator_webapi.anthropic_api import (
         AnthropicApiAnnotator,
     )
-    from image_annotator_lib.core.types import AnnotationSchema
 
     # Setup config
     config_dict = {
@@ -295,9 +289,7 @@ def test_api_error_with_multiple_images(managed_config_registry):
 
     # Create mock Agent with side_effect: error on first call, success on second
     mock_agent = MagicMock()
-    success_response = AnnotationSchema(
-        tags=["test_tag"], captions=["test caption"], score=0.9
-    )
+    success_response = AnnotationSchema(tags=["test_tag"], captions=["test caption"], score=0.9)
     mock_agent.run = AsyncMock(
         side_effect=[
             ModelHTTPError(status_code=500, model_name="test_multi", body="Internal error"),

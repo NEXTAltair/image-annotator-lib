@@ -90,9 +90,9 @@ class TestOpenAIChatContextManager:
             call_args = mock_get_agent.call_args
 
             # Verify OpenRouter prefix added
-            assert call_args[1]["api_model_id"].startswith(
-                "openrouter:"
-            ), "api_model_idに'openrouter:'プレフィックス追加"
+            assert call_args[1]["api_model_id"].startswith("openrouter:"), (
+                "api_model_idに'openrouter:'プレフィックス追加"
+            )
 
             # Verify custom headers in config_data
             config_data = call_args[1]["config_data"]
@@ -107,9 +107,7 @@ class TestOpenAIChatInference:
     """Inference execution tests for OpenAI/OpenRouter annotators."""
 
     @pytest.mark.unit
-    def test_openai_chat_run_with_model_success(
-        self, managed_config_registry, lightweight_test_images
-    ):
+    def test_openai_chat_run_with_model_success(self, managed_config_registry, lightweight_test_images):
         """Test successful inference with UnifiedAnnotationResult conversion.
 
         Coverage: Lines 63-140 (run_with_model core logic)
@@ -184,9 +182,7 @@ class TestOpenAIChatInference:
                     assert result.raw_output is not None, "raw_output存在"
 
     @pytest.mark.unit
-    def test_openai_chat_error_handling_http_errors(
-        self, managed_config_registry, lightweight_test_images
-    ):
+    def test_openai_chat_error_handling_http_errors(self, managed_config_registry, lightweight_test_images):
         """Test HTTP error handling with ModelHTTPError.
 
         Coverage: Lines 141-168 (ModelHTTPError path)
@@ -307,14 +303,14 @@ class TestOpenAIChatInference:
                     )
 
                     # Assert: All images processed
-                    assert len(results) == len(
-                        lightweight_test_images
-                    ), "全画像が処理される（ループ反復数一致）"
+                    assert len(results) == len(lightweight_test_images), (
+                        "全画像が処理される（ループ反復数一致）"
+                    )
 
                     # Assert: Rate limiting called before each inference
-                    assert (
-                        mock_wait.call_count == len(lightweight_test_images)
-                    ), "_wait_for_rate_limit()が各画像前に呼ばれる"
+                    assert mock_wait.call_count == len(lightweight_test_images), (
+                        "_wait_for_rate_limit()が各画像前に呼ばれる"
+                    )
 
                     # Assert: No exceptions occurred
                     for result in results:

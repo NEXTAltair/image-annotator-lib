@@ -23,8 +23,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from image_annotator_lib.core.base.pipeline import PipelineBaseAnnotator
-from image_annotator_lib.core.model_factory import ModelLoad
-
 
 # ==============================================================================
 # Test-specific concrete implementations
@@ -466,9 +464,7 @@ class TestDeviceFallbackScenarios:
     """
 
     @pytest.mark.integration
-    def test_cuda_failure_fallback_to_cpu_cache(
-        self, managed_config_registry, mock_cuda_unavailable
-    ):
+    def test_cuda_failure_fallback_to_cpu_cache(self, managed_config_registry, mock_cuda_unavailable):
         """Test CUDA failure fallback preserves cache functionality.
 
         REAL components:
@@ -523,9 +519,7 @@ class TestDeviceFallbackScenarios:
             annotator.__exit__(None, None, None)
 
     @pytest.mark.integration
-    def test_mixed_device_cache_isolation(
-        self, managed_config_registry, mock_cuda_available
-    ):
+    def test_mixed_device_cache_isolation(self, managed_config_registry, mock_cuda_available):
         """Test CPU and CUDA models coexist in cache.
 
         REAL components:

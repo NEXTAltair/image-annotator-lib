@@ -223,16 +223,8 @@ class SimplifiedAgentWrapper(BaseAnnotator):
             formatted_output = formatted_outputs[0] if formatted_outputs else {}
             tags = self._generate_tags(formatted_output)
 
-            return AnnotationResult(
-                tags=tags,
-                formatted_output=formatted_output,
-                error=None
-            )
+            return AnnotationResult(tags=tags, formatted_output=formatted_output, error=None)
         except Exception as e:
             error_msg = f"Inference failed for {self.model_id}: {e}"
             logger.error(error_msg)
-            return AnnotationResult(
-                tags=[],
-                formatted_output={"error": error_msg},
-                error=error_msg
-            )
+            return AnnotationResult(tags=[], formatted_output={"error": error_msg}, error=error_msg)

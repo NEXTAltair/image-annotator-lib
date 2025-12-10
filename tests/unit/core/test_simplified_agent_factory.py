@@ -32,7 +32,9 @@ def mock_model_discovery():
     Returns:
         Mock function returning model discovery result
     """
-    with patch("image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models") as mock:
+    with patch(
+        "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
+    ) as mock:
         mock.return_value = {
             "models": [
                 "google/gemini-2.5-pro-preview-03-25",
@@ -103,9 +105,7 @@ def reset_global_factory():
 
 @pytest.mark.unit
 @pytest.mark.fast
-def test_create_agent_with_settings_merge(
-    mock_model_discovery, mock_simple_config, mock_agent_creation
-):
+def test_create_agent_with_settings_merge(mock_model_discovery, mock_simple_config, mock_agent_creation):
     """Test create_agent() merges model settings with kwargs and filters parameters.
 
     Coverage: Lines 55-85 (create_agent implementation)
@@ -135,9 +135,7 @@ def test_create_agent_with_settings_merge(
     factory = SimplifiedAgentFactory()
 
     # Create agent with overrides
-    agent = factory.create_agent(
-        "google/gemini-2.5-pro-preview-03-25", temperature=0.5, top_p=0.9
-    )
+    agent = factory.create_agent("google/gemini-2.5-pro-preview-03-25", temperature=0.5, top_p=0.9)
 
     # Assert: get_model_settings called
     mock_simple_config.assert_called_once_with("google/gemini-2.5-pro-preview-03-25")
@@ -169,9 +167,7 @@ def test_create_agent_with_settings_merge(
 
 @pytest.mark.unit
 @pytest.mark.fast
-def test_get_cached_agent_caching_behavior(
-    mock_model_discovery, mock_simple_config, mock_agent_creation
-):
+def test_get_cached_agent_caching_behavior(mock_model_discovery, mock_simple_config, mock_agent_creation):
     """Test get_cached_agent() caches agents by cache_key.
 
     Coverage: Lines 87-103 (get_cached_agent implementation)

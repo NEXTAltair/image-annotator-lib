@@ -331,9 +331,7 @@ def test_config_deep_merge_nested_dicts(registry):
     - No mutation of source dictionaries
     """
     # Create nested structures (2 levels deep - matches actual merge behavior)
-    registry._system_config_data = {
-        "model1": {"device": "cpu", "batch_size": 16, "precision": "fp32"}
-    }
+    registry._system_config_data = {"model1": {"device": "cpu", "batch_size": 16, "precision": "fp32"}}
     registry._user_config_data = {"model1": {"device": "cuda"}, "model2": {"device": "cuda"}}
 
     registry._merge_configs()

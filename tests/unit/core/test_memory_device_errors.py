@@ -43,9 +43,7 @@ def test_cuda_oom_error_detection(managed_config_registry):
     mock_torch.cuda.OutOfMemoryError = mock_oom_error
 
     with patch.dict("sys.modules", {"torch": mock_torch}):
-        with patch(
-            "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-        ) as mock_load:
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
             # Simulate CUDA OOM during load
             mock_load.side_effect = mock_oom_error(
                 "CUDA out of memory. Tried to allocate 2.00 GiB (GPU 0; 8.00 GiB total capacity)"

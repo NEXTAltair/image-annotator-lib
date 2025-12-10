@@ -8,7 +8,6 @@ Mock Strategy (Phase C Level 1-2):
 - Level 3 (Real): Image preprocessing, tag extraction, config loading
 """
 
-from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
@@ -139,9 +138,7 @@ def test_onnx_tagger_initialization_success(mock_wdtagger_config, mock_onnx_sess
     - CSV path loaded from components
     """
     with patch("onnxruntime.InferenceSession", return_value=mock_onnx_session):
-        with patch(
-            "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-        ) as mock_load:
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
             # Configure mock to return components with session and csv_path
             mock_load.return_value = {
                 "session": mock_onnx_session,
@@ -182,9 +179,7 @@ def test_onnx_tagger_preprocessing(mock_wdtagger_config, mock_onnx_session, mock
     - Dtype conversion to float32
     """
     with patch("onnxruntime.InferenceSession", return_value=mock_onnx_session):
-        with patch(
-            "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-        ) as mock_load:
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
             mock_load.return_value = {
                 "session": mock_onnx_session,
                 "csv_path": str(mock_csv_file),
@@ -226,9 +221,7 @@ def test_onnx_tagger_inference(
     - Category scores extracted
     """
     with patch("onnxruntime.InferenceSession", return_value=mock_onnx_session):
-        with patch(
-            "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-        ) as mock_load:
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
             mock_load.return_value = {
                 "session": mock_onnx_session,
                 "csv_path": str(mock_csv_file),
@@ -284,9 +277,7 @@ def test_onnx_tagger_batch_processing(
     - Each result is valid UnifiedAnnotationResult
     """
     with patch("onnxruntime.InferenceSession", return_value=mock_onnx_session):
-        with patch(
-            "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-        ) as mock_load:
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
             mock_load.return_value = {
                 "session": mock_onnx_session,
                 "csv_path": str(mock_csv_file),
@@ -351,9 +342,7 @@ def test_onnx_tagger_error_handling(managed_config_registry, mock_onnx_session):
     managed_config_registry.set("test_no_csv", config_no_csv)
 
     with patch("onnxruntime.InferenceSession", return_value=mock_onnx_session):
-        with patch(
-            "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-        ) as mock_load:
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
             # Return components without csv_path
             mock_load.return_value = {
                 "session": mock_onnx_session,
@@ -375,9 +364,7 @@ def test_onnx_tagger_error_handling(managed_config_registry, mock_onnx_session):
     managed_config_registry.set("test_bad_csv", config_bad_csv)
 
     with patch("onnxruntime.InferenceSession", return_value=mock_onnx_session):
-        with patch(
-            "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-        ) as mock_load:
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
             mock_load.return_value = {
                 "session": mock_onnx_session,
                 "csv_path": "/fake/corrupted.csv",
@@ -423,9 +410,7 @@ rating:explicit,9
     csv_path.write_text(csv_content)
 
     with patch("onnxruntime.InferenceSession", return_value=mock_onnx_session):
-        with patch(
-            "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-        ) as mock_load:
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
             mock_load.return_value = {
                 "session": mock_onnx_session,
                 "csv_path": str(csv_path),
@@ -449,9 +434,7 @@ rating:explicit,9
 
 
 @pytest.mark.unit
-def test_onnx_tagger_preprocessing_edge_cases(
-    mock_wdtagger_config, mock_onnx_session, mock_csv_file
-):
+def test_onnx_tagger_preprocessing_edge_cases(mock_wdtagger_config, mock_onnx_session, mock_csv_file):
     """Test preprocessing with various image sizes and aspect ratios.
 
     Tests:
@@ -462,9 +445,7 @@ def test_onnx_tagger_preprocessing_edge_cases(
     - RGBA image conversion
     """
     with patch("onnxruntime.InferenceSession", return_value=mock_onnx_session):
-        with patch(
-            "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-        ) as mock_load:
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
             mock_load.return_value = {
                 "session": mock_onnx_session,
                 "csv_path": str(mock_csv_file),
@@ -517,9 +498,7 @@ def test_onnx_tagger_tag_threshold_filtering(
     - Different threshold settings
     """
     with patch("onnxruntime.InferenceSession", return_value=mock_onnx_session):
-        with patch(
-            "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-        ) as mock_load:
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
             mock_load.return_value = {
                 "session": mock_onnx_session,
                 "csv_path": str(mock_csv_file),
@@ -583,9 +562,7 @@ def test_onnx_tagger_category_score_extraction(
     - Category mapping accuracy
     """
     with patch("onnxruntime.InferenceSession", return_value=mock_onnx_session):
-        with patch(
-            "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-        ) as mock_load:
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
             mock_load.return_value = {
                 "session": mock_onnx_session,
                 "csv_path": str(mock_csv_file),
@@ -647,9 +624,7 @@ def test_z3d_e621_tagger_initialization(managed_config_registry, mock_onnx_sessi
     managed_config_registry.set("test_z3d", config)
 
     with patch("onnxruntime.InferenceSession", return_value=mock_onnx_session):
-        with patch(
-            "image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components"
-        ) as mock_load:
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
             mock_load.return_value = {
                 "session": mock_onnx_session,
                 "csv_path": str(mock_csv_file),

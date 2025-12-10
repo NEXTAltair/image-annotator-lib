@@ -299,9 +299,7 @@ class TestConfigurationConsistency:
         managed_config_registry.set("config_test_model", config1)
         register_annotators()
 
-        mock_response = FinalResult(
-            output=AnnotationSchema(tags=["config_test"], captions=[], score=0.9)
-        )
+        mock_response = FinalResult(output=AnnotationSchema(tags=["config_test"], captions=[], score=0.9))
 
         with patch(
             "image_annotator_lib.core.pydantic_ai_factory.Agent.run",
@@ -439,9 +437,7 @@ class TestErrorIsolation:
 
             if mock_agent_run.call_count % 2 == 1:
                 # Google succeeds
-                return FinalResult(
-                    output=AnnotationSchema(tags=["isolation_test"], captions=[], score=0.9)
-                )
+                return FinalResult(output=AnnotationSchema(tags=["isolation_test"], captions=[], score=0.9))
             else:
                 # OpenAI fails
                 raise RuntimeError("Simulated OpenAI API error")
@@ -460,7 +456,9 @@ class TestErrorIsolation:
             # Assert: Results contain both attempts
             first_phash = next(iter(results))
             assert "google_isolation_model" in results[first_phash], "Googleモデル結果あり"
-            assert "openai_isolation_model" in results[first_phash], "OpenAIモデル結果あり（エラー含む可能性）"
+            assert "openai_isolation_model" in results[first_phash], (
+                "OpenAIモデル結果あり（エラー含む可能性）"
+            )
 
             # Assert: Google result should be present (either success or error recorded)
             google_result = results[first_phash]["google_isolation_model"]

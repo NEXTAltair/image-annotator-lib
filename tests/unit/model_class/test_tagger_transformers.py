@@ -8,13 +8,13 @@ Mock Strategy (Phase C Level 1-2):
 - Level 3 (Real): Device handling, tensor operations, config loading
 """
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
 from PIL import Image
 
-from image_annotator_lib.model_class.tagger_transformers import BLIPTagger, BLIP2Tagger, GITTagger
+from image_annotator_lib.model_class.tagger_transformers import BLIP2Tagger, BLIPTagger, GITTagger
 
 
 @pytest.fixture
@@ -316,9 +316,7 @@ def test_transformers_tagger_memory_management(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
     ) as mock_load:
-        with patch(
-            "image_annotator_lib.core.model_factory.ModelLoad.cache_to_main_memory"
-        ) as mock_cache:
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.cache_to_main_memory") as mock_cache:
             mock_load.return_value = mock_transformers_components
             mock_cache.return_value = mock_transformers_components
 

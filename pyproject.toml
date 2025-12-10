@@ -148,6 +148,9 @@ markers = [
     "system_integration: エンドツーエンドシナリオ",
     "provider_specific: プロバイダー固有テスト",
     "bdd: BDD（Behavior-Driven Development）テスト",
+    "bdd_core: Core BDD scenarios (SimplifiedAgentWrapper, Factory)",
+    "bdd_integration: Integration BDD (WebAPI, Provider-level)",
+    "bdd_errors: Error handling BDD",
 ]
 
 [tool.coverage.run]

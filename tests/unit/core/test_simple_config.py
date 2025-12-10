@@ -104,9 +104,7 @@ class TestSimpleConfigLoading:
         - logger.info called with success message
         """
         # Mock MODEL_SETTINGS_PATH to point to test file
-        with patch(
-            "image_annotator_lib.core.simple_config.MODEL_SETTINGS_PATH", mock_simple_config_toml
-        ):
+        with patch("image_annotator_lib.core.simple_config.MODEL_SETTINGS_PATH", mock_simple_config_toml):
             # Act: Initialize SimpleModelConfig (triggers _load_config)
             config = SimpleModelConfig()
 
@@ -124,9 +122,7 @@ class TestSimpleConfigLoading:
             # Assert: model_overrides correct
             model_overrides = config._config_cache["model_overrides"]
             assert "google/gemini-2.5-pro" in model_overrides, "モデルオーバーライド読み込み"
-            assert (
-                model_overrides["google/gemini-2.5-pro"]["timeout"] == 60
-            ), "モデル固有timeout読み込み"
+            assert model_overrides["google/gemini-2.5-pro"]["timeout"] == 60, "モデル固有timeout読み込み"
 
     @pytest.mark.unit
     def test_simple_config_missing_file_fallback(self):
@@ -153,9 +149,7 @@ class TestSimpleConfigLoading:
         # Create non-existent path
         non_existent_path = Path("/nonexistent/model_settings.toml")
 
-        with patch(
-            "image_annotator_lib.core.simple_config.MODEL_SETTINGS_PATH", non_existent_path
-        ):
+        with patch("image_annotator_lib.core.simple_config.MODEL_SETTINGS_PATH", non_existent_path):
             # Act: Initialize (file doesn't exist)
             config = SimpleModelConfig()
 
@@ -196,9 +190,7 @@ class TestSimpleConfigLoading:
         with open(invalid_toml_path, "w", encoding="utf-8") as f:
             f.write("[invalid toml content\n")  # Missing closing bracket
 
-        with patch(
-            "image_annotator_lib.core.simple_config.MODEL_SETTINGS_PATH", invalid_toml_path
-        ):
+        with patch("image_annotator_lib.core.simple_config.MODEL_SETTINGS_PATH", invalid_toml_path):
             # Act: Initialize (should catch TOML error)
             config = SimpleModelConfig()
 
@@ -237,9 +229,7 @@ class TestSimpleConfigMerging:
         - Global defaults preserved when not overridden
         - Correct merged settings returned
         """
-        with patch(
-            "image_annotator_lib.core.simple_config.MODEL_SETTINGS_PATH", mock_simple_config_toml
-        ):
+        with patch("image_annotator_lib.core.simple_config.MODEL_SETTINGS_PATH", mock_simple_config_toml):
             config = SimpleModelConfig()
 
             # Act: Get settings for model with overrides
@@ -250,17 +240,15 @@ class TestSimpleConfigMerging:
             assert settings["max_tokens"] == 2000, "max_tokens: モデルオーバーライド優先"
 
             # Assert: Global default preserved (not overridden)
-            assert (
-                settings["temperature"] == 0.7
-            ), "temperature: グローバルデフォルト保持（オーバーライドなし）"
+            assert settings["temperature"] == 0.7, (
+                "temperature: グローバルデフォルト保持（オーバーライドなし）"
+            )
 
             # Act: Get settings for model without overrides
             settings_default = config.get_model_settings("nonexistent/model")
 
             # Assert: All from global defaults
-            assert (
-                settings_default["timeout"] == 30
-            ), "オーバーライドなしモデル: グローバルデフォルト使用"
+            assert settings_default["timeout"] == 30, "オーバーライドなしモデル: グローバルデフォルト使用"
             assert settings_default["max_tokens"] == 1500, "max_tokens: グローバル値"
             assert settings_default["temperature"] == 0.7, "temperature: グローバル値"
 
@@ -270,9 +258,9 @@ class TestSimpleConfigMerging:
             # Assert: Mixed (override + defaults)
             assert settings_partial["temperature"] == 0.5, "temperature: オーバーライド"
             assert settings_partial["timeout"] == 30, "timeout: グローバルデフォルト（未オーバーライド）"
-            assert (
-                settings_partial["max_tokens"] == 1500
-            ), "max_tokens: グローバルデフォルト（未オーバーライド）"
+            assert settings_partial["max_tokens"] == 1500, (
+                "max_tokens: グローバルデフォルト（未オーバーライド）"
+            )
 
 
 class TestSimpleConfigGlobalFunctions:
@@ -322,9 +310,7 @@ class TestSimpleConfigGlobalFunctions:
         - Settings returned correctly
         - Delegates to SimpleModelConfig instance
         """
-        with patch(
-            "image_annotator_lib.core.simple_config.MODEL_SETTINGS_PATH", mock_simple_config_toml
-        ):
+        with patch("image_annotator_lib.core.simple_config.MODEL_SETTINGS_PATH", mock_simple_config_toml):
             # Act: Use convenience function
             settings = get_model_settings("google/gemini-2.5-pro")
 
@@ -350,9 +336,7 @@ class TestSimpleConfigGlobalFunctions:
         - Global defaults returned
         - Delegates to SimpleModelConfig instance
         """
-        with patch(
-            "image_annotator_lib.core.simple_config.MODEL_SETTINGS_PATH", mock_simple_config_toml
-        ):
+        with patch("image_annotator_lib.core.simple_config.MODEL_SETTINGS_PATH", mock_simple_config_toml):
             # Act: Use convenience function
             defaults = get_default_settings()
 
