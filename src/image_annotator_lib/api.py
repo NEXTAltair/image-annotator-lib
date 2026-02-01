@@ -357,49 +357,19 @@ def list_available_annotators() -> list[str]:
     return _list_available_annotators()
 
 
-def annotate(
+def _prepare_phash_map(
     images_list: list[Image.Image],
-    model_name_list: list[str],
-    phash_list: list[str] | None = None,
-    api_keys: dict[str, str] | None = None,
-) -> PHashAnnotationResults:
-    """複数の画像を指定された複数のモデルで評価(アノテーション)します。
-
-    各画像のpHashをキーとして、モデルごとの評価結果を整理して返します。
-    これにより、各画像に対する複数モデルの結果を簡単に比較できます。
+    phash_list: list[str] | None,
+) -> tuple[list[str], dict[int, str]]:
+    """画像リストに対するpHashマップを準備する。
 
     Args:
-        images_list: 評価対象の PIL Image オブジェクトのリスト。
-        model_name_list: 使用するモデル名のリスト。
-        phash_list: 各画像に対応するpHashのリスト。
-        api_keys: WebAPIモデル用のAPIキー辞書 (オプション)。
-                 例: {"openai": "sk-...", "anthropic": "sk-ant-..."}
-                 指定された場合、設定ファイルより優先されます。
+        images_list: 画像リスト。
+        phash_list: 既存のpHashリスト（Noneの場合は計算する）。
 
     Returns:
-        結果を格納した辞書。最上位のキーは画像のpHash (または代替キー 'unknown_image_{index}')、
-        次のレベルのキーはモデル名。値は {"tags": [...], "formatted_output": ..., "error": ...} 形式の辞書。
-        例: {
-            "phash1": {
-                "model1": {"tags": ["tag1"], "formatted_output": ..., "error": None},
-                "model2": {"tags": ["score_tag"], "formatted_output": ..., "error": None}
-            }
-        }
-        エラーが発生した場合、対応するモデル名のエントリにはエラー情報が含まれます。
+        (phash_list, phash_map) のタプル。
     """
-    # レジストリが初期化されていることを確認
-    from .core.registry import get_cls_obj_registry, initialize_registry
-
-    registry = get_cls_obj_registry()
-    if not registry:
-        logger.info("レジストリが空のため初期化を実行します...")
-        initialize_registry()
-        registry = get_cls_obj_registry()
-        logger.info(f"レジストリ初期化完了。登録済みモデル数: {len(registry)}")
-
-    logger.info(f"{len(images_list)} 枚の画像を {len(model_name_list)} 個のモデルで評価開始...")
-    logger.debug(f"利用可能なモデル: {list(registry.keys())[:10]}...")
-
     phash_map: dict[int, str] = {}
 
     if phash_list is None:
@@ -416,80 +386,141 @@ def annotate(
             if i < len(images_list):
                 phash_map[i] = phash
             else:
-                # phash_list が画像リストより長い場合は、警告を出してループを抜けるなどの処理も検討可能
                 logger.warning(
                     f"pHashリストの要素数が画像リストの要素数を超えています。インデックス {i} 以降のpHashは無視されます。"
                 )
                 break
 
+    return phash_list, phash_map
+
+
+def _execute_model_annotation(
+    model_name: str,
+    images_list: list[Image.Image],
+    phash_list: list[str],
+    phash_map: dict[int, str],
+    results_by_phash: PHashAnnotationResults,
+    api_keys: dict[str, str] | None,
+) -> None:
+    """単一モデルでのアノテーションを実行し、結果をresults_by_phashに格納する。
+
+    Args:
+        model_name: モデル名。
+        images_list: 画像リスト。
+        phash_list: pHashリスト。
+        phash_map: インデックス→pHashのマッピング。
+        results_by_phash: 結果格納先（直接更新される）。
+        api_keys: APIキー辞書。
+    """
+    try:
+        annotator = get_annotator_instance(model_name, api_keys=api_keys)
+        annotation_results = _annotate_model(annotator, images_list, phash_list)
+        logger.debug(f"モデル '{model_name}' の評価完了。結果件数: {len(annotation_results)}")
+
+        _process_model_results(model_name, annotation_results, results_by_phash, phash_map)
+
+        # 結果リストの長さが画像数と一致しない場合の補完
+        if len(annotation_results) != len(images_list):
+            logger.error(
+                f"モデル '{model_name}' の結果リスト長 ({len(annotation_results)}) が"
+                f"画像数 ({len(images_list)}) と一致しません。"
+            )
+            from .core.utils import get_model_capabilities
+
+            capabilities = get_model_capabilities(model_name)
+            error_result = UnifiedAnnotationResult(
+                model_name=model_name, capabilities=capabilities, error="処理結果が不足しています"
+            )
+            for i in range(len(annotation_results), len(images_list)):
+                phash_key = phash_map.get(i) or f"unknown_image_{i}"
+                if phash_key not in results_by_phash:
+                    results_by_phash[phash_key] = {}
+                results_by_phash[phash_key][model_name] = error_result
+
+    except Exception as e:
+        logger.error(
+            f"Model processing fatal error: model={model_name}, "
+            f"error_type={type(e).__name__}, message={e!s}, "
+            f"images_count={len(images_list)}",
+            exc_info=True,
+        )
+        _record_model_error(model_name, e, phash_list, phash_map, results_by_phash)
+
+
+def _record_model_error(
+    model_name: str,
+    error: Exception,
+    phash_list: list[str],
+    phash_map: dict[int, str],
+    results_by_phash: PHashAnnotationResults,
+) -> None:
+    """モデル処理の致命的エラーを全画像に記録する。
+
+    Args:
+        model_name: モデル名。
+        error: 発生した例外。
+        phash_list: pHashリスト。
+        phash_map: インデックス→pHashのマッピング。
+        results_by_phash: 結果格納先（直接更新される）。
+    """
+    error_message = f"{type(error).__name__}: {error}"
+    from .core.utils import get_model_capabilities
+
+    capabilities = get_model_capabilities(model_name)
+    if not capabilities:
+        from .core.types import TaskCapability
+
+        capabilities = {TaskCapability.TAGS}
+        logger.warning(f"モデル '{model_name}' のcapabilitiesが未設定のため、デフォルト値 {{TAGS}} を使用")
+    error_results = [
+        UnifiedAnnotationResult(model_name=model_name, capabilities=capabilities, error=error_message)
+        for _ in phash_list
+    ]
+    _process_model_results(model_name, error_results, results_by_phash, phash_map)
+
+
+def annotate(
+    images_list: list[Image.Image],
+    model_name_list: list[str],
+    phash_list: list[str] | None = None,
+    api_keys: dict[str, str] | None = None,
+) -> PHashAnnotationResults:
+    """複数の画像を指定された複数のモデルで評価(アノテーション)する。
+
+    Args:
+        images_list: 評価対象の PIL Image オブジェクトのリスト。
+        model_name_list: 使用するモデル名のリスト。
+        phash_list: 各画像に対応するpHashのリスト。
+        api_keys: WebAPIモデル用のAPIキー辞書 (オプション)。
+
+    Returns:
+        結果を格納した PHashAnnotationResults 辞書。
+    """
+    # レジストリが初期化されていることを確認
+    from .core.registry import get_cls_obj_registry, initialize_registry
+
+    registry = get_cls_obj_registry()
+    if not registry:
+        logger.info("レジストリが空のため初期化を実行します...")
+        initialize_registry()
+        registry = get_cls_obj_registry()
+        logger.info(f"レジストリ初期化完了。登録済みモデル数: {len(registry)}")
+
+    logger.info(f"{len(images_list)} 枚の画像を {len(model_name_list)} 個のモデルで評価開始...")
+    logger.debug(f"利用可能なモデル: {list(registry.keys())[:10]}...")
+
+    # pHash マップ準備
+    phash_list, phash_map = _prepare_phash_map(images_list, phash_list)
+
     # 結果格納用 (pHash ベース)
-    # {phash: {model_name: {"tags": [...], "formatted_output": ..., "error": ...}}}
     results_by_phash: PHashAnnotationResults = PHashAnnotationResults()
 
     # 各モデルで評価
     for model_name in model_name_list:
         logger.debug(f"モデル '{model_name}' の評価を開始...")
-
-        try:
-            annotator = get_annotator_instance(model_name, api_keys=api_keys)
-            annotation_results = _annotate_model(annotator, images_list, phash_list)
-            logger.debug(f"モデル '{model_name}' の評価完了。結果件数: {len(annotation_results)}")
-
-            # 結果を pHash ベースの構造に処理
-            _process_model_results(model_name, annotation_results, results_by_phash, phash_map)
-
-            # 結果リストの長さが画像数と一致しない場合のエラーハンドリング
-            # (predict が必ず画像数と同じ長さのリストを返す想定だが念のため)
-            if len(annotation_results) != len(images_list):
-                logger.error(
-                    f"モデル '{model_name}' の結果リスト長 ({len(annotation_results)}) が画像数 ({len(images_list)}) と一致しません。"
-                )
-                from .core.utils import get_model_capabilities
-
-                capabilities = get_model_capabilities(model_name)
-                error_result = UnifiedAnnotationResult(
-                    model_name=model_name, capabilities=capabilities, error="処理結果が不足しています"
-                )
-                for i in range(len(annotation_results), len(images_list)):
-                    phash_key = phash_map.get(i) or f"unknown_image_{i}"
-                    if phash_key not in results_by_phash:
-                        results_by_phash[phash_key] = {}
-                    results_by_phash[phash_key][model_name] = error_result
-
-        except Exception as e:
-            # エラーハンドリング: このモデルでの処理は失敗とみなし、全画像にエラーを記録
-            {
-                "model_name": model_name,
-                "error_type": type(e).__name__,
-                "error_message": str(e),
-                "images_count": len(images_list),
-                "phase": "model_processing",
-            }
-            logger.error(
-                f"Model processing fatal error: model={model_name}, error_type={type(e).__name__}, message={e!s}, images_count={len(images_list)}",
-                exc_info=True,
-            )
-            logger.error(f"モデル '{model_name}' の処理中に致命的なエラー: {e}", exc_info=True)
-            error_message = f"{type(e).__name__}: {e}"
-            # predictが例外を投げた場合に備え、全画像にエラー結果を作成
-            from .core.utils import get_model_capabilities
-
-            capabilities = get_model_capabilities(model_name)
-            if not capabilities:
-                # エラー結果用のデフォルトcapability（タグ生成を想定）
-                from .core.types import TaskCapability
-
-                capabilities = {TaskCapability.TAGS}
-                logger.warning(
-                    f"モデル '{model_name}' のcapabilitiesが未設定のため、デフォルト値 {{TAGS}} を使用"
-                )
-            error_results = [
-                UnifiedAnnotationResult(
-                    model_name=model_name, capabilities=capabilities, error=error_message
-                )
-                for _ in phash_list
-            ]
-            _process_model_results(model_name, error_results, results_by_phash, phash_map)
+        _execute_model_annotation(
+            model_name, images_list, phash_list, phash_map, results_by_phash, api_keys
+        )
 
     logger.info(f"全モデル ({len(model_name_list)}個) の評価完了。画像キー数: {len(results_by_phash)}")
     return results_by_phash

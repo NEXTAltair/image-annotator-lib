@@ -121,7 +121,7 @@ def test_check_memory_before_load_sufficient():
     """
     model_size_mb = 1024.0  # 1GB
 
-    with patch("image_annotator_lib.core.model_factory.psutil.virtual_memory") as mock_vmem:
+    with patch("image_annotator_lib.core.loaders.loader_base.psutil.virtual_memory") as mock_vmem:
         mock_vmem.return_value = MagicMock(available=5 * 1024 * 1024 * 1024)  # 5GB available
 
         result = ModelLoad._check_memory_before_load(model_size_mb, "test_model")
@@ -140,7 +140,7 @@ def test_check_memory_before_load_insufficient():
     """
     model_size_mb = 5 * 1024.0  # 5GB
 
-    with patch("image_annotator_lib.core.model_factory.psutil.virtual_memory") as mock_vmem:
+    with patch("image_annotator_lib.core.loaders.loader_base.psutil.virtual_memory") as mock_vmem:
         mock_vmem.return_value = MagicMock(available=1 * 1024 * 1024 * 1024)  # 1GB available
 
         result = ModelLoad._check_memory_before_load(model_size_mb, "test_model")
@@ -178,7 +178,7 @@ def test_get_max_cache_size():
     - Correct calculation based on total memory and cache ratio
     - Returns value in MB
     """
-    with patch("image_annotator_lib.core.model_factory.psutil.virtual_memory") as mock_vmem:
+    with patch("image_annotator_lib.core.loaders.loader_base.psutil.virtual_memory") as mock_vmem:
         mock_vmem.return_value = MagicMock(total=16 * 1024 * 1024 * 1024)  # 16GB
 
         max_cache = ModelLoad._get_max_cache_size()

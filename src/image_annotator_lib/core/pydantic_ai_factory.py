@@ -13,7 +13,7 @@ from pydantic_ai.providers import infer_provider_class
 
 from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
 from .config import config_registry
-from .types import AnnotationSchema
+from .types import AnnotationSchema, UnifiedAnnotationResult
 from .utils import logger
 
 
@@ -413,3 +413,74 @@ class PydanticAIAnnotatorMixin:
 
         # Return output (Agent is typed as Agent[None, AnnotationSchema] so result.output is AnnotationSchema)
         return result.output
+
+    # --- 共通 run_with_model() (Phase 1共通化) ---
+
+    # サブクラスでオーバーライドすべきプロバイダ名
+    _PROVIDER_NAME: str = "unknown"
+    _PROVIDER_DISPLAY: str = "Unknown"
+
+    def run_with_model(
+        self, images: list[Image.Image], model_id: str
+    ) -> list["UnifiedAnnotationResult"]:
+        """指定されたモデルIDで推論を実行する（共通実装）。
+
+        4プロバイダで完全に同一だった処理を共通化。
+        サブクラスは _PROVIDER_NAME / _PROVIDER_DISPLAY を設定するだけでよい。
+
+        Args:
+            images: 入力画像リスト。
+            model_id: 推論に使用するモデルID。
+
+        Returns:
+            推論結果のUnifiedAnnotationResultリスト。
+        """
+        from .base.webapi_common import (
+            build_error_result,
+            build_success_result,
+            convert_to_raw_output,
+            handle_inference_error,
+        )
+        from .utils import get_model_capabilities
+
+        if not self.agent:
+            from ..exceptions.errors import WebApiError
+
+            raise WebApiError(
+                "Agent が初期化されていません。コンテキストマネージャーを使用してください。",
+                provider_name=self._PROVIDER_DISPLAY,
+            )
+
+        binary_contents = self._preprocess_images_to_binary(images)
+        capabilities = get_model_capabilities(self.model_name)
+        results: list[UnifiedAnnotationResult] = []
+
+        for binary_content in binary_contents:
+            try:
+                self._wait_for_rate_limit()
+                response_content = self._run_inference_with_model(binary_content, model_id)
+
+                if response_content:
+                    raw_output = convert_to_raw_output(response_content)
+                    result = build_success_result(
+                        self.model_name, capabilities, response_content,
+                        self._PROVIDER_NAME, raw_output,
+                    )
+                    results.append(result)
+                else:
+                    results.append(
+                        build_error_result(
+                            self.model_name, capabilities,
+                            "Empty response from API", self._PROVIDER_NAME,
+                        )
+                    )
+
+            except Exception as e:
+                results.append(
+                    handle_inference_error(
+                        e, self.model_name, capabilities,
+                        self._PROVIDER_NAME, self._PROVIDER_DISPLAY,
+                    )
+                )
+
+        return results

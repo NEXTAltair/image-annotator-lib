@@ -42,7 +42,7 @@ def mock_transformers_loader(mock_model_instance):
 @pytest.fixture
 def mock_psutil_memory():
     """Mock psutil.virtual_memory for memory simulation."""
-    with patch("image_annotator_lib.core.model_factory.psutil.virtual_memory") as mock_mem:
+    with patch("image_annotator_lib.core.loaders.loader_base.psutil.virtual_memory") as mock_mem:
         # Simulate 8GB RAM with 4GB available
         mock_mem.return_value = MagicMock(available=4 * 1024 * 1024 * 1024, total=8 * 1024 * 1024 * 1024)
         yield mock_mem
@@ -290,7 +290,7 @@ def call_load_model(managed_config_registry, mock_transformers_loader, mock_psut
         device = "cpu"
 
         # mock_transformers_loader already patches AutoModelForVision2Seq and AutoProcessor
-        result = ModelLoad.load_transformers_components(model_path, model_name, device=device)
+        result = ModelLoad.load_transformers_components(model_name, model_path, device)
 
         # ModelLoad returns None on error instead of raising exception
         if result is None:
@@ -317,7 +317,7 @@ def call_load_model_again(managed_config_registry, mock_transformers_loader, cac
         cache_before = cache_inspector()
 
         # mock_transformers_loader already active
-        result = ModelLoad.load_transformers_components(model_path, model_name, device=device)
+        result = ModelLoad.load_transformers_components(model_name, model_path, device)
 
         cache_after = cache_inspector()
 
@@ -350,7 +350,7 @@ def call_load_model_triggers_eviction(managed_config_registry, mock_transformers
         cache_before = cache_inspector()
 
         # mock_transformers_loader already active
-        result = ModelLoad.load_transformers_components(f"test/{model_name}", model_name, device="cpu")
+        result = ModelLoad.load_transformers_components(model_name, f"test/{model_name}", "cpu")
 
         cache_after = cache_inspector()
 
@@ -414,9 +414,13 @@ def model_stored_in_cache(load_result: dict, cache_inspector):
 
 @then("キャッシュされたインスタンスが返される")
 def cached_instance_returned(load_result: dict):
-    """Verify cached instance was returned."""
+    """Verify cached model state is preserved (new Loader returns None for already-loaded)."""
     assert load_result["success"]
-    assert load_result["result"] is not None
+    # Phase 2以降: 既にロード済みの場合 load_components() は None を返し、
+    # 呼び出し元が保持済みコンポーネントを再利用する設計。
+    # キャッシュ状態が維持されていることで検証する。
+    cache_after = load_result.get("cache_after", {})
+    assert len(cache_after.get("model_states", {})) > 0
 
 
 @then("新たなロード処理は実行されない")

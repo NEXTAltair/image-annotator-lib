@@ -37,7 +37,7 @@ def test_get_model_size_from_config_success():
     expected_size_gb = 2.5
     expected_size_mb = expected_size_gb * 1024
 
-    with patch("image_annotator_lib.core.model_factory.config_registry") as mock_config:
+    with patch("image_annotator_lib.core.loaders.loader_base.config_registry") as mock_config:
         mock_config.get.return_value = expected_size_gb
 
         result = ModelLoad._get_model_size_from_config(model_name)
@@ -57,7 +57,7 @@ def test_get_model_size_from_config_not_in_config():
     """
     model_name = "nonexistent-model"
 
-    with patch("image_annotator_lib.core.model_factory.config_registry") as mock_config:
+    with patch("image_annotator_lib.core.loaders.loader_base.config_registry") as mock_config:
         mock_config.get.side_effect = KeyError("Model not found")
 
         result = ModelLoad._get_model_size_from_config(model_name)
@@ -76,7 +76,7 @@ def test_get_model_size_from_config_none_value():
     """
     model_name = "test-model"
 
-    with patch("image_annotator_lib.core.model_factory.config_registry") as mock_config:
+    with patch("image_annotator_lib.core.loaders.loader_base.config_registry") as mock_config:
         mock_config.get.return_value = None
 
         result = ModelLoad._get_model_size_from_config(model_name)
@@ -95,7 +95,7 @@ def test_get_model_size_from_config_invalid_type():
     """
     model_name = "test-model"
 
-    with patch("image_annotator_lib.core.model_factory.config_registry") as mock_config:
+    with patch("image_annotator_lib.core.loaders.loader_base.config_registry") as mock_config:
         mock_config.get.return_value = "not-a-number"
 
         result = ModelLoad._get_model_size_from_config(model_name)
@@ -437,7 +437,7 @@ def test_check_memory_before_load_sufficient():
     model_size_mb = 500.0  # 500MB
 
     # Mock psutil to show plenty of memory (10GB available)
-    with patch("image_annotator_lib.core.model_factory.psutil") as mock_psutil:
+    with patch("image_annotator_lib.core.loaders.loader_base.psutil") as mock_psutil:
         mock_memory = Mock()
         mock_memory.available = 10 * 1024 * 1024 * 1024  # 10GB in bytes
         mock_psutil.virtual_memory.return_value = mock_memory
@@ -460,7 +460,7 @@ def test_check_memory_before_load_insufficient():
     model_size_mb = 5000.0  # 5GB
 
     # Mock psutil to show limited memory (1GB available)
-    with patch("image_annotator_lib.core.model_factory.psutil") as mock_psutil:
+    with patch("image_annotator_lib.core.loaders.loader_base.psutil") as mock_psutil:
         mock_memory = Mock()
         mock_memory.available = 1 * 1024 * 1024 * 1024  # 1GB in bytes
         mock_psutil.virtual_memory.return_value = mock_memory
@@ -511,7 +511,7 @@ def test_get_max_cache_size():
     - MB return value
     """
     # Mock psutil to show 8GB total memory
-    with patch("image_annotator_lib.core.model_factory.psutil") as mock_psutil:
+    with patch("image_annotator_lib.core.loaders.loader_base.psutil") as mock_psutil:
         mock_memory = Mock()
         mock_memory.total = 8 * 1024 * 1024 * 1024  # 8GB in bytes
         mock_psutil.virtual_memory.return_value = mock_memory
@@ -850,7 +850,7 @@ def test_save_size_to_config_success():
     size_mb = 2048.0  # 2GB
     expected_size_gb = 2.0
 
-    with patch("image_annotator_lib.core.model_factory.config_registry") as mock_config:
+    with patch("image_annotator_lib.core.loaders.loader_base.config_registry") as mock_config:
         ModelLoad._save_size_to_config(model_name, size_mb)
 
         mock_config.set_system_value.assert_called_once_with(
@@ -866,7 +866,7 @@ def test_save_size_to_config_zero_size():
     model_name = "test-model"
     size_mb = 0.0
 
-    with patch("image_annotator_lib.core.model_factory.config_registry") as mock_config:
+    with patch("image_annotator_lib.core.loaders.loader_base.config_registry") as mock_config:
         ModelLoad._save_size_to_config(model_name, size_mb)
 
         mock_config.set_system_value.assert_not_called()

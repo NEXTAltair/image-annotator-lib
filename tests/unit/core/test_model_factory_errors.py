@@ -200,7 +200,7 @@ def test_release_model_internal_with_components():
     mock_torch = MagicMock()
     mock_torch.cuda.is_available.return_value = False
 
-    with patch("image_annotator_lib.core.model_factory.gc") as mock_gc:
+    with patch("image_annotator_lib.core.loaders.loader_base.gc") as mock_gc:
         # Inject mock torch into sys.modules
         with patch.dict("sys.modules", {"torch": mock_torch}):
             ModelLoad._release_model_internal("test_model", components)
