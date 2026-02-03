@@ -5,6 +5,7 @@ Web API component preparation helper functions.
 """
 
 import os
+from collections.abc import Callable
 from typing import Any
 
 import dotenv
@@ -52,7 +53,7 @@ def _get_api_key(provider_name: str, api_model_id: str) -> str:
         ApiAuthenticationError: 対応する環境変数が見つからない場合。
         ConfigurationError: サポートされていないプロバイダー名の場合。
     """
-    # .env ファイルから直接読み込み（環境変数に設定しない）
+    # .env ファイルから直接読み込み(環境変数に設定しない)
 
     env_values = dotenv.dotenv_values(".env")
 
@@ -113,6 +114,175 @@ def _process_model_id(model_id_on_provider: str, provider_name: str) -> str:
     return processed_id
 
 
+def _resolve_api_key_from_config(model_config: dict[str, Any]) -> str | None:
+    """model_configからAPIキー文字列を解決する。
+
+    SecretStr/str両方に対応。見つからない場合はNoneを返す。
+
+    Args:
+        model_config: モデル設定辞書。
+
+    Returns:
+        APIキー文字列、またはNone。
+    """
+    api_key_from_config = model_config.get("api_key")
+    if not api_key_from_config:
+        return None
+    if isinstance(api_key_from_config, SecretStr):
+        return api_key_from_config.get_secret_value()
+    if isinstance(api_key_from_config, str):
+        return api_key_from_config
+    return None
+
+
+def _resolve_api_key(
+    model_config: dict[str, Any], env_var_names: list[str], provider_display: str, model_name: str
+) -> str:
+    """configと環境変数からAPIキーを解決する。見つからなければ例外。
+
+    Args:
+        model_config: モデル設定辞書。
+        env_var_names: フォールバック用の環境変数名リスト(優先順)。
+        provider_display: エラーメッセージ用のプロバイダー表示名。
+        model_name: エラーメッセージ用のモデル名。
+
+    Returns:
+        APIキー文字列。
+
+    Raises:
+        ApiAuthenticationError: APIキーが見つからない場合。
+    """
+    api_key = _resolve_api_key_from_config(model_config)
+    if api_key:
+        return api_key
+
+    # .envファイルから直接読み込み(環境変数に設定しない)
+    env_values = dotenv.dotenv_values(".env")
+    for env_var in env_var_names:
+        value = env_values.get(env_var) or os.getenv(env_var)
+        if value:
+            return value
+
+    raise ApiAuthenticationError(
+        provider_name=provider_display,
+        message=f"API key for model '{model_name}' not found.",
+    )
+
+
+def _init_openai(
+    model_config: dict[str, Any], model_name: str
+) -> OpenAIAdapter:
+    """OpenAIプロバイダー用クライアントを初期化する。
+
+    Args:
+        model_config: モデル設定辞書。
+        model_name: ログ出力用のモデル名。
+
+    Returns:
+        初期化されたOpenAIAdapter。
+    """
+    from openai import OpenAI
+
+    api_key = _resolve_api_key(model_config, ["OPENAI_API_KEY"], "OpenAI", model_name)
+    system_prompt = model_config.get("system_prompt", webapi_shared.SYSTEM_PROMPT)
+    base_prompt = model_config.get("base_prompt", webapi_shared.BASE_PROMPT)
+    raw_client = OpenAI(api_key=api_key)
+    return OpenAIAdapter(raw_client, system_prompt=system_prompt, base_prompt=base_prompt)
+
+
+def _init_google(
+    model_config: dict[str, Any], model_name: str
+) -> GoogleClientAdapter:
+    """Googleプロバイダー用クライアントを初期化する。
+
+    Args:
+        model_config: モデル設定辞書。
+        model_name: ログ出力用のモデル名。
+
+    Returns:
+        初期化されたGoogleClientAdapter。
+
+    Raises:
+        ApiAuthenticationError: 初期化に失敗した場合。
+    """
+    api_key = _resolve_api_key(
+        model_config, ["GOOGLE_API_KEY", "GEMINI_API_KEY"], "Google", model_name
+    )
+    system_prompt = model_config.get("system_prompt", webapi_shared.SYSTEM_PROMPT)
+    base_prompt = model_config.get("base_prompt", webapi_shared.BASE_PROMPT)
+
+    try:
+        client = genai.Client(api_key=api_key)
+        logger.info(f"Google GenAI Client initialized successfully for model '{model_name}'.")
+        return GoogleClientAdapter(client=client, system_prompt=system_prompt, base_prompt=base_prompt)
+    except Exception as e:
+        logger.error(f"Failed to initialize Google GenAI Client for model '{model_name}': {e}")
+        raise ApiAuthenticationError(
+            provider_name="Google",
+            message=f"Failed to initialize Google GenAI Client for '{model_name}': {e}",
+        ) from e
+
+
+def _init_anthropic(
+    model_config: dict[str, Any], model_name: str
+) -> AnthropicAdapter:
+    """Anthropicプロバイダー用クライアントを初期化する。
+
+    Args:
+        model_config: モデル設定辞書。
+        model_name: ログ出力用のモデル名。
+
+    Returns:
+        初期化されたAnthropicAdapter。
+    """
+    from anthropic import Anthropic
+
+    api_key = _resolve_api_key(model_config, ["ANTHROPIC_API_KEY"], "Anthropic", model_name)
+    raw_client = Anthropic(api_key=api_key)
+    return AnthropicAdapter(raw_client)
+
+
+def _init_openrouter(
+    model_config: dict[str, Any], model_name: str
+) -> OpenAIAdapter:
+    """OpenRouterプロバイダー用クライアントを初期化する。
+
+    Args:
+        model_config: モデル設定辞書。
+        model_name: ログ出力用のモデル名。
+
+    Returns:
+        初期化されたOpenAIAdapter（OpenRouter設定）。
+    """
+    from openai import OpenAI
+
+    api_key = _resolve_api_key(model_config, ["OPENROUTER_API_KEY"], "OpenRouter", model_name)
+    base_url = model_config.get("openrouter_base_url", "https://openrouter.ai/api/v1")
+    site_url = model_config.get("openrouter_site_url", "http://localhost:3000")
+    app_name = model_config.get("openrouter_app_name", "image-annotator-lib")
+    system_prompt = model_config.get("system_prompt", webapi_shared.SYSTEM_PROMPT)
+    base_prompt = model_config.get("base_prompt", webapi_shared.BASE_PROMPT)
+
+    raw_client = OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        default_headers={"HTTP-Referer": site_url, "X-Title": app_name},
+    )
+    return OpenAIAdapter(raw_client, system_prompt=system_prompt, base_prompt=base_prompt)
+
+
+# プロバイダー名 → 初期化関数のディスパッチテーブル
+_PROVIDER_INITIALIZERS: dict[
+    str,
+    Callable[[dict[str, Any], str], GoogleClientAdapter | OpenAIAdapter | AnthropicAdapter],
+] = {
+    "openai": _init_openai,
+    "google": _init_google,
+    "anthropic": _init_anthropic,
+    "openrouter": _init_openrouter,
+}
+
+
 def _initialize_api_client(
     provider: str, model_config: dict[str, Any], model_name_for_logging: str
 ) -> GoogleClientAdapter | OpenAIAdapter | AnthropicAdapter:
@@ -131,111 +301,20 @@ def _initialize_api_client(
         ConfigurationError: サポートされていないプロバイダーの場合。
     """
     logger.debug(f"Initializing API client for provider: {provider}, model: {model_name_for_logging}")
-    api_key_str: str | None = None
-    api_key_from_config = model_config.get("api_key")
-    if api_key_from_config:
-        if isinstance(api_key_from_config, SecretStr):
-            api_key_str = api_key_from_config.get_secret_value()
-        elif isinstance(api_key_from_config, str):
-            api_key_str = api_key_from_config
-
-    system_prompt = model_config.get("system_prompt", webapi_shared.SYSTEM_PROMPT)
-    base_prompt = model_config.get("base_prompt", webapi_shared.BASE_PROMPT)
-
     provider_lower = provider.lower()
 
-    if provider_lower == "openai":
-        from openai import OpenAI
-
-        if not api_key_str:
-            api_key_str = os.getenv("OPENAI_API_KEY")
-        if not api_key_str:
-            raise ApiAuthenticationError(
-                provider_name="OpenAI", message=f"API key for model '{model_name_for_logging}' not found."
-            )
-        raw_openai_client = OpenAI(api_key=api_key_str)
-        return OpenAIAdapter(raw_openai_client, system_prompt=system_prompt, base_prompt=base_prompt)
-
-    elif provider_lower == "google":
-        if not api_key_str:
-            # .envファイルから直接読み込み（環境変数に設定しない）
-            import dotenv
-
-            env_values = dotenv.dotenv_values(".env")
-            api_key_str = (
-                env_values.get("GOOGLE_API_KEY")
-                or env_values.get("GEMINI_API_KEY")
-                or os.getenv("GOOGLE_API_KEY")
-                or os.getenv("GEMINI_API_KEY")
-            )
-        if not api_key_str:
-            raise ApiAuthenticationError(
-                provider_name="Google",
-                message=f"API key for model '{model_name_for_logging}' not found (checked config and GOOGLE_API_KEY/GEMINI_API_KEY).",
-            )
-
-        try:
-            initialized_google_client = genai.Client(api_key=api_key_str)
-            logger.info(
-                f"Google GenAI Client initialized successfully for model '{model_name_for_logging}'."
-            )
-            return GoogleClientAdapter(
-                client=initialized_google_client, system_prompt=system_prompt, base_prompt=base_prompt
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to initialize Google GenAI Client for model '{model_name_for_logging}': {e}"
-            )
-            raise ApiAuthenticationError(
-                provider_name="Google",
-                message=f"Failed to initialize Google GenAI Client for '{model_name_for_logging}': {e}",
-            ) from e
-
-    elif provider_lower == "anthropic":
-        from anthropic import Anthropic
-
-        if not api_key_str:
-            api_key_str = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key_str:
-            raise ApiAuthenticationError(
-                provider_name="Anthropic",
-                message=f"API key for model '{model_name_for_logging}' not found.",
-            )
-
-        raw_anthropic_client = Anthropic(api_key=api_key_str)
-        return AnthropicAdapter(raw_anthropic_client)
-
+    # OpenRouterはモデルIDに":"が含まれる場合も検出
     actual_model_id = model_config.get("api_model_id", model_config.get("model_path"))
-    if (actual_model_id and ":" in actual_model_id) or provider_lower == "openrouter":
-        from openai import OpenAI
+    if provider_lower not in _PROVIDER_INITIALIZERS and actual_model_id and ":" in actual_model_id:
+        provider_lower = "openrouter"
 
-        provider_name_for_key = "OpenRouter"
-        if not api_key_str:
-            api_key_str = os.getenv("OPENROUTER_API_KEY")
-        if not api_key_str:
-            raise ApiAuthenticationError(
-                provider_name=provider_name_for_key,
-                message=f"API key for model '{model_name_for_logging}' not found for OpenRouter.",
-            )
-
-        openrouter_base_url = model_config.get("openrouter_base_url", "https://openrouter.ai/api/v1")
-        openrouter_site_url = model_config.get("openrouter_site_url", "http://localhost:3000")
-        openrouter_app_name = model_config.get("openrouter_app_name", "image-annotator-lib")
-
-        raw_or_client = OpenAI(
-            api_key=api_key_str,
-            base_url=openrouter_base_url,
-            default_headers={
-                "HTTP-Referer": openrouter_site_url,
-                "X-Title": openrouter_app_name,
-            },
-        )
-        return OpenAIAdapter(raw_or_client, system_prompt=system_prompt, base_prompt=base_prompt)
-
-    else:
+    initializer = _PROVIDER_INITIALIZERS.get(provider_lower)
+    if not initializer:
         raise ConfigurationError(
             f"Unsupported Web API provider: {provider} for model '{model_name_for_logging}'"
         )
+
+    return initializer(model_config, model_name_for_logging)
 
 
 def prepare_web_api_components(model_name: str) -> WebApiComponents:

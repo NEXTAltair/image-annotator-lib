@@ -136,87 +136,125 @@ class BaseAnnotator(ABC):
         Returns:
             各画像のアノテーション結果のリスト。
         """
-        results: list[AnnotationResult] = []
         if not images:
             logger.warning("空の画像リストが渡されました。アノテーションをスキップします。")
-            return results
+            return []
         try:
-            # 前処理
-            start_time = time.time()
-            processed = self._preprocess_images(images)
-            preprocess_time = time.time() - start_time
-            logger.debug(f"前処理時間: {preprocess_time:.3f}秒")
-
-            # 推論実行
-            start_time = time.time()
-            raw_outputs = self._run_inference(processed)
-            inference_time = time.time() - start_time
-            logger.debug(f"推論時間: {inference_time:.3f}秒")
-
-            # 結果の整形
-            start_time = time.time()
-            formatted_outputs = self._format_predictions(raw_outputs)
-            format_time = time.time() - start_time
-            logger.debug(f"整形時間: {format_time:.3f}秒")
-
-            # 各画像の結果を処理
-            if not isinstance(formatted_outputs, list):
-                formatted_outputs = [formatted_outputs] * len(images)
-
-            for i, (image, formatted_output) in enumerate(zip(images, formatted_outputs, strict=True)):
-                try:
-                    # 知覚ハッシュの計算
-                    phash = (
-                        phash_list[i]
-                        if phash_list and i < len(phash_list)
-                        else self._calculate_phash(image)
-                    )
-
-                    # タグ生成
-                    tags = self._generate_tags(formatted_output)
-
-                    result: AnnotationResult = {
-                        "phash": phash,
-                        "tags": tags,
-                        "formatted_output": formatted_output,
-                        "error": None,
-                    }
-                    results.append(result)
-
-                except Exception as e:
-                    logger.exception(f"画像 {i} の処理中にエラー: {e}")
-                    err_result: AnnotationResult = {
-                        "phash": phash_list[i] if phash_list and i < len(phash_list) else None,
-                        "tags": [],
-                        "formatted_output": None,
-                        "error": f"タグ生成エラー: {e}",
-                    }
-                    results.append(err_result)
-
+            formatted_outputs = self._execute_pipeline(images)
+            return self._build_results(images, formatted_outputs, phash_list)
         except OutOfMemoryError as mem_e:
             logger.error(f"メモリ不足エラー: {mem_e}")
-            # メモリ不足の場合、全画像に対してエラー結果を返す
-            for i in range(len(images)):
-                err_result: AnnotationResult = {
-                    "phash": phash_list[i] if phash_list and i < len(phash_list) else None,
-                    "tags": [],
-                    "formatted_output": None,
-                    "error": "メモリ不足エラー",
-                }
-                results.append(err_result)
+            return self._create_error_results(images, phash_list, "メモリ不足エラー")
         except Exception as e:
             logger.exception(f"予期せぬエラー: {e}")
-            # その他のエラーの場合も、全画像に対してエラー結果を返す
-            for i in range(len(images)):
-                err_result: AnnotationResult = {
-                    "phash": phash_list[i] if phash_list and i < len(phash_list) else None,
-                    "tags": [],
-                    "formatted_output": None,
-                    "error": f"予期せぬエラー: {e}",
-                }
-                results.append(err_result)
+            return self._create_error_results(images, phash_list, f"予期せぬエラー: {e}")
 
+    def _execute_pipeline(self, images: list[Image.Image]) -> list:
+        """前処理→推論→整形のパイプラインを実行する。
+
+        Args:
+            images: アノテーション対象の画像リスト。
+
+        Returns:
+            整形済みの出力リスト（画像数と同じ長さ）。
+        """
+        start_time = time.time()
+        processed = self._preprocess_images(images)
+        logger.debug(f"前処理時間: {time.time() - start_time:.3f}秒")
+
+        start_time = time.time()
+        raw_outputs = self._run_inference(processed)
+        logger.debug(f"推論時間: {time.time() - start_time:.3f}秒")
+
+        start_time = time.time()
+        formatted_outputs = self._format_predictions(raw_outputs)
+        logger.debug(f"整形時間: {time.time() - start_time:.3f}秒")
+
+        if not isinstance(formatted_outputs, list):
+            formatted_outputs = [formatted_outputs] * len(images)
+        return formatted_outputs
+
+    def _build_results(
+        self,
+        images: list[Image.Image],
+        formatted_outputs: list,
+        phash_list: list[str] | None,
+    ) -> list[AnnotationResult]:
+        """各画像の推論出力からアノテーション結果を構築する。
+
+        Args:
+            images: 元画像リスト。
+            formatted_outputs: 整形済み推論出力。
+            phash_list: 事前計算された知覚ハッシュ（オプション）。
+
+        Returns:
+            アノテーション結果のリスト。
+        """
+        results: list[AnnotationResult] = []
+        for i, (image, formatted_output) in enumerate(zip(images, formatted_outputs, strict=True)):
+            try:
+                phash = (
+                    phash_list[i]
+                    if phash_list and i < len(phash_list)
+                    else self._calculate_phash(image)
+                )
+                tags = self._generate_tags(formatted_output)
+                result: AnnotationResult = {
+                    "phash": phash,
+                    "tags": tags,
+                    "formatted_output": formatted_output,
+                    "error": None,
+                }
+                results.append(result)
+            except Exception as e:
+                logger.exception(f"画像 {i} の処理中にエラー: {e}")
+                results.append(self._create_error_result(
+                    phash_list[i] if phash_list and i < len(phash_list) else None,
+                    f"タグ生成エラー: {e}",
+                ))
         return results
+
+    @staticmethod
+    def _create_error_result(phash: str | None, error_message: str) -> AnnotationResult:
+        """エラー発生時のアノテーション結果を生成する。
+
+        Args:
+            phash: 知覚ハッシュ（取得済みならその値、未取得ならNone）。
+            error_message: エラーメッセージ。
+
+        Returns:
+            エラー情報を含むアノテーション結果。
+        """
+        return {
+            "phash": phash,
+            "tags": [],
+            "formatted_output": None,
+            "error": error_message,
+        }
+
+    def _create_error_results(
+        self,
+        images: list[Image.Image],
+        phash_list: list[str] | None,
+        error_message: str,
+    ) -> list[AnnotationResult]:
+        """全画像に対してエラー結果を一括生成する。
+
+        Args:
+            images: 元画像リスト。
+            phash_list: 事前計算された知覚ハッシュ（オプション）。
+            error_message: エラーメッセージ。
+
+        Returns:
+            エラー結果のリスト。
+        """
+        return [
+            self._create_error_result(
+                phash_list[i] if phash_list and i < len(phash_list) else None,
+                error_message,
+            )
+            for i in range(len(images))
+        ]
 
     def _load_config_from_registry(self, model_name: str) -> BaseModelConfig:
         """config_registryからConfig Objectを生成します (後方互換性用)。

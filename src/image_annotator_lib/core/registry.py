@@ -121,15 +121,116 @@ def _gather_available_classes(directory: str) -> dict[str, ModelClass]:
     return available
 
 
+def _is_obsolete_annotator_class(class_name: str) -> bool:
+    """古いプロバイダー固有のアノテータークラスかどうかを判定する。
+
+    PydanticAI統合後、個別プロバイダークラス(例: OpenAIApiAnnotator,
+    OpenAIApiChatAnnotator, OpenAIApiResponseAnnotator)は廃止。
+
+    Args:
+        class_name: チェック対象のクラス名。
+
+    Returns:
+        廃止クラスの場合True。
+    """
+    if class_name == "PydanticAIWebAPIAnnotator":
+        return False
+    # *ApiAnnotator, *ApiChatAnnotator, *ApiResponseAnnotator を検出
+    obsolete_suffixes = ("ApiAnnotator", "ApiChatAnnotator", "ApiResponseAnnotator")
+    return any(class_name.endswith(suffix) for suffix in obsolete_suffixes)
+
+
+def _resolve_model_class(
+    desired_class_name: str,
+    model_name: str,
+    available_classes: dict[str, type],
+    pydantic_ai_class: type | None,
+    model_type_name: str,
+) -> type | None:
+    """設定エントリからモデルクラスを解決する。
+
+    WebAPIクラスは統一PydanticAI実装にマッピングし、
+    古いプロバイダー固有クラスは警告してスキップする。
+
+    Args:
+        desired_class_name: 設定で指定されたクラス名。
+        model_name: ログ用のモデル名。
+        available_classes: スキャン済みの利用可能なクラス辞書。
+        pydantic_ai_class: PydanticAIWebAPIAnnotatorクラス(なければNone)。
+        model_type_name: ログ用のモデルタイプ名。
+
+    Returns:
+        解決されたモデルクラス、またはスキップすべき場合はNone。
+    """
+    # WebAPIクラス(PydanticAIWebAPIAnnotator)の場合は統一実装を使用
+    if desired_class_name == "PydanticAIWebAPIAnnotator" and pydantic_ai_class:
+        logger.debug(f"WebAPIモデル '{model_name}' にPydanticAI統一実装を使用")
+        return pydantic_ai_class
+
+    # 古いプロバイダー固有クラスは警告してスキップ
+    if _is_obsolete_annotator_class(desired_class_name):
+        logger.warning(
+            f"モデル '{model_name}' で古いプロバイダー固有クラス '{desired_class_name}' が指定されています。"
+            f"PydanticAI統合後はすべてのWebAPIモデルで 'PydanticAIWebAPIAnnotator' を使用してください。スキップします。"
+        )
+        return None
+
+    # 非WebAPIクラス(ローカルMLモデルなど)は従来通りの処理
+    model_cls = available_classes.get(desired_class_name)
+    if model_cls is None:
+        logger.warning(
+            f"{model_type_name} モデル '{model_name}' で指定されたクラス '{desired_class_name}' が見つかりません。"
+        )
+    return model_cls
+
+
+def _try_register_model(
+    registry: dict[str, ModelClass],
+    model_name: str,
+    model_cls: type,
+    base_class: type,
+) -> bool:
+    """単一モデルをレジストリに登録する。
+
+    Args:
+        registry: 登録先レジストリ。
+        model_name: モデル名。
+        model_cls: モデルクラス。
+        base_class: 期待される基底クラス。
+
+    Returns:
+        登録に成功した場合True。
+    """
+    if not (issubclass(model_cls, base_class) or hasattr(model_cls, "predict")):
+        logger.error(
+            f"モデル '{model_name}' のクラス '{model_cls.__name__}' が "
+            f"{base_class.__name__} を継承しておらず predict メソッドも持ちません。スキップします。"
+        )
+        return False
+
+    if model_name in registry:
+        logger.warning(f"モデル名 '{model_name}' は既に登録されています。クラス '{model_cls.__name__}' で上書きします。")
+    registry[model_name] = model_cls
+    logger.debug(f"モデル '{model_name}' をクラス '{model_cls.__name__}' でレジストリに登録しました。")
+    return True
+
+
 def _register_models(
-    registry: dict[str, ModelClass],  # ModelClass を使用
-    model_type_name: str,  # ログ用の "annotator" など
-    directory: str,  # モデルクラスファイルを含むディレクトリ (例: "model_class")
-    base_module_path: str,  # 基本Pythonインポートパス (例: "image_annotator_lib.model_class")
-    base_class: type,  # モデルが継承すべき基底クラス (ABC互換性のために 'type' を使用)
-    # config_filter は削除
+    registry: dict[str, ModelClass],
+    model_type_name: str,
+    directory: str,
+    base_module_path: str,
+    base_class: type,
 ) -> None:
-    """設定に基づいてモデルを登録する汎用関数。"""
+    """設定に基づいてモデルを登録する汎用関数。
+
+    Args:
+        registry: 登録先レジストリ辞書。
+        model_type_name: ログ用のモデルタイプ名 (例: "annotator")。
+        directory: モデルクラスファイルを含むディレクトリ (例: "model_class")。
+        base_module_path: 基本Pythonインポートパス (例: "image_annotator_lib.model_class")。
+        base_class: モデルが継承すべき基底クラス。
+    """
     current_frame = inspect.currentframe()
     caller_frame = current_frame.f_back if current_frame else None
     caller_info = inspect.getframeinfo(caller_frame) if caller_frame else None
@@ -142,90 +243,36 @@ def _register_models(
     logger.debug(f"{model_type_name} モデルの登録を開始します。呼び出し元: {caller_repr}")
     logger.debug(f"現在のレジストリの状態: {list(registry.keys())}")
 
-    registered_count = 0  # 変数を初期化
+    registered_count = 0
 
     try:
-        # config_registry からロード済みの設定データを取得
         config = config_registry.get_all_config()
-        logger.debug(
-            f"[DEBUG _register_models] ロードされた設定 (config_registry.get_all_config()): {config}"
-        )
-
         if not config:
             logger.warning("モデル設定が空か、ロードに失敗しました。モデルは登録されません。")
             return
         logger.debug(f"モデル設定をロードしました: 合計 {len(config)} エントリ。")
 
-        # 指定されたディレクトリから利用可能なクラスを収集
         available_classes = _gather_available_classes(directory)
-        logger.debug(
-            f"[DEBUG _register_models] 利用可能なクラス (_gather_available_classesの結果): {list(available_classes.keys())}"
-        )
-        logger.debug(
-            f"{len(available_classes)} 個の利用可能な {model_type_name} クラスが見つかりました: {list(available_classes.keys())}"
-        )
+        logger.debug(f"{len(available_classes)} 個の利用可能な {model_type_name} クラスが見つかりました")
 
-        # PydanticAI統一WebAPIアノテーターを取得
         pydantic_ai_class = available_classes.get("PydanticAIWebAPIAnnotator")
         if not pydantic_ai_class:
             logger.error("PydanticAIWebAPIAnnotator クラスが見つかりません。WebAPIモデルは登録できません。")
 
-        # 設定ファイルに基づいてモデルを登録
         for model_name, model_config in config.items():
-            logger.debug(
-                f"[DEBUG _register_models] 設定エントリを処理中: モデル名='{model_name}', 設定={model_config}"
-            )
-
             desired_class_name = model_config.get("class")
             if not desired_class_name:
-                logger.warning(
-                    f"設定でモデル '{model_name}' のクラス名が指定されていません。スキップします。"
-                )
+                logger.warning(f"設定でモデル '{model_name}' のクラス名が指定されていません。スキップします。")
                 continue
-            logger.debug(f"[DEBUG _register_models] 期待されるクラス名: '{desired_class_name}'")
 
-            # WebAPIクラス(PydanticAIWebAPIAnnotator)の場合は統一実装を使用
-            if desired_class_name == "PydanticAIWebAPIAnnotator" and pydantic_ai_class:
-                model_cls = pydantic_ai_class
-                logger.debug(
-                    f"[DEBUG _register_models] WebAPIモデル '{model_name}' にPydanticAI統一実装を使用"
-                )
-            elif desired_class_name.endswith("ApiAnnotator"):
-                # 古いプロバイダー固有のクラス名が設定されている場合の警告とスキップ
-                logger.warning(
-                    f"モデル '{model_name}' で古いプロバイダー固有クラス '{desired_class_name}' が指定されています。"
-                    f"PydanticAI統合後はすべてのWebAPIモデルで 'PydanticAIWebAPIAnnotator' を使用してください。スキップします。"
-                )
+            model_cls = _resolve_model_class(
+                desired_class_name, model_name, available_classes, pydantic_ai_class, model_type_name
+            )
+            if model_cls is None:
                 continue
-            else:
-                # 非WebAPIクラス(ローカルMLモデルなど)は従来通りの処理
-                model_cls = available_classes.get(desired_class_name)
-                logger.debug(
-                    f"[DEBUG _register_models] 利用可能なクラスから '{desired_class_name}' を検索した結果: {model_cls}"
-                )
 
-            if model_cls is not None:
-                # 期待されるbase_classのサブクラスであるか、または predict を持つかを確認 (元のロジック踏襲)
-                if issubclass(model_cls, base_class) or hasattr(model_cls, "predict"):
-                    if model_name in registry:
-                        logger.warning(
-                            f"モデル名 '{model_name}' は既に登録されています。クラス '{model_cls.__name__}' で上書きします。"
-                        )
-                    registry[model_name] = model_cls
-                    registered_count += 1  # 登録成功時にカウント (修正)
-                    logger.debug(
-                        f"[DEBUG _register_models] モデル '{model_name}' をクラス '{model_cls.__name__}' でレジストリに登録しました。現在のレジストリキー: {list(registry.keys())}"
-                    )
-                else:
-                    logger.error(
-                        f"モデル '{model_name}' のクラス '{desired_class_name}' が見つかりましたが、{base_class.__name__} を継承しておらず predict メソッドも持ちません。スキップします。"
-                    )
-            else:
-                # 設定で指定されたクラスがスキャンされたディレクトリで見つかりません
-                logger.warning(
-                    f"{model_type_name} モデル '{model_name}' で指定されたクラス '{desired_class_name}' が、'{directory}' 内の利用可能なクラスの中に見つかりません。"
-                    f"クラス名が正しいか、それを定義するファイルが '{base_module_path}' に存在するか確認してください。"
-                )
+            if _try_register_model(registry, model_name, model_cls, base_class):
+                registered_count += 1
 
     except Exception as e:
         logger.error(
@@ -233,7 +280,8 @@ def _register_models(
         )
 
     logger.debug(
-        f"{model_type_name} モデルの登録が完了しました。登録済み合計: {registered_count}。最終レジストリ状態: {list(registry.keys())}"
+        f"{model_type_name} モデルの登録が完了しました。登録済み合計: {registered_count}。"
+        f"最終レジストリ状態: {list(registry.keys())}"
     )
 
 
@@ -317,74 +365,81 @@ def list_available_annotators() -> list[str]:
     return list(_MODEL_CLASS_OBJ_REGISTRY.keys())
 
 
-def list_available_annotators_with_metadata() -> dict[str, dict[str, any]]:
-    """利用可能なアノテータモデルとそのメタデータを返します。
+def _build_annotator_metadata(
+    model_name: str, model_class: ModelClass, model_config: dict[str, any]
+) -> dict[str, any]:
+    """単一アノテーターのメタデータ辞書を構築する。
 
-    LoRAIro統合用の拡張API。各モデルの詳細情報(プロバイダー、APIモデルID、
-    サイズ、APIキー要件等)を含む辞書を返します。
+    Args:
+        model_name: モデル名。
+        model_class: モデルクラス。
+        model_config: TOMLからの設定辞書。
 
     Returns:
-        dict[str, dict[str, any]]: モデル名をキーとし、メタデータ辞書を値とする辞書
-            メタデータには以下が含まれます:
-            - class: モデルクラス名
-            - provider: プロバイダー名(API系の場合)
-            - api_model_id: APIモデルID(API系の場合)
-            - model_type: モデルタイプ("vision", "score", "tagger")
-            - estimated_size_gb: 推定サイズ(GB、ローカルモデルの場合)
-            - requires_api_key: APIキーが必要かどうか
-            - max_output_tokens: 最大出力トークン数(API系の場合)
-            - discontinued_at: 廃止日時(該当する場合のみ)
+        メタデータ辞書。
+    """
+    return {
+        "class": model_class.__name__,
+        "provider": model_config.get("provider"),
+        "api_model_id": model_config.get("api_model_id"),
+        "model_type": _determine_model_type(model_name, model_class, model_config),
+        "estimated_size_gb": model_config.get("estimated_size_gb"),
+        "requires_api_key": _requires_api_key(model_class, model_config),
+        "max_output_tokens": model_config.get("max_output_tokens"),
+        "discontinued_at": model_config.get("discontinued_at"),
+    }
+
+
+def _build_fallback_metadata(model_class: ModelClass) -> dict[str, any]:
+    """エラー時のフォールバックメタデータを構築する。
+
+    Args:
+        model_class: モデルクラス。
+
+    Returns:
+        最小限のメタデータ辞書。
+    """
+    return {
+        "class": model_class.__name__,
+        "provider": None,
+        "api_model_id": None,
+        "model_type": "unknown",
+        "estimated_size_gb": None,
+        "requires_api_key": False,
+        "max_output_tokens": None,
+        "discontinued_at": None,
+    }
+
+
+def list_available_annotators_with_metadata() -> dict[str, dict[str, any]]:
+    """利用可能なアノテータモデルとそのメタデータを返す。
+
+    LoRAIro統合用の拡張API。各モデルの詳細情報(プロバイダー、APIモデルID、
+    サイズ、APIキー要件等)を含む辞書を返す。
+
+    Returns:
+        モデル名をキーとし、メタデータ辞書を値とする辞書。
     """
     logger.debug("メタデータ付きアノテーターリストの生成を開始します")
 
-    # レジストリが初期化されていない場合は初期化
     if not _REGISTRY_INITIALIZED:
         initialize_registry()
 
     result = {}
 
     try:
-        # 全設定を取得
         all_config = config_registry.get_all_config()
         logger.debug(f"設定から{len(all_config)}件のモデル設定を取得しました")
 
-        # レジストリに登録されているモデルのみを対象とする
-        for model_name in _MODEL_CLASS_OBJ_REGISTRY.keys():
+        for model_name, model_class in _MODEL_CLASS_OBJ_REGISTRY.items():
             model_config = all_config.get(model_name, {})
-            model_class = _MODEL_CLASS_OBJ_REGISTRY[model_name]
-
-            # メタデータ構築
-            metadata = {
-                "class": model_class.__name__,
-                "provider": model_config.get("provider"),
-                "api_model_id": model_config.get("api_model_id"),
-                "model_type": _determine_model_type(model_name, model_class, model_config),
-                "estimated_size_gb": model_config.get("estimated_size_gb"),
-                "requires_api_key": _requires_api_key(model_class, model_config),
-                "max_output_tokens": model_config.get("max_output_tokens"),
-                "discontinued_at": model_config.get("discontinued_at"),
-            }
-
-            # None値をクリーンアップ(必要に応じて)
-            # metadata = {k: v for k, v in metadata.items() if v is not None}
-
-            result[model_name] = metadata
+            result[model_name] = _build_annotator_metadata(model_name, model_class, model_config)
             logger.debug(f"モデル '{model_name}' のメタデータを生成しました")
 
     except Exception as e:
         logger.error(f"メタデータ付きアノテーターリスト生成中にエラー: {e}", exc_info=True)
-        # エラーが発生しても、基本的なリストは返す
-        for model_name in _MODEL_CLASS_OBJ_REGISTRY.keys():
-            result[model_name] = {
-                "class": _MODEL_CLASS_OBJ_REGISTRY[model_name].__name__,
-                "provider": None,
-                "api_model_id": None,
-                "model_type": "unknown",
-                "estimated_size_gb": None,
-                "requires_api_key": False,
-                "max_output_tokens": None,
-                "discontinued_at": None,
-            }
+        for model_name, model_class in _MODEL_CLASS_OBJ_REGISTRY.items():
+            result[model_name] = _build_fallback_metadata(model_class)
 
     logger.info(f"メタデータ付きアノテーターリスト生成完了: {len(result)}件")
     return result
@@ -443,7 +498,7 @@ def _requires_api_key(model_class: ModelClass, model_config: dict[str, Any]) -> 
     # クラス名から判定
     class_name = model_class.__name__
 
-    # PydanticAI WebAPIアノテーターは全てAPIキー必要
+    # PydanticAI WebAPI annotator は全てAPIキー必要
     if class_name == "PydanticAIWebAPIAnnotator":
         return True
 
@@ -537,71 +592,70 @@ def _update_config_with_api_models() -> None:
         )
 
 
-def initialize_registry() -> None:
+def _discover_and_update_api_models(skip_api_discovery: bool) -> None:
+    """Web APIモデル情報の取得と設定ファイルの自動更新を行う。
+
+    Args:
+        skip_api_discovery: Trueの場合、API検出をスキップする。
     """
-    loggerとレジストリの初期化を明示的に行う関数。
+    if not AVAILABLE_API_MODELS_CONFIG_PATH.exists():
+        if skip_api_discovery:
+            logger.info(
+                "環境変数 IMAGE_ANNOTATOR_SKIP_API_DISCOVERY=true のため、"
+                "API モデル情報の取得をスキップします。"
+            )
+        else:
+            logger.info(
+                f"{AVAILABLE_API_MODELS_CONFIG_PATH} が見つかりません。APIから最新情報を取得します..."
+            )
+            try:
+                api_model_discovery._fetch_and_update_vision_models()
+                logger.info(
+                    f"API からモデル情報を取得し、{AVAILABLE_API_MODELS_CONFIG_PATH} を更新しました。"
+                )
+            except Exception as api_e:
+                logger.error(
+                    f"API からのモデル情報取得中にエラーが発生しました: {api_e}", exc_info=True
+                )
+                logger.warning(
+                    "APIからのモデル情報取得に失敗したため、Web API モデルの自動設定は行われない可能性があります。"
+                )
+    else:
+        logger.debug(f"{AVAILABLE_API_MODELS_CONFIG_PATH} が存在します。既存のファイルを使用します。")
+
+    # available_api_models.toml を読み込み、annotator_config.toml を更新
+    if AVAILABLE_API_MODELS_CONFIG_PATH.exists():
+        _update_config_with_api_models()
+    else:
+        logger.warning(
+            f"{AVAILABLE_API_MODELS_CONFIG_PATH} が存在しないため、Web API モデル設定を読み込めません。"
+        )
+
+
+def initialize_registry() -> None:
+    """loggerとレジストリの初期化を明示的に行う関数。
+
     必ずlogger初期化後に呼び出すこと。
     Web API モデル情報の取得と設定ファイルの自動更新も行う。
     """
     global _REGISTRY_INITIALIZED
 
-    from .utils import init_logger  # init_logger はここでインポート
+    from .utils import init_logger
 
     init_logger()
 
-    # 既に初期化済みの場合はスキップ
     if _REGISTRY_INITIALIZED:
         logger.debug(f"レジストリは既に初期化済みです。登録済みモデル数: {len(_MODEL_CLASS_OBJ_REGISTRY)}")
         return
 
     logger.debug("レジストリ初期化プロセスを開始します...")
 
-    # 環境変数チェック: テスト環境などでAPI検出をスキップする
     skip_api_discovery = os.getenv("IMAGE_ANNOTATOR_SKIP_API_DISCOVERY", "false").lower() == "true"
 
-    # --- Web API モデル情報の取得と設定ファイルの自動更新 --- #
     try:
-        if not AVAILABLE_API_MODELS_CONFIG_PATH.exists():
-            if skip_api_discovery:
-                logger.info(
-                    "環境変数 IMAGE_ANNOTATOR_SKIP_API_DISCOVERY=true のため、"
-                    "API モデル情報の取得をスキップします。"
-                )
-                # ファイルが存在しない場合でも処理を続行
-            else:
-                logger.info(
-                    f"{AVAILABLE_API_MODELS_CONFIG_PATH} が見つかりません。APIから最新情報を取得します..."
-                )
-                try:
-                    # APIから取得してtomlファイルを生成/更新
-                    api_model_discovery._fetch_and_update_vision_models()
-                    logger.info(
-                        f"API からモデル情報を取得し、{AVAILABLE_API_MODELS_CONFIG_PATH} を更新しました。"
-                    )
-                except Exception as api_e:
-                    # API取得に失敗しても、処理は続行する(ログには残す)
-                    logger.error(
-                        f"API からのモデル情報取得中にエラーが発生しました: {api_e}", exc_info=True
-                    )
-                    logger.warning(
-                        "APIからのモデル情報取得に失敗したため、Web API モデルの自動設定は行われない可能性があります。"
-                    )
-        else:
-            logger.debug(f"{AVAILABLE_API_MODELS_CONFIG_PATH} が存在します。既存のファイルを使用します。")
-
-        # available_api_models.toml を読み込み、annotator_config.toml を更新
-        # ファイルが存在する場合のみ実行
-        if AVAILABLE_API_MODELS_CONFIG_PATH.exists():
-            _update_config_with_api_models()
-        else:
-            logger.warning(
-                f"{AVAILABLE_API_MODELS_CONFIG_PATH} が存在しないため、Web API モデル設定を読み込めません。"
-            )
-
+        _discover_and_update_api_models(skip_api_discovery)
     except Exception as e:
-        # このステップ全体でエラーが発生しても初期化は続行する
         logger.error(f"Web API モデル情報の処理中にエラーが発生しました: {e}", exc_info=True)
-    # --- ここまで --- #
 
     logger.debug("アノテータ登録を開始します...")
     register_annotators()

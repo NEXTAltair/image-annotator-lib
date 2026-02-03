@@ -310,8 +310,139 @@ def test_initialize_registry_singleton_pattern(
 
 
 # ==============================================================================
-# Phase C Additional Coverage Tests (2025-12-05)
+# Test _is_obsolete_annotator_class
 # ==============================================================================
-# NOTE: Registry tests skipped due to complexity of mocking internal registry API.
-# These tests require significant refactoring of registry module to support proper
-# test isolation. Focus shifted to Phase 4 verification to assess actual coverage.
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_is_obsolete_annotator_class_true_for_old_api_annotators():
+    """古いプロバイダー固有クラスはobsolete判定される。"""
+    assert registry._is_obsolete_annotator_class("OpenAIApiAnnotator") is True
+    assert registry._is_obsolete_annotator_class("GoogleApiAnnotator") is True
+    assert registry._is_obsolete_annotator_class("AnthropicApiAnnotator") is True
+    # Chat/Response系もobsolete
+    assert registry._is_obsolete_annotator_class("OpenAIApiChatAnnotator") is True
+    assert registry._is_obsolete_annotator_class("OpenAIApiResponseAnnotator") is True
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_is_obsolete_annotator_class_false_for_pydantic_ai():
+    """PydanticAIWebAPIAnnotatorはobsoleteではない。"""
+    assert registry._is_obsolete_annotator_class("PydanticAIWebAPIAnnotator") is False
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_is_obsolete_annotator_class_false_for_non_api():
+    """非APIクラスはobsoleteではない。"""
+    assert registry._is_obsolete_annotator_class("LocalMLAnnotator") is False
+    assert registry._is_obsolete_annotator_class("SomeOtherClass") is False
+
+
+# ==============================================================================
+# Test _resolve_model_class
+# ==============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_resolve_model_class_pydantic_ai():
+    """PydanticAIWebAPIAnnotatorが指定された場合、統一実装が返される。"""
+    mock_pydantic_class = type("PydanticAIWebAPIAnnotator", (), {})
+    available = {"SomeLocal": type("SomeLocal", (), {})}
+
+    result = registry._resolve_model_class(
+        "PydanticAIWebAPIAnnotator", "test-model", available, mock_pydantic_class, "annotator"
+    )
+    assert result is mock_pydantic_class
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_resolve_model_class_obsolete_returns_none():
+    """古いプロバイダー固有クラスが指定された場合、Noneが返される。"""
+    available = {"OpenAIApiAnnotator": type("OpenAIApiAnnotator", (), {})}
+
+    result = registry._resolve_model_class(
+        "OpenAIApiAnnotator", "test-model", available, None, "annotator"
+    )
+    assert result is None
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_resolve_model_class_local_model():
+    """ローカルモデルクラスは正しく解決される。"""
+    local_cls = type("LocalMLAnnotator", (), {})
+    available = {"LocalMLAnnotator": local_cls}
+
+    result = registry._resolve_model_class(
+        "LocalMLAnnotator", "test-model", available, None, "annotator"
+    )
+    assert result is local_cls
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_resolve_model_class_not_found():
+    """存在しないクラスが指定された場合、Noneが返される。"""
+    result = registry._resolve_model_class(
+        "NonExistentClass", "test-model", {}, None, "annotator"
+    )
+    assert result is None
+
+
+# ==============================================================================
+# Test _try_register_model
+# ==============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_try_register_model_success():
+    """base_classのサブクラスが正常に登録される。"""
+    reg: dict = {}
+    model_cls = type("TestModel", (BaseAnnotator,), {})
+
+    result = registry._try_register_model(reg, "test-model", model_cls, BaseAnnotator)
+    assert result is True
+    assert "test-model" in reg
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_try_register_model_with_predict_method():
+    """predictメソッドを持つクラスはbase_classのサブクラスでなくても登録される。"""
+    reg: dict = {}
+    model_cls = type("PredictModel", (), {"predict": lambda self: None})
+
+    result = registry._try_register_model(reg, "test-model", model_cls, BaseAnnotator)
+    assert result is True
+    assert "test-model" in reg
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_try_register_model_reject_incompatible():
+    """base_classのサブクラスでもpredictも持たないクラスは拒否される。"""
+    reg: dict = {}
+    model_cls = type("IncompatibleModel", (), {})
+
+    result = registry._try_register_model(reg, "test-model", model_cls, BaseAnnotator)
+    assert result is False
+    assert "test-model" not in reg
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_try_register_model_overwrite_warning():
+    """既存エントリへの上書き登録が成功する。"""
+    old_cls = type("OldModel", (BaseAnnotator,), {})
+    new_cls = type("NewModel", (BaseAnnotator,), {})
+    reg: dict = {"test-model": old_cls}
+
+    result = registry._try_register_model(reg, "test-model", new_cls, BaseAnnotator)
+    assert result is True
+    assert reg["test-model"] is new_cls

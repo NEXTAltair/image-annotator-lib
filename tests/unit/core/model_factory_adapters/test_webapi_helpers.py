@@ -14,6 +14,8 @@ from image_annotator_lib.core.model_factory_adapters.webapi_helpers import (
     _get_api_key,
     _initialize_api_client,
     _process_model_id,
+    _resolve_api_key,
+    _resolve_api_key_from_config,
     prepare_web_api_components,
 )
 from image_annotator_lib.exceptions.errors import ApiAuthenticationError, ConfigurationError
@@ -262,7 +264,10 @@ def test_initialize_api_client_missing_api_key():
     """Test _initialize_api_client raises error when API key missing."""
     model_config = {}
 
-    with patch.dict(os.environ, {}, clear=True):
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch("dotenv.dotenv_values", return_value={}),
+    ):
         with pytest.raises(ApiAuthenticationError, match="API key for model"):
             _initialize_api_client("openai", model_config, "test-model")
 
@@ -345,3 +350,135 @@ def test_prepare_web_api_components_empty_available_models():
 
         with pytest.raises(ConfigurationError, match="利用可能なAPIモデル情報"):
             prepare_web_api_components("Any Model")
+
+
+# ==============================================================================
+# Test _resolve_api_key_from_config
+# ==============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_resolve_api_key_from_config_with_string():
+    """config内の文字列APIキーを解決できる。"""
+    config = {"api_key": "plain-key-123"}
+    assert _resolve_api_key_from_config(config) == "plain-key-123"
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_resolve_api_key_from_config_with_secret_str():
+    """config内のSecretStr APIキーを解決できる。"""
+    config = {"api_key": SecretStr("secret-key-456")}
+    assert _resolve_api_key_from_config(config) == "secret-key-456"
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_resolve_api_key_from_config_missing():
+    """config内にAPIキーがない場合はNoneを返す。"""
+    assert _resolve_api_key_from_config({}) is None
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_resolve_api_key_from_config_empty_string():
+    """config内のAPIキーが空文字列の場合はNoneを返す。"""
+    assert _resolve_api_key_from_config({"api_key": ""}) is None
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_resolve_api_key_from_config_unexpected_type():
+    """config内のAPIキーが予期しない型の場合はNoneを返す。"""
+    assert _resolve_api_key_from_config({"api_key": 12345}) is None
+
+
+# ==============================================================================
+# Test _resolve_api_key
+# ==============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_resolve_api_key_from_config_priority():
+    """configのAPIキーが環境変数より優先される。"""
+    config = {"api_key": "config-key"}
+    with (
+        patch.dict(os.environ, {"OPENAI_API_KEY": "env-key"}),
+        patch("dotenv.dotenv_values", return_value={"OPENAI_API_KEY": "dotenv-key"}),
+    ):
+        result = _resolve_api_key(config, ["OPENAI_API_KEY"], "OpenAI", "test-model")
+    assert result == "config-key"
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_resolve_api_key_from_dotenv_fallback():
+    """.envファイルからのフォールバック取得。"""
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch("dotenv.dotenv_values", return_value={"OPENAI_API_KEY": "dotenv-key"}),
+    ):
+        result = _resolve_api_key({}, ["OPENAI_API_KEY"], "OpenAI", "test-model")
+    assert result == "dotenv-key"
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_resolve_api_key_from_env_var_fallback():
+    """環境変数からのフォールバック取得。"""
+    with (
+        patch.dict(os.environ, {"OPENAI_API_KEY": "env-key"}),
+        patch("dotenv.dotenv_values", return_value={}),
+    ):
+        result = _resolve_api_key({}, ["OPENAI_API_KEY"], "OpenAI", "test-model")
+    assert result == "env-key"
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_resolve_api_key_empty_env_var_names():
+    """env_var_namesが空リストで、configにもキーがない場合は例外。"""
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch("dotenv.dotenv_values", return_value={}),
+    ):
+        with pytest.raises(ApiAuthenticationError, match="API key for model"):
+            _resolve_api_key({}, [], "TestProvider", "test-model")
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_resolve_api_key_multiple_env_vars_first_wins():
+    """複数のenv_var_namesで最初にヒットした値が使われる。"""
+    with (
+        patch.dict(os.environ, {}, clear=True),
+        patch(
+            "dotenv.dotenv_values",
+            return_value={"GOOGLE_API_KEY": "google-key", "GEMINI_API_KEY": "gemini-key"},
+        ),
+    ):
+        result = _resolve_api_key({}, ["GOOGLE_API_KEY", "GEMINI_API_KEY"], "Google", "test-model")
+    assert result == "google-key"
+
+
+# ==============================================================================
+# Test _initialize_api_client dispatch edge cases
+# ==============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_initialize_api_client_colon_model_id_dispatches_to_openrouter():
+    """モデルIDに":"が含まれる未知プロバイダーはOpenRouterにディスパッチされる。"""
+    model_config = {
+        "api_key": "test-key",
+        "api_model_id": "meta-llama/llama-3.3:free",
+    }
+
+    with patch("openai.OpenAI") as mock_openai_class:
+        mock_openai_class.return_value = MagicMock()
+        result = _initialize_api_client("unknown-provider", model_config, "test-model")
+        assert result is not None
+        mock_openai_class.assert_called_once()
