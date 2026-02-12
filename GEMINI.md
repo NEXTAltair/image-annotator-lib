@@ -11,7 +11,7 @@ This document provides essential context about the `image-annotator-lib` project
 These rules, derived from `.cursor/rules/`, must be strictly followed at all times.
 
 - **Reference Documentation:** Always reference documents in the `docs/` directory and rule files (`.mdc`) in `.cursor/rules/` before responding.
-- **Follow Plans and Memory:** Adhere to the planning and memory management workflows defined in `.cursor/rules/plan.mdc` and `.cursor/rules/memory.mdc`. Use Serena memory for short-term task tracking and Moltbot→Notion for long-term records.
+- **Follow Plans and Memory:** Adhere to the planning and memory management workflows defined in `.cursor/rules/plan.mdc` and `.cursor/rules/memory.mdc`. Use Serena memory for short-term task tracking and OpenClaw→Notion for long-term records.
 - **YAGNI (You Ain't Gonna Need It):** Do not implement features that might be needed later. Only implement the minimum required functionality for the current task.
 - **No Full-Width Characters:** Never use full-width alphanumeric characters or symbols in code, comments, or documentation.
 - **Record Changes:** If you alter the existing design, you must check related documentation and record the change and its reasoning in the appropriate location.
@@ -94,7 +94,7 @@ Commands should be run from the project root (`C:\LoRAIro\local_packages\image-a
     - **`.cursor/rules/debug.mdc`**: For debugging procedures.
 - **Task Management:**
     - **MCP Serena Memory**: All task tracking, project status, and development records
-- **Moltbot → Notion LTM**: Long-term design decisions and architectural knowledge
+- **OpenClaw → Notion LTM**: Long-term design decisions and architectural knowledge
 - **Project Configuration:**
     - **`pyproject.toml`**: Project metadata, dependencies, and tool configurations (`ruff`, `pytest`, `mypy`).
 - **Core Logic:**

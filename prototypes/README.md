@@ -15,7 +15,7 @@
 PydanticAI統合による WebApiBaseAnnotator の置き換え概念実装。
 
 - **目標**: PydanticAI Agent を使用した新しい WebAPI アノテーター基底クラス
-- **関連記録**: Notion LTM (Moltbot) `pydanticai_implementation_complete_history_2025`
+- **関連記録**: Notion LTM (OpenClaw) `pydanticai_implementation_complete_history_2025`
 - **実装段階**: ✅ 完了・本番統合済み（2025年10月）
 
 ## 使用方針
