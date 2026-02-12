@@ -1,329 +1,248 @@
-"""Unit tests for API error handling in PydanticAI-based annotators.
+"""Unit tests for API error handling in Plan 1 architecture.
 
-Tests error handling for common API failure scenarios:
+Tests error handling for common API failure scenarios through
+ProviderManager -> PydanticAIAgentFactory -> Agent path:
 - 401 Authentication errors
 - 429 Rate limit errors
 - Timeout errors
+- Unexpected model behavior errors
+- Partial failure with multiple images
 
 Mock Strategy:
-- Mock: PydanticAI Agent and its run() method to raise exceptions
-- Real: Error handling logic in annotator classes
+- Mock: PydanticAIAgentFactory.get_or_create_agent to return mock Agent
+- Mock: Agent.run_sync() to raise exceptions
+- Real: Error handling logic in ProviderManager.run_inference_with_model()
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from PIL import Image
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 
+from image_annotator_lib.core.provider_manager import ProviderManager
+from image_annotator_lib.core.types import AnnotationSchema
+
+
+@pytest.fixture(autouse=True)
+def clear_caches():
+    """Clear caches before and after each test."""
+    ProviderManager.clear_cache()
+    yield
+    ProviderManager.clear_cache()
+
 
 @pytest.mark.unit
-def test_api_authentication_failure_401(managed_config_registry):
-    """Test 401 authentication failure handling.
-
-    Mock Strategy:
-    - Mock: Agent.run() to raise ModelHTTPError with 401 status
-    - Real: Error handling in AnthropicApiAnnotator.run_with_model()
+@patch("image_annotator_lib.core.provider_manager.calculate_phash")
+@patch("image_annotator_lib.core.provider_manager.preprocess_images_to_binary")
+@patch("image_annotator_lib.core.provider_manager.PydanticAIAgentFactory")
+@patch("image_annotator_lib.core.provider_manager.config_registry")
+def test_api_authentication_failure_401(
+    mock_config, mock_factory, mock_preprocess, mock_phash
+):
+    """Test 401 authentication failure is caught and returned as error result.
 
     Verifies:
-    - ModelHTTPError(401) is caught
-    - Error message includes status code
-    - Result contains error (not exception)
-    - NO retry attempted (single call to agent.run)
+    - ModelHTTPError(401) is caught per-image
+    - Error message includes status code information
+    - Result contains error (not exception propagation)
     """
-    from image_annotator_lib.model_class.annotator_webapi.anthropic_api import (
-        AnthropicApiAnnotator,
-    )
+    mock_config.get.return_value = "test_api_key"
+    mock_phash.return_value = "phash_auth"
+    mock_preprocess.return_value = [MagicMock()]
 
-    # Setup config
-    config_dict = {
-        "class": "AnthropicApiAnnotator",
-        "model_name_on_provider": "claude-3-5-sonnet-20241022",
-        "api_model_id": "claude-3-5-sonnet-20241022",
-        "api_key": "test_key",
-        "timeout": 30,
-        "retry_count": 0,
-        "capabilities": ["tags", "captions", "scores"],
-    }
-    managed_config_registry.set("test_auth", config_dict)
-
-    # Create mock Agent with AsyncMock.run() that raises 401 error
     mock_agent = MagicMock()
-    mock_agent.run = AsyncMock(
-        side_effect=ModelHTTPError(status_code=401, model_name="test_auth", body="Invalid API key")
+    mock_factory.get_or_create_agent.return_value = mock_agent
+    mock_agent.run_sync.side_effect = ModelHTTPError(
+        status_code=401, model_name="claude-3-opus", body="Invalid API key"
     )
 
-    with patch(
-        "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent",
-        return_value=mock_agent,
-    ):
-        annotator = AnthropicApiAnnotator("test_auth")
+    test_image = Image.new("RGB", (100, 100), color="red")
+    results = ProviderManager.run_inference_with_model(
+        model_name="test_model",
+        images_list=[test_image],
+        api_model_id="claude-3-opus",
+    )
 
-        # Create test image
-        test_image = Image.new("RGB", (100, 100), color="red")
-
-        with annotator:
-            # Call run_with_model (should catch error, not raise)
-            results = annotator.run_with_model([test_image], "claude-3-5-sonnet-20241022")
-
-        # Verify error was caught and recorded
-        assert len(results) == 1
-        result = results[0]
-        assert result.error is not None
-        assert "401" in result.error or "Unauthorized" in result.error
-        assert result.provider_name == "anthropic"
-
-        # Verify NO retry (single call)
-        assert mock_agent.run.call_count == 1
+    assert len(results) == 1
+    result = results["phash_auth"]
+    assert result["error"] is not None
+    assert "401" in result["error"] or "Invalid" in result["error"]
+    assert result["tags"] == []
+    assert mock_agent.run_sync.call_count == 1
 
 
 @pytest.mark.unit
-def test_api_rate_limit_429(managed_config_registry):
-    """Test 429 rate limit error handling.
-
-    Mock Strategy:
-    - Mock: Agent.run() to raise ModelHTTPError with 429 status
-    - Real: Error handling in AnthropicApiAnnotator.run_with_model()
+@patch("image_annotator_lib.core.provider_manager.calculate_phash")
+@patch("image_annotator_lib.core.provider_manager.preprocess_images_to_binary")
+@patch("image_annotator_lib.core.provider_manager.PydanticAIAgentFactory")
+@patch("image_annotator_lib.core.provider_manager.config_registry")
+def test_api_rate_limit_429(
+    mock_config, mock_factory, mock_preprocess, mock_phash
+):
+    """Test 429 rate limit error is caught and returned as error result.
 
     Verifies:
-    - ModelHTTPError(429) is caught
-    - Error message includes status code
-    - Result contains error (not exception)
-    - Current implementation: NO automatic retry (single call)
-
-    Note:
-        Current implementation catches 429 but does not implement
-        exponential backoff retry logic. Test verifies error is caught
-        and recorded correctly.
+    - ModelHTTPError(429) is caught per-image
+    - Error message includes rate limit information
+    - NO automatic retry (single call to agent)
     """
-    from image_annotator_lib.model_class.annotator_webapi.anthropic_api import (
-        AnthropicApiAnnotator,
-    )
+    mock_config.get.return_value = "test_api_key"
+    mock_phash.return_value = "phash_rate"
+    mock_preprocess.return_value = [MagicMock()]
 
-    # Setup config
-    config_dict = {
-        "class": "AnthropicApiAnnotator",
-        "model_name_on_provider": "claude-3-5-sonnet-20241022",
-        "api_model_id": "claude-3-5-sonnet-20241022",
-        "api_key": "test_key",
-        "timeout": 30,
-        "retry_count": 0,
-        "capabilities": ["tags", "captions", "scores"],
-    }
-    managed_config_registry.set("test_rate_limit", config_dict)
-
-    # Create mock Agent with AsyncMock.run() that raises 429 error
     mock_agent = MagicMock()
-    mock_agent.run = AsyncMock(
-        side_effect=ModelHTTPError(status_code=429, model_name="test_rate_limit", body="Too many requests")
+    mock_factory.get_or_create_agent.return_value = mock_agent
+    mock_agent.run_sync.side_effect = ModelHTTPError(
+        status_code=429, model_name="claude-3-opus", body="Too many requests"
     )
 
-    with patch(
-        "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent",
-        return_value=mock_agent,
-    ):
-        annotator = AnthropicApiAnnotator("test_rate_limit")
+    test_image = Image.new("RGB", (100, 100), color="blue")
+    results = ProviderManager.run_inference_with_model(
+        model_name="test_model",
+        images_list=[test_image],
+        api_model_id="claude-3-opus",
+    )
 
-        # Create test image
-        test_image = Image.new("RGB", (100, 100), color="blue")
-
-        with annotator:
-            # Call run_with_model (should catch error, not raise)
-            results = annotator.run_with_model([test_image], "claude-3-5-sonnet-20241022")
-
-        # Verify error was caught and recorded
-        assert len(results) == 1
-        result = results[0]
-        assert result.error is not None
-        assert "429" in result.error or "Rate limit" in result.error
-        assert result.provider_name == "anthropic"
-
-        # Verify current behavior: NO retry (single call)
-        assert mock_agent.run.call_count == 1
+    assert len(results) == 1
+    result = results["phash_rate"]
+    assert result["error"] is not None
+    assert "429" in result["error"] or "Too many" in result["error"]
+    assert result["tags"] == []
+    assert mock_agent.run_sync.call_count == 1
 
 
 @pytest.mark.unit
-def test_api_timeout_error(managed_config_registry):
-    """Test async timeout error handling.
-
-    Mock Strategy:
-    - Mock: Agent.run() to raise asyncio.TimeoutError
-    - Real: Error handling in AnthropicApiAnnotator.run_with_model()
+@patch("image_annotator_lib.core.provider_manager.calculate_phash")
+@patch("image_annotator_lib.core.provider_manager.preprocess_images_to_binary")
+@patch("image_annotator_lib.core.provider_manager.PydanticAIAgentFactory")
+@patch("image_annotator_lib.core.provider_manager.config_registry")
+def test_api_timeout_error(
+    mock_config, mock_factory, mock_preprocess, mock_phash
+):
+    """Test timeout error is caught and returned as error result.
 
     Verifies:
-    - asyncio.TimeoutError is caught by generic Exception handler
+    - TimeoutError is caught by generic Exception handler
     - Error message is recorded in result
-    - Result contains error (not exception)
     - NO retry attempted (single call)
     """
-    from image_annotator_lib.model_class.annotator_webapi.anthropic_api import (
-        AnthropicApiAnnotator,
+    mock_config.get.return_value = "test_api_key"
+    mock_phash.return_value = "phash_timeout"
+    mock_preprocess.return_value = [MagicMock()]
+
+    mock_agent = MagicMock()
+    mock_factory.get_or_create_agent.return_value = mock_agent
+    mock_agent.run_sync.side_effect = TimeoutError("Request timed out")
+
+    test_image = Image.new("RGB", (100, 100), color="green")
+    results = ProviderManager.run_inference_with_model(
+        model_name="test_model",
+        images_list=[test_image],
+        api_model_id="gpt-4",
     )
 
-    # Setup config
-    config_dict = {
-        "class": "AnthropicApiAnnotator",
-        "model_name_on_provider": "claude-3-5-sonnet-20241022",
-        "api_model_id": "claude-3-5-sonnet-20241022",
-        "api_key": "test_key",
-        "timeout": 30,
-        "retry_count": 0,
-        "capabilities": ["tags", "captions", "scores"],
-    }
-    managed_config_registry.set("test_timeout", config_dict)
-
-    # Create mock Agent with AsyncMock.run() that raises TimeoutError
-    mock_agent = MagicMock()
-    mock_agent.run = AsyncMock(side_effect=TimeoutError("Request timed out"))
-
-    with patch(
-        "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent",
-        return_value=mock_agent,
-    ):
-        annotator = AnthropicApiAnnotator("test_timeout")
-
-        # Create test image
-        test_image = Image.new("RGB", (100, 100), color="green")
-
-        with annotator:
-            # Call run_with_model (should catch error, not raise)
-            results = annotator.run_with_model([test_image], "claude-3-5-sonnet-20241022")
-
-        # Verify error was caught and recorded
-        assert len(results) == 1
-        result = results[0]
-        assert result.error is not None
-        assert "Error" in result.error or "timed out" in result.error.lower()
-        assert result.provider_name == "anthropic"
-
-        # Verify NO retry (single call)
-        assert mock_agent.run.call_count == 1
+    assert len(results) == 1
+    result = results["phash_timeout"]
+    assert result["error"] is not None
+    assert "timed out" in result["error"].lower()
+    assert result["tags"] == []
+    assert mock_agent.run_sync.call_count == 1
 
 
 @pytest.mark.unit
-def test_unexpected_model_behavior_error(managed_config_registry):
-    """Test UnexpectedModelBehavior error handling.
-
-    Mock Strategy:
-    - Mock: Agent.run() to raise UnexpectedModelBehavior exception
-    - Real: Error handling in AnthropicApiAnnotator.run_with_model()
+@patch("image_annotator_lib.core.provider_manager.calculate_phash")
+@patch("image_annotator_lib.core.provider_manager.preprocess_images_to_binary")
+@patch("image_annotator_lib.core.provider_manager.PydanticAIAgentFactory")
+@patch("image_annotator_lib.core.provider_manager.config_registry")
+def test_unexpected_model_behavior_error(
+    mock_config, mock_factory, mock_preprocess, mock_phash
+):
+    """Test UnexpectedModelBehavior error is caught and returned as error result.
 
     Verifies:
     - UnexpectedModelBehavior is caught
-    - Error message includes "Unexpected model behavior"
+    - Error message includes description
     - Result contains error (not exception)
     """
-    from image_annotator_lib.model_class.annotator_webapi.anthropic_api import (
-        AnthropicApiAnnotator,
+    mock_config.get.return_value = "test_api_key"
+    mock_phash.return_value = "phash_unexpected"
+    mock_preprocess.return_value = [MagicMock()]
+
+    mock_agent = MagicMock()
+    mock_factory.get_or_create_agent.return_value = mock_agent
+    mock_agent.run_sync.side_effect = UnexpectedModelBehavior(
+        "Model returned invalid structure"
     )
 
-    # Setup config
-    config_dict = {
-        "class": "AnthropicApiAnnotator",
-        "model_name_on_provider": "claude-3-5-sonnet-20241022",
-        "api_model_id": "claude-3-5-sonnet-20241022",
-        "api_key": "test_key",
-        "timeout": 30,
-        "retry_count": 0,
-        "capabilities": ["tags", "captions", "scores"],
-    }
-    managed_config_registry.set("test_unexpected", config_dict)
+    test_image = Image.new("RGB", (100, 100), color="yellow")
+    results = ProviderManager.run_inference_with_model(
+        model_name="test_model",
+        images_list=[test_image],
+        api_model_id="gpt-4",
+    )
 
-    # Create mock Agent with AsyncMock.run() that raises UnexpectedModelBehavior
-    mock_agent = MagicMock()
-    mock_agent.run = AsyncMock(side_effect=UnexpectedModelBehavior("Model returned invalid structure"))
-
-    with patch(
-        "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent",
-        return_value=mock_agent,
-    ):
-        annotator = AnthropicApiAnnotator("test_unexpected")
-
-        # Create test image
-        test_image = Image.new("RGB", (100, 100), color="yellow")
-
-        with annotator:
-            # Call run_with_model (should catch error, not raise)
-            results = annotator.run_with_model([test_image], "claude-3-5-sonnet-20241022")
-
-        # Verify error was caught and recorded
-        assert len(results) == 1
-        result = results[0]
-        assert result.error is not None
-        assert "Unexpected model behavior" in result.error
-        assert result.provider_name == "anthropic"
-
-        # Verify single call
-        assert mock_agent.run.call_count == 1
+    assert len(results) == 1
+    result = results["phash_unexpected"]
+    assert result["error"] is not None
+    assert "invalid structure" in result["error"].lower()
+    assert result["tags"] == []
 
 
 @pytest.mark.unit
-def test_api_error_with_multiple_images(managed_config_registry):
-    """Test API error handling with multiple images.
-
-    Mock Strategy:
-    - Mock: Agent.run() to raise ModelHTTPError on first call, succeed on second
-    - Real: Error handling in AnthropicApiAnnotator.run_with_model()
+@patch("image_annotator_lib.core.provider_manager.calculate_phash")
+@patch("image_annotator_lib.core.provider_manager.preprocess_images_to_binary")
+@patch("image_annotator_lib.core.provider_manager.PydanticAIAgentFactory")
+@patch("image_annotator_lib.core.provider_manager.config_registry")
+def test_api_error_with_multiple_images(
+    mock_config, mock_factory, mock_preprocess, mock_phash
+):
+    """Test API error handling with multiple images (partial failure).
 
     Verifies:
-    - Errors are recorded per-image
-    - Partial results returned (error for first, success for second)
-    - Both images processed independently
+    - Errors are recorded per-image independently
+    - First image fails, second succeeds
+    - Both images processed (no early termination)
     """
-    from image_annotator_lib.core.types import AnnotationSchema
-    from image_annotator_lib.model_class.annotator_webapi.anthropic_api import (
-        AnthropicApiAnnotator,
-    )
+    mock_config.get.return_value = "test_api_key"
+    mock_phash.side_effect = ["phash_fail", "phash_ok"]
+    mock_preprocess.return_value = [MagicMock(), MagicMock()]
 
-    # Setup config
-    config_dict = {
-        "class": "AnthropicApiAnnotator",
-        "model_name_on_provider": "claude-3-5-sonnet-20241022",
-        "api_model_id": "claude-3-5-sonnet-20241022",
-        "api_key": "test_key",
-        "timeout": 30,
-        "retry_count": 0,
-        "capabilities": ["tags", "captions", "scores"],
-    }
-    managed_config_registry.set("test_multi", config_dict)
-
-    # Create mock Agent with side_effect: error on first call, success on second
     mock_agent = MagicMock()
-    success_response = AnnotationSchema(tags=["test_tag"], captions=["test caption"], score=0.9)
-    mock_agent.run = AsyncMock(
-        side_effect=[
-            ModelHTTPError(status_code=500, model_name="test_multi", body="Internal error"),
-            MagicMock(output=success_response),  # ModelResponse with output
-        ]
+    mock_factory.get_or_create_agent.return_value = mock_agent
+
+    # 1件目: エラー、2件目: 成功
+    success_response = MagicMock()
+    success_response.data = AnnotationSchema(
+        tags=["test_tag"], captions=["test caption"], score=0.9
+    )
+    mock_agent.run_sync.side_effect = [
+        ModelHTTPError(
+            status_code=500, model_name="gpt-4", body="Internal error"
+        ),
+        success_response,
+    ]
+
+    test_images = [
+        Image.new("RGB", (100, 100), color="red"),
+        Image.new("RGB", (100, 100), color="blue"),
+    ]
+    results = ProviderManager.run_inference_with_model(
+        model_name="test_model",
+        images_list=test_images,
+        api_model_id="gpt-4",
     )
 
-    with patch(
-        "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent",
-        return_value=mock_agent,
-    ):
-        annotator = AnthropicApiAnnotator("test_multi")
+    assert len(results) == 2
 
-        # Create two test images
-        test_images = [
-            Image.new("RGB", (100, 100), color="red"),
-            Image.new("RGB", (100, 100), color="blue"),
-        ]
+    # 1件目: エラー
+    assert results["phash_fail"]["error"] is not None
+    assert "500" in results["phash_fail"]["error"]
+    assert results["phash_fail"]["tags"] == []
 
-        with annotator:
-            # Call run_with_model with multiple images
-            results = annotator.run_with_model(test_images, "claude-3-5-sonnet-20241022")
+    # 2件目: 成功
+    assert results["phash_ok"]["error"] is None
+    assert results["phash_ok"]["tags"] == ["test_tag"]
 
-        # Verify partial results: error for first, success for second
-        assert len(results) == 2
-
-        # First result: error
-        assert results[0].error is not None
-        assert "500" in results[0].error
-
-        # Second result: success
-        assert results[1].error is None
-        assert results[1].tags == ["test_tag"]
-        assert results[1].captions == ["test caption"]
-
-        # Verify both images processed (2 calls)
-        assert mock_agent.run.call_count == 2
+    # 両方処理された
+    assert mock_agent.run_sync.call_count == 2

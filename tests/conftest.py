@@ -47,7 +47,7 @@ def reset_global_state(request):
             from image_annotator_lib.core.config import config_registry
             from image_annotator_lib.core.model_factory import ModelLoad
             from image_annotator_lib.core.provider_manager import ProviderManager
-            from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+            from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
             from image_annotator_lib.core.registry import _MODEL_CLASS_OBJ_REGISTRY
 
             # レジストリクリア
@@ -68,17 +68,9 @@ def reset_global_state(request):
                 for model in test_models:
                     config_registry._config.pop(model, None)
 
-            # ProviderManagerキャッシュクリア
-            if hasattr(ProviderManager, "_provider_cache"):
-                ProviderManager._provider_cache.clear()
-            if hasattr(ProviderManager, "_agent_cache"):
-                ProviderManager._agent_cache.clear()
-
-            # PydanticAIProviderFactoryキャッシュクリア
-            if hasattr(PydanticAIProviderFactory, "_provider_cache"):
-                PydanticAIProviderFactory._provider_cache.clear()
-            if hasattr(PydanticAIProviderFactory, "_agent_cache"):
-                PydanticAIProviderFactory._agent_cache.clear()
+            # ProviderManager/PydanticAIAgentFactory キャッシュクリア
+            ProviderManager.clear_cache()
+            PydanticAIAgentFactory.clear_cache()
 
         except ImportError:
             # モジュールがまだロードされていない場合はスキップ
