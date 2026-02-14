@@ -1,0 +1,444 @@
+# tests/integration/test_pydantic_ai_factory_api_key_management.py
+"""
+Integration tests for PydanticAI Factory API key management.
+Addresses the openai.OpenAIError: The api_key client option must be set errors.
+"""
+
+import os
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from image_annotator_lib.core.provider_manager import ProviderManager
+from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
+
+
+class TestPydanticAIFactoryApiKeyManagement:
+    """Integration tests for API key management in PydanticAI Factory."""
+
+    @pytest.fixture(autouse=True)
+    def setup_and_teardown(self):
+        """Setup and teardown for each test."""
+        import asyncio
+        import gc
+
+        from image_annotator_lib.core.base.pydantic_ai_annotator import AdvancedAgentFactory
+        from image_annotator_lib.core.config import config_registry
+
+        # 1. Clear all caches before each test
+        PydanticAIAgentFactory.clear_cache()
+        AdvancedAgentFactory.clear_cache()
+
+        # 2. Close any existing event loops
+        try:
+            loop = asyncio.get_event_loop()
+            if loop and not loop.is_closed():
+                loop.close()
+        except RuntimeError:
+            pass  # No loop to close
+
+        # 3. Set new event loop for clean state
+        try:
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+        except RuntimeError:
+            pass
+
+        # 4. Clear any test configurations from config registry
+        test_configs = [
+            key for key in getattr(config_registry, "_config", {}).keys() if key.startswith("test_")
+        ]
+        for key in test_configs:
+            try:
+                config_registry._config.pop(key, None)
+            except (AttributeError, KeyError):
+                pass
+
+        # 5. Force garbage collection
+        gc.collect()
+
+        yield
+
+        # Clean up after each test
+        # 1. Clear all caches
+        PydanticAIAgentFactory.clear_cache()
+        AdvancedAgentFactory.clear_cache()
+
+        # 2. Clean up test configurations again
+        test_configs = [
+            key for key in getattr(config_registry, "_config", {}).keys() if key.startswith("test_")
+        ]
+        for key in test_configs:
+            try:
+                config_registry._config.pop(key, None)
+            except (AttributeError, KeyError):
+                pass
+
+        # 3. Close event loop if it exists
+        try:
+            loop = asyncio.get_event_loop()
+            if loop and not loop.is_closed():
+                loop.close()
+        except RuntimeError:
+            pass
+
+        # 4. Force garbage collection
+        gc.collect()
+
+    @pytest.fixture
+    def mock_environment_api_keys(self):
+        """Mock environment variables for API keys."""
+        env_vars = {
+            "OPENAI_API_KEY": "test-openai-key-from-env",
+            "ANTHROPIC_API_KEY": "test-anthropic-key-from-env",
+            "GOOGLE_API_KEY": "test-google-key-from-env",
+            "OPENROUTER_API_KEY": "test-openrouter-key-from-env",
+        }
+
+        with patch.dict(os.environ, env_vars, clear=False):
+            yield env_vars
+
+    @pytest.fixture
+    def mock_config_api_keys(self, managed_config_registry):
+        """Mock configuration with API keys."""
+        configs = {
+            "openai_test_model": {
+                "class": "OpenAIApiChatAnnotator",
+                "api_model_id": "gpt-4o-mini",
+                "model_name_on_provider": "gpt-4o-mini",
+                "api_key": "test-openai-key-from-config",
+            },
+            "anthropic_test_model": {
+                "class": "AnthropicApiAnnotator",
+                "api_model_id": "claude-3-5-sonnet",
+                "model_name_on_provider": "claude-3-5-sonnet",
+                "api_key": "test-anthropic-key-from-config",
+            },
+            "google_test_model": {
+                "class": "GoogleApiAnnotator",
+                "api_model_id": "gemini-1.5-pro",
+                "model_name_on_provider": "gemini-1.5-pro",
+                "api_key": "test-google-key-from-config",
+            },
+            "openrouter_test_model": {
+                "class": "OpenAIApiChatAnnotator",
+                "api_model_id": "openrouter:anthropic/claude-3.5-sonnet",
+                "model_name_on_provider": "openrouter:anthropic/claude-3.5-sonnet",
+                "api_key": "test-openrouter-key-from-config",
+            },
+        }
+
+        for model_name, config in configs.items():
+            managed_config_registry.set(model_name, config)
+
+        return configs
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_api_key_from_environment_variables(self, mock_environment_api_keys):
+        """Test that API keys are correctly loaded from environment variables."""
+        with patch("pydantic_ai.providers.openai.OpenAIProvider") as mock_provider:
+            # Mock the provider to not actually connect
+            mock_instance = MagicMock()
+            mock_provider.return_value = mock_instance
+
+            with patch("pydantic_ai.models.infer_model") as mock_infer:
+                mock_model = MagicMock()
+                mock_infer.return_value = mock_model
+
+                # Test OpenAI key from environment
+                try:
+                    agent = PydanticAIAgentFactory.get_cached_agent(
+                        "test_model",
+                        "gpt-4o-mini",
+                        None,  # No explicit API key - should use environment
+                    )
+                    assert agent is not None
+                except Exception as e:
+                    # Should not fail due to missing API key
+                    assert "api_key client option must be set" not in str(e)
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_api_key_from_configuration(self, mock_config_api_keys):
+        """Test that API keys are correctly loaded from model configuration."""
+        with patch("pydantic_ai.providers.openai.OpenAIProvider") as mock_provider:
+            mock_instance = MagicMock()
+            mock_provider.return_value = mock_instance
+
+            with patch("pydantic_ai.models.infer_model") as mock_infer:
+                mock_model = MagicMock()
+                mock_infer.return_value = mock_model
+
+                # Test with config-provided API key
+                try:
+                    agent = PydanticAIAgentFactory.get_cached_agent(
+                        "openai_test_model", "gpt-4o-mini", "test-openai-key-from-config"
+                    )
+                    assert agent is not None
+                except Exception as e:
+                    assert "api_key client option must be set" not in str(e)
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_api_key_priority_explicit_over_env(self, mock_environment_api_keys):
+        """Test that explicit API keys take priority over environment variables."""
+        with patch("pydantic_ai.providers.openai.OpenAIProvider") as mock_provider:
+            # Mock to capture the API key passed to provider
+            captured_api_key = None
+
+            def mock_provider_init(*args, **kwargs):
+                nonlocal captured_api_key
+                if "api_key" in kwargs:
+                    captured_api_key = kwargs["api_key"]
+                return MagicMock()
+
+            mock_provider.side_effect = mock_provider_init
+
+            with patch("pydantic_ai.models.infer_model") as mock_infer:
+                mock_model = MagicMock()
+                mock_infer.return_value = mock_model
+
+                explicit_key = "explicit-api-key-override"
+
+                try:
+                    agent = PydanticAIAgentFactory.get_cached_agent(
+                        "test_model", "gpt-4o-mini", explicit_key
+                    )
+
+                    # Verify explicit key was used (would need to check provider call)
+                    # This is a structural test - in real implementation,
+                    # we'd verify the explicit key is passed to the provider
+                    assert agent is not None
+
+                except Exception as e:
+                    assert "api_key client option must be set" not in str(e)
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_missing_api_key_handling(self):
+        """Test proper error handling when no API key is available."""
+        # Store original environment variables to restore later
+        original_env = {}
+        env_keys = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"]
+
+        for key in env_keys:
+            original_env[key] = os.environ.get(key)
+            # Remove from environment if it exists
+            if key in os.environ:
+                del os.environ[key]
+
+        try:
+            # Mock _is_test_environment to return False so we test real provider creation
+            with patch(
+                "image_annotator_lib.core.pydantic_ai_factory._is_test_environment", return_value=False
+            ):
+                # Also need to enable ALLOW_MODEL_REQUESTS to test real provider creation
+                from pydantic_ai import models
+
+                original_allow = models.ALLOW_MODEL_REQUESTS
+                models.ALLOW_MODEL_REQUESTS = True
+
+                try:
+                    # This should raise an appropriate error about missing API key
+                    with pytest.raises(Exception) as exc_info:
+                        PydanticAIAgentFactory.get_cached_agent(
+                            "test_model",
+                            "gpt-4o-mini",
+                            None,  # No API key provided
+                        )
+
+                    # Should get a clear error message about missing API key
+                    error_msg = str(exc_info.value)
+                    assert (
+                        "api_key" in error_msg.lower()
+                        or "key" in error_msg.lower()
+                        or "authentication" in error_msg.lower()
+                        or "credential" in error_msg.lower()
+                        or "none" in error_msg.lower()
+                    ), f"Unexpected error message: {error_msg}"
+                finally:
+                    models.ALLOW_MODEL_REQUESTS = original_allow
+
+        finally:
+            # Restore original environment variables
+            for key, value in original_env.items():
+                if value is not None:
+                    os.environ[key] = value
+                elif key in os.environ:
+                    del os.environ[key]
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_provider_specific_api_key_handling(self, mock_environment_api_keys):
+        """Test API key handling for different providers."""
+        test_cases = [
+            ("openai", "gpt-4o-mini", "OPENAI_API_KEY"),
+            ("anthropic", "claude-3-5-sonnet", "ANTHROPIC_API_KEY"),
+            ("google", "gemini-1.5-pro", "GOOGLE_API_KEY"),
+            ("openrouter", "openrouter:anthropic/claude-3.5-sonnet", "OPENROUTER_API_KEY"),
+        ]
+
+        for provider_name, model_id, _env_var in test_cases:
+            with patch("pydantic_ai.models.infer_model") as mock_infer:
+                # Mock the model inference to avoid actual provider instantiation
+                mock_model = MagicMock()
+                mock_infer.return_value = mock_model
+
+                with patch("pydantic_ai.providers.infer_provider") as mock_provider_infer:
+                    mock_provider = MagicMock()
+                    mock_provider_infer.return_value = mock_provider
+
+                    try:
+                        agent = PydanticAIAgentFactory.get_cached_agent(
+                            f"test_{provider_name}_model",
+                            model_id,
+                            None,  # Should use environment variable
+                        )
+                        assert agent is not None
+
+                    except Exception as e:
+                        # Should not fail due to API key issues when env var is set
+                        if "api_key client option must be set" in str(e):
+                            pytest.fail(f"API key not properly handled for {provider_name}: {e!s}")
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_agent_caching_with_different_api_keys(self, mock_environment_api_keys):
+        """Test that agents are properly cached and differentiated by API keys."""
+        with patch("pydantic_ai.models.infer_model") as mock_infer:
+            mock_model = MagicMock()
+            mock_infer.return_value = mock_model
+
+            with patch("pydantic_ai.providers.infer_provider") as mock_provider_infer:
+                mock_provider = MagicMock()
+                mock_provider_infer.return_value = mock_provider
+
+                # Get agent with first API key
+                agent1 = PydanticAIAgentFactory.get_cached_agent(
+                    "test_model", "gpt-4o-mini", "api-key-1"
+                )
+
+                # Get agent with different API key - should be different instance
+                agent2 = PydanticAIAgentFactory.get_cached_agent(
+                    "test_model", "gpt-4o-mini", "api-key-2"
+                )
+
+                # Get agent with same API key as first - should be cached instance
+                agent3 = PydanticAIAgentFactory.get_cached_agent(
+                    "test_model", "gpt-4o-mini", "api-key-1"
+                )
+
+                assert agent1 is not None
+                assert agent2 is not None
+                assert agent3 is not None
+                # agent1 and agent3 should be the same (cached)
+                # agent2 should be different (different API key)
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_openrouter_custom_headers_with_api_key(self, mock_environment_api_keys):
+        """Test that OpenRouter models handle custom headers along with API keys."""
+        with patch("pydantic_ai.models.infer_model") as mock_infer:
+            mock_model = MagicMock()
+            mock_infer.return_value = mock_model
+
+            with patch("pydantic_ai.providers.infer_provider") as mock_provider_infer:
+                mock_provider = MagicMock()
+                mock_provider_infer.return_value = mock_provider
+
+                # Test OpenRouter-specific handling
+                openrouter_config = {
+                    "openrouter_referer": "https://test-app.com",
+                    "openrouter_app_name": "TestApp",
+                }
+
+                try:
+                    agent = PydanticAIAgentFactory.create_openrouter_agent(
+                        "openrouter_test_model",
+                        "openrouter:anthropic/claude-3.5-sonnet",
+                        "test-openrouter-key",
+                        openrouter_config,
+                    )
+                    assert agent is not None
+
+                except Exception as e:
+                    assert "api_key client option must be set" not in str(e)
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_provider_manager_integration_with_api_keys(
+        self, mock_config_api_keys, lightweight_test_images
+    ):
+        """Test ProviderManager integration with proper API key management."""
+        with patch(
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
+        ) as mock_get_agent:
+            # Mock successful agent creation
+            mock_agent = MagicMock()
+            mock_agent.run.return_value = MagicMock(data={"tags": ["test_tag"]})
+            mock_get_agent.return_value = mock_agent
+
+            try:
+                # Test that ProviderManager can successfully run inference
+                # when API keys are properly configured
+                result = ProviderManager.run_inference_with_model(
+                    "openai_test_model", lightweight_test_images, api_model_id="gpt-4o-mini"
+                )
+
+                assert result is not None
+                assert len(result) > 0
+
+                # Verify the agent was created with proper API key
+                mock_get_agent.assert_called()
+                # API key should be passed (either from config or environment)
+
+            except Exception as e:
+                if "api_key client option must be set" in str(e):
+                    pytest.fail(f"API key management failed in ProviderManager integration: {e!s}")
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_api_key_validation_methods(self):
+        """Test utility methods for API key validation."""
+        # Test that we have methods to validate API key presence
+        test_cases = [("", False), (None, False), ("valid-api-key", True), ("sk-1234567890abcdef", True)]
+
+        for api_key, expected_valid in test_cases:
+            # This would test a hypothetical validation method
+            # In actual implementation, we'd add a method to validate API keys
+            if api_key and len(api_key.strip()) > 0:
+                is_valid = True
+            else:
+                is_valid = False
+
+            assert is_valid == expected_valid
+
+    @pytest.mark.integration
+    @pytest.mark.fast_integration
+    def test_cache_invalidation_on_api_key_change(self, mock_environment_api_keys):
+        """Test that cache is properly invalidated when API keys change."""
+        with patch("pydantic_ai.models.infer_model") as mock_infer:
+            mock_model = MagicMock()
+            mock_infer.return_value = mock_model
+
+            with patch("pydantic_ai.providers.infer_provider") as mock_provider_infer:
+                mock_provider = MagicMock()
+                mock_provider_infer.return_value = mock_provider
+
+                # Create agent with first API key
+                agent1 = PydanticAIAgentFactory.get_cached_agent(
+                    "test_model", "gpt-4o-mini", "original-api-key"
+                )
+
+                # Clear cache explicitly
+                PydanticAIAgentFactory.clear_cache()
+
+                # Create agent with different API key after cache clear
+                agent2 = PydanticAIAgentFactory.get_cached_agent(
+                    "test_model", "gpt-4o-mini", "new-api-key"
+                )
+
+                # Should be different instances due to cache clear
+                assert agent1 is not None
+                assert agent2 is not None

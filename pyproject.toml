@@ -4,23 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "image-annotator-lib"
-version = "0.1.0"
+version = "0.1.2"
 description = "Integrated library for image tagging and scoring."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 license = "MIT"
-authors = [
-    # { name = "Your Name", email = "you@example.com" }
-]
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",                     # Updated based on source tomls
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",                         # Keep general, specific handled by deps
-    "Topic :: Scientific/Engineering :: Image Processing",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Topic :: Multimedia :: Graphics",
-]
+authors = [{ name = "NEXTAltair" }]
 keywords = [ # Merged keywords
     "ai",
     "machine-learning",
@@ -28,18 +17,24 @@ keywords = [ # Merged keywords
     "image-annotation",
     "computer-vision",
 ]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",                         # Keep general, specific handled by deps
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Graphics",
+]
+
 dependencies = [
     # Core & Data Handling
     "numpy>=1.26.0",
     "pandas>=2.0.0",
     "Pillow>=10.0.0",
-    "polars",
     "toml",
-
-    # ML Frameworks & Models
-    "torch>=2.5.1",
-    "torchvision>=0.16.1",
-    "tensorflow>=2.19.0;platform_system!='Darwin'",      # Use newer version from scorer
+    "tensorflow>=2.19.0;platform_system!='Darwin'", # Use newer version from scorer
     "transformers>=4.27.4",
     "tf-keras>=2.19.0",
     "accelerate>=0.26.0",
@@ -52,48 +47,48 @@ dependencies = [
     "google-genai",
     "openai",
     "anthropic",
-    "dotenv",
-
+    "python-dotenv",
     # Image Processing & Utils
     "opencv-python>=4.8.0",
     "requests>=2.31.0",
     "tqdm>=4.66.0",
-    "imagehash",            # For pHash calculation in base.py
+    "imagehash",
+    "loguru",
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
+    "datetime>=5.5",
+    "pydantic-ai>=0.3.2",
+    "pyyaml>=6.0.2",
+    "polars>=1.31.0",
+    "pytest-xdist>=3.7.0",
+    "pytest-bdd>=8.1.0",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
-    # Testing
     "pytest>=8.0.0",
-    "pytest-bdd>=8.0.0",
     "pytest-clarity>=1.0.1",
     "pytest-cov>=4.1.0",
     "pytest-xdist>=3.5.0",
-    "pytest-playwright",     # Moved from scorer dependencies
-
-    # Code Quality
     "mypy>=1.8.0",
     "ruff>=0.2.0",
     "types-requests>=2.32.0",
     "types-Pillow",
     "types-toml",
-
-    # Utilities
     "psutil",
+    "pytest-mock",
 ]
 
-
 [project.urls]
-Homepage = "https://github.com/user/image-annotator-lib"       # 仮
-Repository = "https://github.com/user/image-annotator-lib.git" # 仮
-
-[tool.hatch.version]
-path = "src/image_annotator_lib/__init__.py"
+Homepage = "https://github.com/NEXTAltair/image-annotator-lib"
+Repository = "https://github.com/NEXTAltair/image-annotator-lib.git"
 
 [tool.ruff]
-# Lint Rules: https://docs.astral.sh/ruff/rules/
-# Format Options: https://docs.astral.sh/ruff/formatter/
-line-length = 119
+fix = true
+line-length = 108
+target-version = "py312"
+
+[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -104,10 +99,16 @@ select = [
     "UP",  # pyupgrade
     "RUF", # Ruff-specific rules
 ]
+
+exclude = [
+    "*/__pycache__"
+]
+
 ignore = [
     "E501",   # Line too long (handled by formatter)
-    "RUF021", # カタカナの `ノ` でなにか言われるのを回避
+    "RUF002", # カタカナの `ノ` でなにか言われるのを回避
 ]
+fixable = ["ALL"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -116,17 +117,48 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.mypy]
-python_version = "3.12"       # Match requires-python
+python_version = "3.12"
 ignore_missing_imports = true
 
-[tool.poetry.dependencies]
-imagehash = "^4.3.1" # pHash計算用
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+norecursedirs = ["prototypes", "examples", "docs", ".git", ".ruff_cache", ".mypy_cache", "__pycache__"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = [
+    "--import-mode=importlib",
+    "--strict-markers",
+    "--tb=short",
+    "--maxfail=5",
+    "-ra",
+]
+markers = [
+    "unit: ユニットテスト（全体）",
+    "integration: 統合テスト",
+    "webapi: Web APIテスト",
+    "scorer: スコアラーモデルテスト",
+    "tagger: タガーモデルテスト",
+    "fast: 高速実行テスト（外部依存なし、<1秒）",
+    "standard: 標準ユニットテスト（軽いモック、<5秒）",
+    "heavy: 重いテスト（実際のライブラリ、>5秒）",
+    "model_factory: Tests for the model factory (ModelLoad)",
+    "fast_integration: CI対応モックテスト",
+    "real_api: 実API検証テスト",
+    "system_integration: エンドツーエンドシナリオ",
+    "provider_specific: プロバイダー固有テスト",
+    "bdd: BDD（Behavior-Driven Development）テスト",
+    "bdd_core: Core BDD scenarios (SimplifiedAgentWrapper, Factory)",
+    "bdd_integration: Integration BDD (WebAPI, Provider-level)",
+    "bdd_errors: Error handling BDD",
+]
 
 [tool.coverage.run]
 source = ["image_annotator_lib"]
 branch = true
+parallel = true
 omit = [
-    "*/__init__.py",                        # __init__.py は通常カバレッジ不
+    "*/__init__.py",
     "src/image_annotator_lib/exceptions/*",
 ]
 
@@ -145,11 +177,11 @@ exclude_lines = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/image_annotator_lib"]
 
-[tool.hatch.build.targets.wheel.sources]
-"src" = ""
-
 [tool.hatch.build.targets.sdist]
 include = ["/src", "/tests"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
 
 [tool.hatch.build.targets.wheel.shared-data]
 "src/image_annotator_lib/py.typed" = "image_annotator_lib/py.typed"

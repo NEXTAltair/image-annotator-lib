@@ -1,6 +1,5 @@
 """TensorFlow を使用する Tagger モデルの実装。"""
 
-import logging
 from typing import Any
 
 import numpy as np
@@ -9,8 +8,9 @@ from PIL import Image
 
 from ..core.base import TensorflowBaseAnnotator
 from ..core.config import config_registry
-
-logger = logging.getLogger(__name__)
+from ..core.model_config import BaseModelConfig
+from ..core.types import TaskCapability, UnifiedAnnotationResult
+from ..core.utils import get_model_capabilities, logger
 
 
 class DeepDanbooruTagger(TensorflowBaseAnnotator):
@@ -24,21 +24,20 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
     # config から読み込まれる属性
     # tags, tags_general, tags_character は _load_tags で components に設定される
 
-    def __init__(self, model_name: str):  # kwargs は不要
+    def __init__(self, model_name: str, config: BaseModelConfig | None = None):
         """DeepDanbooruTagger を初期化します。"""
-        super().__init__(model_name=model_name)
+        super().__init__(model_name=model_name, config=config)
         # tag_threshold の設定 (config_registry.get を使用、デフォルト値 0.35)
-        self.tag_threshold = config_registry.get(self.model_name, "tag_threshold", 0.35)
-        self.logger.info(f"Tag threshold set to: {self.tag_threshold}")
+        threshold = config_registry.get(self.model_name, "tag_threshold", 0.35)
+        self.tag_threshold = threshold if threshold is not None else 0.35
+        logger.info(f"Tag threshold set to: {self.tag_threshold}")
         # model_format は TensorflowBaseAnnotator で処理されるため、ここでは不要
         logger.debug(f"DeepDanbooruTagger '{model_name}' initialized with threshold: {self.tag_threshold}")
 
     def _load_tags(self) -> None:
         """DeepDanbooru固有のタグファイル (tags.txt, tags-character.txt, tags-general.txt) をロードします。"""
         if "model_dir" not in self.components or not self.components["model_dir"]:
-            self.logger.error(
-                "モデルディレクトリが components に設定されていません。タグをロードできません。"
-            )
+            logger.error("モデルディレクトリが components に設定されていません。タグをロードできません。")
             # タグファイルがないと動作しないため、エラーを送出する方が良いかもしれない
             raise FileNotFoundError("モデルディレクトリが見つかりません。")
             # return # ここでは到達不能
@@ -62,31 +61,36 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
             # components に代入したリストの長さを取得 (None でないことが保証される)
             general_len = len(self.components["tags_general"])
             character_len = len(self.components["tags_character"])
-            self.logger.info(
+            logger.info(
                 f"タグファイルをロードしました: total={len(all_tags)}, general={general_len}, character={character_len}"
             )
 
         except FileNotFoundError as e:
-            self.logger.error(f"必須タグファイルが見つかりません: {e}")
+            logger.error(f"必須タグファイルが見つかりません: {e}")
             # 必須ファイルがない場合はエラーとして扱う
             raise e
         except Exception as e:
-            self.logger.exception(f"タグファイルの読み込み中に予期せぬエラーが発生しました: {e}")
+            logger.exception(f"タグファイルの読み込み中に予期せぬエラーが発生しました: {e}")
             raise e  # エラーを再送出
 
     # メソッド名を _preprocess_images に変更、引数型を修正
     def _preprocess_images(self, images: list[Image.Image]) -> np.ndarray[Any, np.dtype[np.float32]]:
         """画像リストを前処理し、単一の NumPy 配列バッチを返します。"""
-        processed_images = []
         # モデル名からバージョンを判断してターゲットサイズを決定
         # TODO: 設定ファイルで明示的に指定する方が良いかもしれない
         if "v1-" in self.model_name:
             target_size = (299, 299)
-            self.logger.debug("Using target size 299x299 for v1 model.")
+            logger.debug("Using target size 299x299 for v1 model.")
         else:
             target_size = (512, 512)  # v3, v4 and potentially others
-            self.logger.debug("Using target size 512x512 for v3/v4 model.")
+            logger.debug("Using target size 512x512 for v3/v4 model.")
 
+        # 空リストの場合は空のバッチを返す
+        if not images:
+            logger.debug("Empty image list, returning empty batch.")
+            return np.empty((0, target_size[0], target_size[1], 3), dtype=np.float32)
+
+        processed_images = []
         for image in images:
             if image.mode != "RGB":
                 image = image.convert("RGB")
@@ -96,27 +100,39 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
 
         # リストを NumPy 配列に変換してバッチを作成
         batch_array = np.stack(processed_images, axis=0)
-        self.logger.debug(f"Preprocessed batch shape: {batch_array.shape}")
+        logger.debug(f"Preprocessed batch shape: {batch_array.shape}")
         return batch_array.astype(np.float32)
 
     # _run_inference は TensorflowBaseAnnotator の実装を使用
 
     # メソッド名を _format_predictions に変更
-    # 戻り値の型を list[dict[str, dict[str, float]]] に変更 (BaseAnnotator._generate_results が解釈できる形式)
-    def _format_predictions(self, raw_output: tf.Tensor) -> list[dict[str, dict[str, float]]]:
-        """モデルの生出力バッチをフォーマットし、各画像のカテゴリ別タグ辞書のリストを返します。"""
+    # 戻り値の型を list[UnifiedAnnotationResult] に変更
+    def _format_predictions(self, raw_output: tf.Tensor) -> list[UnifiedAnnotationResult]:
+        """モデルの生出力バッチをフォーマットし、各画像のUnifiedAnnotationResultリストを返します。"""
         batch_results = []
         # TensorFlow のテンソルを NumPy 配列に変換 (CPU にコピー)
         try:
             predictions_np = raw_output.numpy()
         except Exception as e:
-            self.logger.exception(f"TensorFlow テンソルの NumPy 変換中にエラー: {e}")
-            # エラーが発生した場合、空の結果リストを返すか、例外を再送出するか検討
-            # BaseAnnotator.predict でエラーハンドリングされるため、例外を送出する
-            raise ValueError("TensorFlow テンソルの NumPy 変換に失敗しました。") from e
+            logger.exception(f"TensorFlow テンソルの NumPy 変換中にエラー: {e}")
+            # エラーが発生した場合、エラーResultを返す
+            return [
+                UnifiedAnnotationResult(
+                    model_name=self.model_name,
+                    capabilities={TaskCapability.TAGS},
+                    error=f"NumPy変換エラー: {e!s}",
+                    framework="tensorflow",
+                )
+            ]
 
         batch_size = predictions_np.shape[0]
-        self.logger.debug(f"Formatting predictions for batch size: {batch_size}")
+        logger.debug(f"Formatting predictions for batch size: {batch_size}")
+
+        # capabilities を取得 (バッチ外で1回のみ)
+        capabilities = get_model_capabilities(self.model_name)
+        if not capabilities:
+            # デフォルトはTAGS capability
+            capabilities = {TaskCapability.TAGS}
 
         # components からタグリストを取得 (存在チェックと None の場合のデフォルト値設定)
         all_tags = self.components.get("all_tags")
@@ -125,17 +141,30 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
         character_tags = self.components.get("tags_character", [])
 
         if not all_tags:
-            self.logger.error(
-                "タグ候補リスト (all_tags) が components に存在しません。フォーマットできません。"
-            )
-            # エラーを示す結果を返すのではなく、例外を送出する
-            raise ValueError("タグ候補リストが見つかりません。")
+            logger.error("タグ候補リスト (all_tags) が components に存在しません。フォーマットできません。")
+            # エラーを示す結果を返す
+            return [
+                UnifiedAnnotationResult(
+                    model_name=self.model_name,
+                    capabilities=capabilities,
+                    error="タグ候補リストが見つかりません。",
+                    framework="tensorflow",
+                )
+            ]
 
         if len(all_tags) != predictions_np.shape[1]:
-            self.logger.error(
+            logger.error(
                 f"タグ候補リストの長さ ({len(all_tags)}) とモデル出力次元 ({predictions_np.shape[1]}) が一致しません。"
             )
-            raise ValueError("タグ候補リストとモデル出力の次元が一致しません。")
+            # エラーを示す結果を返す
+            return [
+                UnifiedAnnotationResult(
+                    model_name=self.model_name,
+                    capabilities=capabilities,
+                    error="タグ候補リストとモデル出力の次元が一致しません。",
+                    framework="tensorflow",
+                )
+            ]
 
         for i in range(batch_size):
             single_preds = predictions_np[i]  # i番目の画像の予測結果 (NumPy 配列)
@@ -172,7 +201,18 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
                 sorted(formatted["other"].items(), key=lambda item: item[1], reverse=True)
             )
 
-            batch_results.append(formatted)
+            # タグリストを生成 (閾値を適用)
+            tags = self._generate_tags(formatted)
+
+            # UnifiedAnnotationResult を作成
+            result = UnifiedAnnotationResult(
+                model_name=self.model_name,
+                capabilities=capabilities,
+                tags=tags,
+                framework="tensorflow",
+                raw_output=formatted,
+            )
+            batch_results.append(result)
 
         return batch_results
 

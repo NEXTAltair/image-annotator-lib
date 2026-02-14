@@ -1,4 +1,3 @@
-import logging
 import os
 
 from PIL import Image
@@ -8,54 +7,70 @@ os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 from .api import PHashAnnotationResults
-from .core.base import AnnotationResult
-from .core.utils import setup_logger
-from .exceptions.errors import (
-    AnnotatorError,
-    ModelLoadError,
-    ModelNotFoundError,
-    OutOfMemoryError,
+from .core.api_model_discovery import discover_available_vision_models
+from .core.config import config_registry
+from .core.constants import (
+    AVAILABLE_API_MODELS_CONFIG_PATH,
+    DEFAULT_PATHS,
+    SYSTEM_CONFIG_PATH,
+    USER_CONFIG_PATH,
 )
-
-setup_logger("image_annotator_lib", level=logging.DEBUG)
-
+from .core.model_factory import ModelLoad
+from .core.registry import (
+    initialize_registry,
+    list_available_annotators,
+    list_available_annotators_with_metadata,
+)
+from .core.simplified_agent_factory import create_agent, get_available_models
+from .core.types import AnnotationResult
+from .core.utils import init_logger
+from .exceptions.errors import AnnotatorError, ModelLoadError, ModelNotFoundError, OutOfMemoryError
 
 # --- Public API ---
-
 __all__ = [
+    "AVAILABLE_API_MODELS_CONFIG_PATH",
+    "DEFAULT_PATHS",
+    "SYSTEM_CONFIG_PATH",
+    "USER_CONFIG_PATH",
     "AnnotationResult",
     "AnnotatorError",
+    "ModelLoad",
     "ModelLoadError",
     "ModelNotFoundError",
     "OutOfMemoryError",
     "annotate",
+    "config_registry",
+    "create_agent",
+    "discover_available_vision_models",
+    "get_available_models",
     "list_available_annotators",
+    "list_available_annotators_with_metadata",
 ]
 
 # モジュールレベルのキャッシュ
-# NOTE: 遅延インポートにして必要なときだけregistryとannotatorをインポートしないと他のテストが激遅になる
-_cached_list_available_annotators = None
+# NOTE: 遅延インポートにして必要なときだけannotatorをインポートしないと他のテストが激遅になる
 _cached_annotate = None
 
-
-def list_available_annotators() -> list[str]:
-    """利用可能なアノテーターモデルのリストを返します。"""
-    global _cached_list_available_annotators
-    if _cached_list_available_annotators is None:
-        # pylint: disable=import-outside-toplevel
-        from .core.registry import list_available_annotators as _list_available_annotators_impl
-
-        _cached_list_available_annotators = _list_available_annotators_impl
-    return _cached_list_available_annotators()
+init_logger()
+initialize_registry()
 
 
-def annotate(images_list: list[Image.Image], model_name_list: list[str]) -> PHashAnnotationResults:
+def annotate(
+    images_list: list[Image.Image],
+    model_name_list: list[str],
+    phash_list: list[str] | None = None,
+    api_keys: dict[str, str] | None = None,
+) -> PHashAnnotationResults:
     """
     指定されたモデルを使用して画像のリストにアノテーションを付けます。
 
     Args:
         images_list: アノテーションを付けるPIL Imageオブジェクトのリスト。
         model_name_list: 使用するアノテーターモデル名のリスト。
+        phash_list: 画像のpHash値のリスト。
+        api_keys: WebAPIモデル用のAPIキー辞書（オプション）。
+                 例: {"openai": "sk-...", "anthropic": "sk-ant-..."}
+                 指定された場合、環境変数より優先されます。
 
     Returns:
         pHash をキーとし、その値がモデル名をキーとする ModelResultDict の辞書。
@@ -68,7 +83,7 @@ def annotate(images_list: list[Image.Image], model_name_list: list[str]) -> PHas
 
         _cached_annotate = _annotate_impl
 
-    return _cached_annotate(images_list, model_name_list)
+    return _cached_annotate(images_list, model_name_list, phash_list, api_keys)
 
 
 # You might want to add version information here later

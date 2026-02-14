@@ -1,46 +1,96 @@
 import hashlib
-import logging
+import sys
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import huggingface_hub
 import imagehash
 import requests
+from loguru import logger
 from PIL import Image
 from tqdm import tqdm
 
-# --- ローカルインポート ---
-from .config import DEFAULT_PATHS, DEFAULT_TIMEOUT, WD_LABEL_FILENAME, WD_MODEL_FILENAME
+# torch は関数内で lazy import（pytest collection時のエラー回避）
+# confing モジュールで定数を定義すると循環インポートになるのを回避
+from .constants import DEFAULT_PATHS
+
+DEFAULT_TIMEOUT = 30
+WD_MODEL_FILENAME = "model.onnx"
+WD_LABEL_FILENAME = "selected_tags.csv"
+
+# Explicitly export logger and other public functions
+__all__ = [
+    "calculate_phash",
+    "convert_unix_to_iso8601",
+    "determine_effective_device",
+    "download_onnx_tagger_model",
+    "extract_zip",
+    "get_file_path",
+    "get_model_capabilities",
+    "init_logger",
+    "load_file",
+    "logger",
+]
 
 
-def setup_logger(name: str, level: int = logging.INFO, log_file: Path | str | None = None) -> logging.Logger:
-    """指定された名前でロガーを初期化します。"""
-    # log_file が None の場合はデフォルトパスを使用
-    if log_file is None:
-        log_file = DEFAULT_PATHS["log_file"]
+# ログフォーマット
+LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function} - {message}"
 
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
-
-    if not logger.handlers:
-        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-
-        stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(formatter)
-        logger.addHandler(stream_handler)
-
-        # 文字列の場合はPathオブジェクトに変換
-        log_file_path = Path(log_file) if isinstance(log_file, str) else log_file
-        log_file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file_path, encoding="utf-8")
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-
-    return logging.getLogger(name)
+# logger初期化用関数
+_logger_initialized = False
 
 
-logger = logging.getLogger(__name__)
+def init_logger() -> None:
+    global _logger_initialized
+    if _logger_initialized:
+        return
+    _logger_initialized = True
+    # loguru のデフォルトハンドラを削除 (明示的に設定するため)
+    logger.remove()
+    # コンソールシンク (stderr)
+    logger.add(
+        sys.stderr,
+        level="INFO",  # デフォルトレベル (必要に応じて変更)
+        format=LOG_FORMAT,
+        colorize=True,
+        backtrace=True,
+        diagnose=True,
+    )
+
+    # 特定のモジュールのDEBUGログをフィルタするための関数
+    def filter_module_logs(record: Any) -> bool:  # loguru.Record type (dict-like access)
+        # 'registry' または 'config' モジュールからのDEBUGログをフィルタ
+        if record["name"].startswith("image_annotator_lib.core.registry") or record["name"].startswith(
+            "image_annotator_lib.core.config"
+        ):
+            # INFOレベル以上のログだけを許可する (DEBUGレベルは除外)
+            return bool(record["level"].no >= logger.level("INFO").no)
+        # その他のモジュールのログはすべて通す
+        return True
+
+    # ファイルシンク (DEFAULT_PATHS["log_file"] を使用) - フィルタを追加
+    try:
+        log_file_path = Path(DEFAULT_PATHS["log_file"])
+        log_file_path.parent.mkdir(parents=True, exist_ok=True)  # フォルダ作成
+        logger.add(
+            log_file_path,
+            level="DEBUG",
+            format=LOG_FORMAT,
+            rotation="25 MB",
+            retention=5,
+            encoding="utf-8",
+            backtrace=True,
+            diagnose=True,
+            filter=filter_module_logs,  # フィルタ関数を追加
+        )
+        logger.info(f"Logging to file: {log_file_path}")
+        logger.info("registry と config モジュールのDEBUGログは出力されません (INFO以上のみ出力)")
+    except Exception as e:
+        logger.error(f"Failed to configure file logging to '{DEFAULT_PATHS['log_file']}': {e}")
+        logger.error("File logging disabled.")
 
 
 def calculate_phash(image: Image.Image) -> str:
@@ -74,7 +124,7 @@ def _is_cached(url: str, cache_dir: Path) -> tuple[bool, Path]:
 
 
 def _perform_download(url: str, target_path: Path) -> None:
-    """実際のダウンロード処理を行う（進捗表示付き）"""
+    """実際のダウンロード処理を行う(進捗表示付き)"""
     logger.info(f"Downloading model from {url} to {target_path}")
     response = requests.get(url, stream=True, timeout=DEFAULT_TIMEOUT)
     response.raise_for_status()
@@ -107,6 +157,7 @@ def get_file_path(path_or_url: str, cache_dir: Path | str | None = None) -> Path
 
     # 文字列の場合はPathオブジェクトに変換
     cache_dir_path = Path(cache_dir) if isinstance(cache_dir, str) else cache_dir
+    assert isinstance(cache_dir_path, Path), "cache_dir_path must be a Path object"
 
     parsed = urlparse(path_or_url)
     if parsed.scheme in ("http", "https"):
@@ -186,3 +237,119 @@ def download_onnx_tagger_model(model_repo: str) -> tuple[Path, Path]:
     )
 
     return Path(csv_path), Path(model_path)
+
+
+def determine_effective_device(requested_device: str, model_name: str | None = None) -> str:
+    """要求されたデバイスとCUDAの利用可否に基づき、実際に使用するデバイスを決定する。
+
+    CUDAが要求されたが利用できない場合は、警告ログを出力し "cpu" を返す。
+
+    Args:
+        requested_device: ユーザーまたは設定から要求されたデバイス ("cuda", "cpu" など)。
+        model_name: ログ出力用のモデル名 (任意)。
+
+    Returns:
+        実際に使用すべきデバイス名 ("cuda" または "cpu")。
+    """
+    import torch  # lazy import (pytest collection時のエラー回避)
+
+    actual_device = requested_device
+
+    if requested_device.startswith("cuda"):
+        try:
+            # torch.cuda.is_available() を呼び出す前に torch がインポートされていることを確認
+            if not torch.cuda.is_available():
+                log_prefix = f"モデル '{model_name}' の" if model_name else ""
+                logger.warning(
+                    f"{log_prefix}要求されたデバイス '{requested_device}' は利用できません "
+                    f"(CUDA非対応PyTorch または CUDA環境不備)。CPU にフォールバックします。"
+                )
+                actual_device = "cpu"
+            else:
+                # CUDA is available, check if the specific device index is valid (optional)
+                try:
+                    # Example: "cuda:1"
+                    if ":" in requested_device:
+                        device_index = int(requested_device.split(":")[1])
+                        if device_index >= torch.cuda.device_count():
+                            log_prefix = f"モデル '{model_name}' の" if model_name else ""
+                            logger.warning(
+                                f"{log_prefix}要求されたCUDAデバイスインデックス '{device_index}' は無効です "
+                                f"(利用可能なデバイス数: {torch.cuda.device_count()})。デフォルトの CUDA デバイス (cuda:0) を使用します。"
+                            )
+                            actual_device = "cuda"  # Fallback to default cuda
+                except (ValueError, IndexError):
+                    logger.warning(
+                        f"要求されたCUDAデバイス '{requested_device}' の形式が不正です。デフォルトの CUDA デバイスを使用します。"
+                    )
+                    actual_device = "cuda"
+
+        except Exception as e:
+            # torch.cuda のチェック自体でエラーが発生した場合 (稀だが念のため)
+            logger.error(f"CUDA利用可否の確認中にエラーが発生しました: {e}。CPU にフォールバックします。")
+            actual_device = "cpu"
+
+    # 必要に応じて他のデバイスタイプのチェックを追加します(たとえば、Appleシリコンの「MPS」)
+
+    if actual_device != requested_device:
+        logger.info(
+            f"モデル '{model_name or 'N/A'}' の実行デバイスを '{requested_device}' から '{actual_device}' に変更しました。"
+        )
+
+    logger.debug(f"要求デバイス: '{requested_device}', 決定デバイス: '{actual_device}'")
+    return actual_device
+
+
+def get_model_capabilities(model_name: str) -> set[Any]:
+    """モデル名からcapabilitiesを取得
+
+    Args:
+        model_name: モデル名
+
+    Returns:
+        set: TaskCapabilityのセット
+    """
+    from .config import config_registry
+    from .types import TaskCapability
+
+    # 設定ファイルからcapabilitiesを取得
+    capabilities_config = config_registry.get(model_name, "capabilities", [])
+    if not capabilities_config:
+        logger.warning(f"モデル '{model_name}' のcapabilitiesが設定されていません")
+        return set()
+
+    # 文字列リストをTaskCapabilityに変換
+    capabilities = set()
+    for cap in capabilities_config:
+        try:
+            capabilities.add(TaskCapability(cap))
+        except ValueError:
+            logger.error(f"無効なcapability '{cap}' (model: {model_name})")
+
+    return capabilities
+
+
+def convert_unix_to_iso8601(timestamp: int | float | None, model_id_for_log: str | None = None) -> str:
+    """Unixタイムスタンプを ISO 8601 形式の UTC 文字列に変換する。
+
+    Args:
+        timestamp: Unix タイムスタンプ (int または float)。None の場合は "Invalid Timestamp" を返す。
+        model_id_for_log: ログ出力用のモデル ID (任意)。
+
+    Returns:
+        ISO 8601 形式の文字列 (例: "2024-07-28T12:34:56Z") または "Invalid Timestamp"。
+    """
+    if timestamp is None:
+        return "Invalid Timestamp"
+
+    if isinstance(timestamp, int | float):
+        try:
+            dt_object = datetime.fromtimestamp(timestamp, tz=UTC)
+            # ISO 8601 形式 (秒まで) + Z (UTCを示す) に変換
+            return dt_object.isoformat(timespec="seconds").replace("+00:00", "Z")
+        except (ValueError, OSError) as e:
+            log_prefix = f"モデル {model_id_for_log} の " if model_id_for_log else ""
+            logger.warning(
+                f"{log_prefix}created タイムスタンプ ({timestamp}) を ISO8601 に変換できませんでした: {e}"
+            )
+            return "Invalid Timestamp"

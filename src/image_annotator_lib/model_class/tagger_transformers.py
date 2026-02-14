@@ -4,6 +4,7 @@ import torch
 from PIL import Image
 
 from ..core.base import TransformersBaseAnnotator
+from ..core.utils import logger
 from ..exceptions.errors import OutOfMemoryError
 
 
@@ -49,7 +50,7 @@ class ToriiGateTagger(TransformersBaseAnnotator):
             )
             inputs = self.components["processor"](text=prompt, images=[image], return_tensors="pt")
             # デバッグログ: processor が返すキーを確認
-            self.logger.debug(f"Processor output keys for {self.model_name}: {list(inputs.keys())}")
+            logger.debug(f"Processor output keys for {self.model_name}: {list(inputs.keys())}")
             # デバイスに移動
             processed_output = {k: v.to(self.device) for k, v in inputs.items()}
             results.append(processed_output)
@@ -59,7 +60,14 @@ class ToriiGateTagger(TransformersBaseAnnotator):
         """モデル推論を実行します。生成されたIDを返します。"""
         results = []
         # generateメソッドの一般的な引数やモデルのforwardメソッドの引数を想定
-        KNOWN_ARGS = {"input_ids", "pixel_values", "attention_mask", "token_type_ids", "position_ids", "labels"}
+        KNOWN_ARGS = {
+            "input_ids",
+            "pixel_values",
+            "attention_mask",
+            "token_type_ids",
+            "position_ids",
+            "labels",
+        }
         try:
             for processed_image in processed_images:
                 # モデルに渡す引数をフィルタリング
@@ -67,12 +75,12 @@ class ToriiGateTagger(TransformersBaseAnnotator):
                 # max_new_tokens を追加
                 model_kwargs["max_new_tokens"] = 500
                 model_out = self.components["model"].generate(**model_kwargs)
-                self.logger.debug(f"推論結果のデバイス: {model_out.device}, 形状: {model_out.shape}")
+                logger.debug(f"推論結果のデバイス: {model_out.device}, 形状: {model_out.shape}")
                 results.append(model_out)
             return results
         except torch.cuda.OutOfMemoryError as e:
             error_message = f"CUDAメモリ不足: モデル '{self.model_name}' の推論実行中"
-            self.logger.error(error_message)
+            logger.error(error_message)
             raise OutOfMemoryError(error_message) from e
 
     def _format_predictions(self, token_ids_list: list[torch.Tensor]) -> list[str]:

@@ -1,0 +1,81 @@
+# Git attributes for image-annotator-lib
+
+# Text files - ensure consistent line endings
+*.py text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.xml text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.sh text eol=lf
+
+# Configuration files
+*.ini text eol=lf
+*.cfg text eol=lf
+*.conf text eol=lf
+
+# Documentation
+*.rst text eol=lf
+README* text eol=lf
+CHANGELOG* text eol=lf
+LICENSE* text eol=lf
+CONTRIBUTING* text eol=lf
+
+# Binary files - do not attempt text conversion
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+*.rar binary
+*.7z binary
+*.dmg binary
+*.gz binary
+*.iso binary
+*.jar binary
+*.tar binary
+
+# Model files (binary, large files)
+*.onnx binary
+*.pt binary
+*.pth binary
+*.bin binary
+*.safetensors binary
+*.h5 binary
+*.pkl binary
+*.pickle binary
+
+# Qt UI files - keep as text
+*.ui text eol=lf
+
+# Archive and compressed files
+*.bz2 binary
+*.xz binary
+*.lzma binary
+
+# Fonts
+*.ttf binary
+*.eot binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+
+# Exclude from export (files that shouldn't be included in releases)
+.gitattributes export-ignore
+.gitignore export-ignore
+.github/ export-ignore
+tests/resources/ export-ignore
+docs/development/ export-ignore
+.dev_context/ export-ignore
+tools/ export-ignore
+models/ export-ignore
+stable-diffusion-webui-wd14-tagger/ export-ignore
+DeepDanbooru/ export-ignore
