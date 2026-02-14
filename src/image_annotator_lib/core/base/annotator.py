@@ -11,7 +11,7 @@ from PIL import Image
 from ...exceptions.errors import OutOfMemoryError
 from ..config import config_registry
 from ..model_config import BaseModelConfig, ModelConfigFactory
-from ..types import AnnotationResult, LoaderComponents
+from ..types import AnnotationResult, LoaderComponents, UnifiedAnnotationResult
 from ..utils import logger
 
 
@@ -126,28 +126,29 @@ class BaseAnnotator(ABC):
 
     def predict(
         self, images: list[Image.Image], phash_list: list[str] | None = None
-    ) -> list[AnnotationResult]:
+    ) -> list[UnifiedAnnotationResult]:
         """画像リストに対してアノテーションを実行します。
 
         Args:
             images: アノテーションする PIL Image のリスト。
             phash_list: 事前計算された知覚ハッシュのリスト（オプション）。
+                api.pyでpHashマッピングに使用。結果オブジェクトには含まれない。
 
         Returns:
-            各画像のアノテーション結果のリスト。
+            各画像のUnifiedAnnotationResult結果のリスト。
         """
         if not images:
             logger.warning("空の画像リストが渡されました。アノテーションをスキップします。")
             return []
         try:
             formatted_outputs = self._execute_pipeline(images)
-            return self._build_results(images, formatted_outputs, phash_list)
+            return self._build_results(images, formatted_outputs)
         except OutOfMemoryError as mem_e:
             logger.error(f"メモリ不足エラー: {mem_e}")
-            return self._create_error_results(images, phash_list, "メモリ不足エラー")
+            return self._create_error_results(images, "メモリ不足エラー")
         except Exception as e:
             logger.exception(f"予期せぬエラー: {e}")
-            return self._create_error_results(images, phash_list, f"予期せぬエラー: {e}")
+            return self._create_error_results(images, f"予期せぬエラー: {e}")
 
     def _execute_pipeline(self, images: list[Image.Image]) -> list:
         """前処理→推論→整形のパイプラインを実行する。
@@ -178,83 +179,78 @@ class BaseAnnotator(ABC):
         self,
         images: list[Image.Image],
         formatted_outputs: list,
-        phash_list: list[str] | None,
-    ) -> list[AnnotationResult]:
+    ) -> list[UnifiedAnnotationResult]:
         """各画像の推論出力からアノテーション結果を構築する。
+
+        _format_predictionsがUnifiedAnnotationResultを返す場合はそのまま使用。
+        それ以外の場合はget_model_capabilitiesを使って変換する（後方互換）。
 
         Args:
             images: 元画像リスト。
             formatted_outputs: 整形済み推論出力。
-            phash_list: 事前計算された知覚ハッシュ（オプション）。
 
         Returns:
-            アノテーション結果のリスト。
+            UnifiedAnnotationResult結果のリスト。
         """
-        results: list[AnnotationResult] = []
+        from ..utils import get_model_capabilities
+
+        results: list[UnifiedAnnotationResult] = []
         for i, (image, formatted_output) in enumerate(zip(images, formatted_outputs, strict=True)):
             try:
-                phash = (
-                    phash_list[i]
-                    if phash_list and i < len(phash_list)
-                    else self._calculate_phash(image)
-                )
-                tags = self._generate_tags(formatted_output)
-                result: AnnotationResult = {
-                    "phash": phash,
-                    "tags": tags,
-                    "formatted_output": formatted_output,
-                    "error": None,
-                }
-                results.append(result)
+                if isinstance(formatted_output, UnifiedAnnotationResult):
+                    # _format_predictionsが既にUnifiedAnnotationResultを返す場合
+                    results.append(formatted_output)
+                else:
+                    # 後方互換: 旧形式の出力をUnifiedAnnotationResultに変換
+                    capabilities = get_model_capabilities(self.model_name)
+                    tags = self._generate_tags(formatted_output)
+                    result = UnifiedAnnotationResult(
+                        model_name=self.model_name,
+                        capabilities=capabilities,
+                        tags=tags or None,
+                        raw_output={"formatted_output": formatted_output}
+                        if formatted_output is not None
+                        else None,
+                    )
+                    results.append(result)
             except Exception as e:
                 logger.exception(f"画像 {i} の処理中にエラー: {e}")
-                results.append(self._create_error_result(
-                    phash_list[i] if phash_list and i < len(phash_list) else None,
-                    f"タグ生成エラー: {e}",
-                ))
+                results.append(self._create_error_result(f"タグ生成エラー: {e}"))
         return results
 
-    @staticmethod
-    def _create_error_result(phash: str | None, error_message: str) -> AnnotationResult:
+    def _create_error_result(self, error_message: str) -> UnifiedAnnotationResult:
         """エラー発生時のアノテーション結果を生成する。
 
         Args:
-            phash: 知覚ハッシュ（取得済みならその値、未取得ならNone）。
             error_message: エラーメッセージ。
 
         Returns:
-            エラー情報を含むアノテーション結果。
+            エラー情報を含むUnifiedAnnotationResult。
         """
-        return {
-            "phash": phash,
-            "tags": [],
-            "formatted_output": None,
-            "error": error_message,
-        }
+        from ..utils import get_model_capabilities
+
+        capabilities = get_model_capabilities(self.model_name)
+        return UnifiedAnnotationResult(
+            model_name=self.model_name,
+            capabilities=capabilities,
+            error=error_message,
+        )
 
     def _create_error_results(
         self,
         images: list[Image.Image],
-        phash_list: list[str] | None,
         error_message: str,
-    ) -> list[AnnotationResult]:
+    ) -> list[UnifiedAnnotationResult]:
         """全画像に対してエラー結果を一括生成する。
 
         Args:
             images: 元画像リスト。
-            phash_list: 事前計算された知覚ハッシュ（オプション）。
             error_message: エラーメッセージ。
 
         Returns:
             エラー結果のリスト。
         """
-        return [
-            self._create_error_result(
-                phash_list[i] if phash_list and i < len(phash_list) else None,
-                error_message,
-            )
-            for i in range(len(images))
-        ]
+        return [self._create_error_result(error_message) for _ in images]
 
     def _load_config_from_registry(self, model_name: str) -> BaseModelConfig:
         """config_registryからConfig Objectを生成します (後方互換性用)。

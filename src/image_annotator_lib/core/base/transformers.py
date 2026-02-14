@@ -153,8 +153,16 @@ class TransformersBaseAnnotator(BaseAnnotator):
                 outputs.append(model_out)
         return outputs
 
-    def _format_predictions(self, token_ids_list: list[torch.Tensor]) -> list[str]:
-        """生出力バッチをフォーマットします (Transformers用、テキストデコード)。"""
+    def _format_predictions(self, token_ids_list: list[torch.Tensor]) -> list[Any]:
+        """生出力バッチをフォーマットします (Transformers用、テキストデコード)。
+
+        Returns:
+            list[UnifiedAnnotationResult]: 統一フォーマットのアノテーション結果リスト
+        """
+        # 関数レベルでインポート（循環インポート回避）
+        from ..types import UnifiedAnnotationResult
+        from ..utils import get_model_capabilities
+
         if (
             not self.components
             or "processor" not in self.components
@@ -163,7 +171,15 @@ class TransformersBaseAnnotator(BaseAnnotator):
             raise RuntimeError("Transformer プロセッサがロードされていません。")
 
         processor_obj = self.components["processor"]
-        all_formatted = []
+        all_formatted: list[Any] = []
+
+        # get_model_capabilities を一度だけ呼び出す
+        try:
+            capabilities = get_model_capabilities(self.model_name)
+        except Exception as e:
+            logger.error(f"モデル '{self.model_name}' のcapabilities取得に失敗: {e}")
+            capabilities = set()
+
         try:
             for token_ids in token_ids_list:
                 # batch_decode属性の有無を安全に判定
@@ -171,22 +187,40 @@ class TransformersBaseAnnotator(BaseAnnotator):
                 if callable(batch_decode):
                     decoded_texts = batch_decode(token_ids, skip_special_tokens=True)
                     if isinstance(decoded_texts, str):
-                        all_formatted.append(decoded_texts)
+                        decoded_text = decoded_texts
                     elif isinstance(decoded_texts, list) and decoded_texts:
-                        all_formatted.append(decoded_texts[0])
+                        decoded_text = decoded_texts[0]
                     else:
-                        all_formatted.append("")
+                        decoded_text = ""
                 elif isinstance(processor_obj, CLIPProcessor):
                     logger.warning(
                         "CLIPProcessorにはbatch_decodeがありません。デコード処理をスキップします。"
                     )
-                    all_formatted.append("")
+                    decoded_text = ""
                 else:
                     raise TypeError(f"Unsupported processor type: {type(processor_obj)}")
+
+                # UnifiedAnnotationResult に変換
+                result = UnifiedAnnotationResult(
+                    model_name=self.model_name,
+                    capabilities=capabilities,
+                    captions=[decoded_text] if decoded_text else None,
+                    tags=[decoded_text] if decoded_text else None,
+                    framework="transformers",
+                )
+                all_formatted.append(result)
+
             return all_formatted
         except Exception as e:
             logger.exception(f"予測結果のフォーマット中にエラー発生: {e}")
-            raise ValueError(f"予測結果のフォーマット失敗: {e}") from e
+            # エラー時は1つのエラー結果を返す
+            error_result = UnifiedAnnotationResult(
+                model_name=self.model_name,
+                capabilities=capabilities,
+                error=f"予測結果のフォーマット失敗: {e}",
+                framework="transformers",
+            )
+            return [error_result]
 
     def _generate_tags(self, formatted_output: str | list[str]) -> list[str]:
         """キャプション文字列を単一要素のリストに変換します。

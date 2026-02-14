@@ -8,7 +8,7 @@ from PIL import Image
 from ...exceptions.errors import ModelLoadError
 from ..config import config_registry
 from ..model_factory import ModelLoad
-from ..types import TransformersPipelineComponents
+from ..types import TransformersPipelineComponents, UnifiedAnnotationResult
 from ..utils import logger
 from .annotator import BaseAnnotator
 
@@ -92,8 +92,9 @@ class PipelineBaseAnnotator(BaseAnnotator):
             logger.exception(f"Pipeline 推論中にエラーが発生: {e}")
             raise
 
-    def _format_predictions(self, raw_outputs: list[list[dict[str, Any]]]) -> Any:
+    def _format_predictions(self, raw_outputs: list[list[dict[str, Any]]]) -> list[UnifiedAnnotationResult]:
         """
         Pipeline の生出力は人間が読めるので不要
         """
-        return raw_outputs
+        # Concrete subclasses override this method completely
+        return []

@@ -176,7 +176,14 @@ class ModelConfigFactory:
                 return WebAPIModelConfig(**filtered_dict)
             elif "model_path" in config_dict:
                 logger.debug(f"ローカルMLモデルとして '{model_name}' をパース")
-                return LocalMLModelConfig(**config_dict)
+                # Filter out fields not in LocalMLModelConfig
+                # capabilities are retrieved via config_registry.get() for dynamic capability support
+                filtered_dict = {
+                    k: v
+                    for k, v in config_dict.items()
+                    if k not in ("capabilities",)
+                }
+                return LocalMLModelConfig(**filtered_dict)
             else:
                 error_msg = f"モデル '{model_name}' の設定に 'model_path' または 'model_name_on_provider' がありません"
                 logger.error(error_msg)

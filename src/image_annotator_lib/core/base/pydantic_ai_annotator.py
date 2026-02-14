@@ -22,8 +22,8 @@ from pydantic_ai.settings import ModelSettings
 
 from ...exceptions.errors import ConfigurationError
 from ..config import config_registry
-from ..types import AnnotationResult, AnnotationSchema
-from ..utils import logger
+from ..types import AnnotationResult, AnnotationSchema, UnifiedAnnotationResult
+from ..utils import get_model_capabilities, logger
 from .annotator import BaseAnnotator
 
 
@@ -275,7 +275,7 @@ class PydanticAIWebAPIAnnotator(BaseAnnotator):
 
     def predict(
         self, images: list[Image.Image], phash_list: list[str] | None = None
-    ) -> list[AnnotationResult]:
+    ) -> list[UnifiedAnnotationResult]:
         """統一予測インターフェース - 同期ラッパー"""
         if not self.agent:
             raise RuntimeError("Agent not initialized. Use within context manager.")
@@ -295,7 +295,7 @@ class PydanticAIWebAPIAnnotator(BaseAnnotator):
 
     async def predict_async(
         self, images: list[Image.Image], phash_list: list[str] | None = None
-    ) -> list[AnnotationResult]:
+    ) -> list[UnifiedAnnotationResult]:
         """完全非同期実装"""
         if not self.agent:
             raise RuntimeError("Agent not initialized")
@@ -307,13 +307,12 @@ class PydanticAIWebAPIAnnotator(BaseAnnotator):
 
     async def _predict_streaming(
         self, images: list[Image.Image], phash_list: list[str] | None = None
-    ) -> list[AnnotationResult]:
+    ) -> list[UnifiedAnnotationResult]:
         """ストリーミング処理 - リアルタイム結果"""
         results = []
+        capabilities = get_model_capabilities(self.model_name)
 
         for i, image in enumerate(images):
-            phash = phash_list[i] if phash_list and i < len(phash_list) else None
-
             try:
                 binary_content = self._image_to_binary_content(image)
 
@@ -327,61 +326,84 @@ class PydanticAIWebAPIAnnotator(BaseAnnotator):
 
                 if accumulated_response:
                     results.append(
-                        AnnotationResult(
-                            phash=phash,
-                            tags=accumulated_response.tags,
-                            formatted_output=accumulated_response,
-                            error=None,
+                        UnifiedAnnotationResult(
+                            model_name=self.model_name,
+                            capabilities=capabilities,
+                            tags=accumulated_response.tags if hasattr(accumulated_response, "tags") else None,
+                            captions=accumulated_response.captions if hasattr(accumulated_response, "captions") else None,
+                            scores={"score": accumulated_response.score} if hasattr(accumulated_response, "score") and accumulated_response.score else None,
+                            provider_name=getattr(self, "provider_name", None) or "pydantic_ai",
+                            raw_output=accumulated_response.model_dump() if hasattr(accumulated_response, "model_dump") else None,
                         )
                     )
                 else:
                     results.append(
-                        AnnotationResult(
-                            phash=phash, tags=[], formatted_output=None, error="No response from streaming"
+                        UnifiedAnnotationResult(
+                            model_name=self.model_name,
+                            capabilities=capabilities,
+                            error="No response from streaming",
+                            provider_name=getattr(self, "provider_name", None) or "pydantic_ai",
                         )
                     )
 
             except Exception as e:
                 logger.error(f"Streaming prediction failed for {self.model_name}: {e}")
-                results.append(AnnotationResult(phash=phash, tags=[], formatted_output=None, error=str(e)))
+                results.append(
+                    UnifiedAnnotationResult(
+                        model_name=self.model_name,
+                        capabilities=capabilities,
+                        error=str(e),
+                        provider_name=getattr(self, "provider_name", None) or "pydantic_ai",
+                    )
+                )
 
         return results
 
     async def _predict_batch(
         self, images: list[Image.Image], phash_list: list[str] | None = None
-    ) -> list[AnnotationResult]:
+    ) -> list[UnifiedAnnotationResult]:
         """バッチ処理 - 効率性重視"""
         batch_size = self.config.batch_size
         results = []
+        capabilities = get_model_capabilities(self.model_name)
 
         # バッチ分割処理
         for i in range(0, len(images), batch_size):
             batch_images = images[i : i + batch_size]
-            batch_phashes = phash_list[i : i + batch_size] if phash_list else None
 
             # 並列処理タスク準備
             batch_tasks = []
             for j, image in enumerate(batch_images):
-                phash = batch_phashes[j] if batch_phashes and j < len(batch_phashes) else None
                 binary_content = self._image_to_binary_content(image)
 
                 task = self.agent.run(message_history=[binary_content])
-                batch_tasks.append((task, phash))
+                batch_tasks.append(task)
 
             # 並列実行
-            batch_results = await asyncio.gather(*[task for task, _ in batch_tasks], return_exceptions=True)
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
 
             # 結果処理
-            for result, (_, phash) in zip(batch_results, batch_tasks, strict=False):
+            for result in batch_results:
                 if isinstance(result, Exception):
                     logger.error(f"Batch prediction failed for {self.model_name}: {result}")
                     results.append(
-                        AnnotationResult(phash=phash, tags=[], formatted_output=None, error=str(result))
+                        UnifiedAnnotationResult(
+                            model_name=self.model_name,
+                            capabilities=capabilities,
+                            error=str(result),
+                            provider_name=getattr(self, "provider_name", None) or "pydantic_ai",
+                        )
                     )
                 else:
                     results.append(
-                        AnnotationResult(
-                            phash=phash, tags=result.data.tags, formatted_output=result.data, error=None
+                        UnifiedAnnotationResult(
+                            model_name=self.model_name,
+                            capabilities=capabilities,
+                            tags=result.data.tags if hasattr(result.data, "tags") else None,
+                            captions=result.data.captions if hasattr(result.data, "captions") else None,
+                            scores={"score": result.data.score} if hasattr(result.data, "score") and result.data.score else None,
+                            provider_name=getattr(self, "provider_name", None) or "pydantic_ai",
+                            raw_output=result.data.model_dump() if hasattr(result.data, "model_dump") else None,
                         )
                     )
 

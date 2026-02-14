@@ -9,7 +9,8 @@ from PIL import Image
 from ..core.base import TensorflowBaseAnnotator
 from ..core.config import config_registry
 from ..core.model_config import BaseModelConfig
-from ..core.utils import logger
+from ..core.types import TaskCapability, UnifiedAnnotationResult
+from ..core.utils import get_model_capabilities, logger
 
 
 class DeepDanbooruTagger(TensorflowBaseAnnotator):
@@ -105,20 +106,33 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
     # _run_inference は TensorflowBaseAnnotator の実装を使用
 
     # メソッド名を _format_predictions に変更
-    # 戻り値の型を list[dict[str, dict[str, float]]] に変更 (BaseAnnotator._generate_results が解釈できる形式)
-    def _format_predictions(self, raw_output: tf.Tensor) -> list[dict[str, dict[str, float]]]:
-        """モデルの生出力バッチをフォーマットし、各画像のカテゴリ別タグ辞書のリストを返します。"""
+    # 戻り値の型を list[UnifiedAnnotationResult] に変更
+    def _format_predictions(self, raw_output: tf.Tensor) -> list[UnifiedAnnotationResult]:
+        """モデルの生出力バッチをフォーマットし、各画像のUnifiedAnnotationResultリストを返します。"""
         batch_results = []
         # TensorFlow のテンソルを NumPy 配列に変換 (CPU にコピー)
         try:
             predictions_np = raw_output.numpy()
         except Exception as e:
             logger.exception(f"TensorFlow テンソルの NumPy 変換中にエラー: {e}")
-            # エラーが発生した場合、エラー情報を含む辞書を返す
-            return [{"error": f"NumPy変換エラー: {e!s}"}]
+            # エラーが発生した場合、エラーResultを返す
+            return [
+                UnifiedAnnotationResult(
+                    model_name=self.model_name,
+                    capabilities={TaskCapability.TAGS},
+                    error=f"NumPy変換エラー: {e!s}",
+                    framework="tensorflow",
+                )
+            ]
 
         batch_size = predictions_np.shape[0]
         logger.debug(f"Formatting predictions for batch size: {batch_size}")
+
+        # capabilities を取得 (バッチ外で1回のみ)
+        capabilities = get_model_capabilities(self.model_name)
+        if not capabilities:
+            # デフォルトはTAGS capability
+            capabilities = {TaskCapability.TAGS}
 
         # components からタグリストを取得 (存在チェックと None の場合のデフォルト値設定)
         all_tags = self.components.get("all_tags")
@@ -129,14 +143,28 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
         if not all_tags:
             logger.error("タグ候補リスト (all_tags) が components に存在しません。フォーマットできません。")
             # エラーを示す結果を返す
-            return [{"error": "タグ候補リストが見つかりません。"}]
+            return [
+                UnifiedAnnotationResult(
+                    model_name=self.model_name,
+                    capabilities=capabilities,
+                    error="タグ候補リストが見つかりません。",
+                    framework="tensorflow",
+                )
+            ]
 
         if len(all_tags) != predictions_np.shape[1]:
             logger.error(
                 f"タグ候補リストの長さ ({len(all_tags)}) とモデル出力次元 ({predictions_np.shape[1]}) が一致しません。"
             )
             # エラーを示す結果を返す
-            return [{"error": "タグ候補リストとモデル出力の次元が一致しません。"}]
+            return [
+                UnifiedAnnotationResult(
+                    model_name=self.model_name,
+                    capabilities=capabilities,
+                    error="タグ候補リストとモデル出力の次元が一致しません。",
+                    framework="tensorflow",
+                )
+            ]
 
         for i in range(batch_size):
             single_preds = predictions_np[i]  # i番目の画像の予測結果 (NumPy 配列)
@@ -173,7 +201,18 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
                 sorted(formatted["other"].items(), key=lambda item: item[1], reverse=True)
             )
 
-            batch_results.append(formatted)
+            # タグリストを生成 (閾値を適用)
+            tags = self._generate_tags(formatted)
+
+            # UnifiedAnnotationResult を作成
+            result = UnifiedAnnotationResult(
+                model_name=self.model_name,
+                capabilities=capabilities,
+                tags=tags,
+                framework="tensorflow",
+                raw_output=formatted,
+            )
+            batch_results.append(result)
 
         return batch_results
 

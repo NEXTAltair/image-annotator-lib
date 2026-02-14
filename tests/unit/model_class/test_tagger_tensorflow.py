@@ -286,6 +286,8 @@ def test_preprocess_images_multiple_images(mock_config):
 @pytest.mark.fast
 def test_format_predictions_success(mock_config, sample_tags, sample_character_tags, sample_general_tags):
     """Test _format_predictions successfully formats predictions."""
+    from image_annotator_lib.core.types import UnifiedAnnotationResult
+
     tagger = DeepDanbooruTagger("deepdanbooru-v3", config=mock_config)
     tagger.components = {
         "all_tags": sample_tags,
@@ -300,10 +302,11 @@ def test_format_predictions_success(mock_config, sample_tags, sample_character_t
 
     assert isinstance(result, list)
     assert len(result) == 1
-    assert isinstance(result[0], dict)
-    assert "general" in result[0]
-    assert "character" in result[0]
-    assert "other" in result[0]
+    assert isinstance(result[0], UnifiedAnnotationResult)
+    assert result[0].raw_output is not None
+    assert "general" in result[0].raw_output
+    assert "character" in result[0].raw_output
+    assert "other" in result[0].raw_output
 
 
 @pytest.mark.unit
@@ -329,7 +332,7 @@ def test_format_predictions_categorizes_tags_correctly(mock_config):
     result = tagger._format_predictions(predictions)
 
     assert len(result) == 1
-    formatted = result[0]
+    formatted = result[0].raw_output
 
     # Check that character tags are in character category
     assert "char1" in formatted["character"]
@@ -361,7 +364,7 @@ def test_format_predictions_sorts_by_score(
     predictions = tf.constant([[0.3, 0.9, 0.5, 0.7]])  # tag2 > tag4 > tag3 > tag1
 
     result = tagger._format_predictions(predictions)
-    formatted = result[0]
+    formatted = result[0].raw_output
 
     # Check that tags in each category are sorted by score
     for category in ["general", "character", "other"]:
@@ -376,6 +379,8 @@ def test_format_predictions_sorts_by_score(
 @pytest.mark.fast
 def test_format_predictions_batch(mock_config):
     """Test _format_predictions with batch predictions."""
+    from image_annotator_lib.core.types import UnifiedAnnotationResult
+
     tagger = DeepDanbooruTagger("deepdanbooru-v3", config=mock_config)
     tagger.components = {
         "all_tags": ["tag1", "tag2"],
@@ -397,8 +402,9 @@ def test_format_predictions_batch(mock_config):
     assert isinstance(result, list)
     assert len(result) == 3
 
-    for formatted in result:
-        assert isinstance(formatted, dict)
+    for unified_result in result:
+        assert isinstance(unified_result, UnifiedAnnotationResult)
+        formatted = unified_result.raw_output
         assert "general" in formatted
         assert "character" in formatted
         assert "other" in formatted
@@ -408,6 +414,8 @@ def test_format_predictions_batch(mock_config):
 @pytest.mark.fast
 def test_format_predictions_shape_mismatch(mock_config):
     """Test _format_predictions handles tag/prediction count mismatch."""
+    from image_annotator_lib.core.types import UnifiedAnnotationResult
+
     tagger = DeepDanbooruTagger("deepdanbooru-v3", config=mock_config)
     tagger.components = {
         "all_tags": ["tag1", "tag2"],  # 2 tags
@@ -420,15 +428,18 @@ def test_format_predictions_shape_mismatch(mock_config):
 
     result = tagger._format_predictions(predictions)
 
-    # Should return error dict
+    # Should return error result
     assert len(result) == 1
-    assert "error" in result[0]
+    assert isinstance(result[0], UnifiedAnnotationResult)
+    assert result[0].error is not None
 
 
 @pytest.mark.unit
 @pytest.mark.fast
 def test_format_predictions_empty_tags(mock_config):
     """Test _format_predictions handles empty tags list."""
+    from image_annotator_lib.core.types import UnifiedAnnotationResult
+
     tagger = DeepDanbooruTagger("deepdanbooru-v3", config=mock_config)
     tagger.components = {
         "all_tags": [],
@@ -441,7 +452,8 @@ def test_format_predictions_empty_tags(mock_config):
     result = tagger._format_predictions(predictions)
 
     assert len(result) == 1
-    assert "error" in result[0]
+    assert isinstance(result[0], UnifiedAnnotationResult)
+    assert result[0].error is not None
 
 
 # ==============================================================================

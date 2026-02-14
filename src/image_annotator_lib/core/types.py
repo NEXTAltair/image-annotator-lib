@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, Union
 
-from pydantic import BaseModel, Field, SecretStr, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, SecretStr, ValidationInfo, field_validator, model_validator
 
 # Lazy imports for heavy ML libraries (imported only during type checking)
 if TYPE_CHECKING:
@@ -356,12 +356,12 @@ class UnifiedAnnotationResult(BaseModel):
                 raise ValueError(f"scores provided but SCORES not in capabilities: {capabilities}")
         return v
 
-    @field_validator("capabilities")
-    @classmethod
-    def validate_capabilities_not_empty(cls, v: set[TaskCapability]) -> set[TaskCapability]:
-        if not v:
-            raise ValueError("capabilities cannot be empty")
-        return v
+    @model_validator(mode="after")
+    def validate_capabilities_not_empty(self) -> "UnifiedAnnotationResult":
+        """エラー結果以外はcapabilitiesが必須。"""
+        if self.error is None and not self.capabilities:
+            raise ValueError("capabilities cannot be empty for non-error results")
+        return self
 
 
 # === 新しい統一型システム ===

@@ -220,7 +220,7 @@ class TestBaseAnnotator:
 
         annotator = OOMAnnotator()
         results = annotator.predict([Mock(spec=Image.Image)], ["hash"])
-        assert "メモリ不足エラー" in results[0]["error"]
+        assert "メモリ不足エラー" in results[0].error
         mock_logger.error.assert_called()
 
     @pytest.mark.unit
@@ -234,7 +234,7 @@ class TestBaseAnnotator:
 
         annotator = ExcAnnotator()
         results = annotator.predict([Mock(spec=Image.Image)], ["hash"])
-        assert "予期せぬエラー" in results[0]["error"]
+        assert "予期せぬエラー" in results[0].error
         mock_logger.exception.assert_called()
 
 

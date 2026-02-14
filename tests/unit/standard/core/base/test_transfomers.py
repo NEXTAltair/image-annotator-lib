@@ -5,6 +5,7 @@ import pytest
 from PIL import Image
 
 from image_annotator_lib.core.base.transformers import TransformersBaseAnnotator
+from image_annotator_lib.core.types import UnifiedAnnotationResult
 
 
 @pytest.fixture(autouse=True)
@@ -16,6 +17,7 @@ def setup_dummy_model_config():
         "model_path": "/path/to/dummy-model",
         "device": "cpu",
         "class": "DummyTransformersAnnotator",
+        "capabilities": ["tags", "captions"],
     }
     for key, value in config.items():
         config_registry.add_default_setting("dummy-model", key, value)
@@ -94,7 +96,10 @@ def test_format_predictions_batch_decode():
     mock_tensor = MagicMock()
     token_ids = [mock_tensor]
     out = annotator._format_predictions(token_ids)
-    assert out == ["text1"]
+    assert len(out) == 1
+    assert isinstance(out[0], UnifiedAnnotationResult)
+    assert out[0].captions == ["text1"]
+    assert out[0].tags == ["text1"]
     mock_processor.batch_decode.assert_called_once()
 
 
@@ -109,8 +114,11 @@ def test_format_predictions_no_batch_decode():
     processor_mock = DummyCLIPProcessor()
     annotator.components["processor"] = processor_mock
     mock_tensor = MagicMock()
-    with pytest.raises(ValueError):
-        annotator._format_predictions([mock_tensor])
+    # TypeError は内部でキャッチされエラー結果として返される
+    result = annotator._format_predictions([mock_tensor])
+    assert len(result) == 1
+    assert isinstance(result[0], UnifiedAnnotationResult)
+    assert result[0].error is not None
 
 
 # --- _generate_tags ---

@@ -4,8 +4,10 @@ from typing import Any
 
 # PipelineBaseAnnotator をインポート
 from image_annotator_lib.core.base import PipelineBaseAnnotator
+from image_annotator_lib.core import utils
 
 from ..core.utils import logger
+from ..core.types import UnifiedAnnotationResult
 
 
 class AestheticShadow(PipelineBaseAnnotator):
@@ -24,18 +26,19 @@ class AestheticShadow(PipelineBaseAnnotator):
             "displeasing": 0.27,
         }
 
-    def _format_predictions(self, raw_outputs: list[list[dict[str, Any]]]) -> list[dict[str, float]]:
-        """Pipeline の生出力リストから、各画像のhqとlqスコアを辞書形式で返します。
+    def _format_predictions(self, raw_outputs: list[list[dict[str, Any]]]) -> list[UnifiedAnnotationResult]:
+        """Pipeline の生出力リストから、各画像のhqとlqスコアを UnifiedAnnotationResult で返します。
 
         Args:
             raw_outputs: モデルからの生の出力リスト
                 例: [[{'label': 'hq', 'score': 0.9}, {'label': 'lq', 'score': 0.1}], ...]
 
         Returns:
-            list[dict[str, float]]: 各画像のスコアを含む辞書のリスト
-                例: [{'hq': 0.9, 'lq': 0.1}, ...]
+            list[UnifiedAnnotationResult]: 各画像の統一アノテーション結果
         """
-        scores = []
+        capabilities = utils.get_model_capabilities(self.model_name)
+        results = []
+
         for single_output in raw_outputs:
             final_scores: dict[str, float] = {}
 
@@ -44,9 +47,21 @@ class AestheticShadow(PipelineBaseAnnotator):
                 if label in ["hq", "lq"]:
                     final_scores[label] = float(item["score"])
 
-            scores.append(final_scores)
+            # Generate tags based on the formatted scores
+            tags = self._generate_tags(final_scores)
 
-        return scores
+            # Create UnifiedAnnotationResult
+            result = UnifiedAnnotationResult(
+                model_name=self.model_name,
+                capabilities=capabilities,
+                scores=final_scores,
+                tags=tags,
+                framework="pipeline",
+                raw_output={"scores": final_scores}
+            )
+            results.append(result)
+
+        return results
 
     def _generate_tags(self, formatted_score: dict[str, float]) -> list[str]:
         """スコア値に基づいてスコアタグを返します。
@@ -79,11 +94,13 @@ class CafePredictor(PipelineBaseAnnotator):
         logger.debug(f"CafePredictor '{model_name}' initialized with prefix: '{self.score_prefix}'")
 
     # _format_predictions を実装 (PipelineBaseAnnotator の抽象メソッド)
-    def _format_predictions(self, raw_outputs: list[list[dict[str, Any]]]) -> list[float]:
-        """Pipeline の生出力リストから、各画像の最終スコア (float) のリストを生成します。
+    def _format_predictions(self, raw_outputs: list[list[dict[str, Any]]]) -> list[UnifiedAnnotationResult]:
+        """Pipeline の生出力リストから、各画像の最終スコアを UnifiedAnnotationResult で返します。
         'aesthetic' ラベルのスコアを抽出します。
         """
-        scores = []
+        capabilities = utils.get_model_capabilities(self.model_name)
+        results = []
+
         for single_output in raw_outputs:
             # 各画像の出力 (例: [{'label': 'aesthetic', 'score': 0.67}, {'label': 'not_aesthetic', 'score': 0.33}])
             # から 'aesthetic' スコアを抽出するロジック
@@ -91,27 +108,41 @@ class CafePredictor(PipelineBaseAnnotator):
                 logger.warning(
                     f"予期しない single_output の型: {type(single_output)}。スコア 0.0 を使用します。"
                 )
-                scores.append(0.0)
-                continue
+                score = 0.0
+            else:
+                score = 0.0
+                score_found = False
+                for entry in single_output:
+                    if isinstance(entry, dict) and entry.get("label") == "aesthetic" and "score" in entry:
+                        try:
+                            score = float(entry["score"])
+                            score_found = True
+                            break  # aesthetic スコアが見つかったらループを抜ける
+                        except (TypeError, ValueError):
+                            logger.error(f"モデルからの戻り値 'aesthetic' のスコアが不正です: {entry}")
+                            score = 0.0
+                            score_found = True
+                            break
+                if not score_found:
+                    # 'aesthetic' ラベルが見つからなかった場合
+                    logger.warning(f"出力に 'aesthetic' ラベルが見つかりませんでした: {single_output}")
+                    score = 0.0
 
-            score_found = False
-            for entry in single_output:
-                if isinstance(entry, dict) and entry.get("label") == "aesthetic" and "score" in entry:
-                    try:
-                        scores.append(float(entry["score"]))
-                        score_found = True
-                        break  # aesthetic スコアが見つかったらループを抜ける
-                    except (TypeError, ValueError):
-                        logger.error(f"モデルからの戻り値 'aesthetic' のスコアが不正です: {entry}")
-                        scores.append(0.0)
-                        score_found = True
-                        break
-            if not score_found:
-                # 'aesthetic' ラベルが見つからなかった場合
-                logger.warning(f"出力に 'aesthetic' ラベルが見つかりませんでした: {single_output}")
-                scores.append(0.0)
+            # Generate tags based on the score
+            tags = self._generate_tags(score)
 
-        return scores
+            # Create UnifiedAnnotationResult
+            result = UnifiedAnnotationResult(
+                model_name=self.model_name,
+                capabilities=capabilities,
+                scores={"aesthetic": score},
+                tags=tags,
+                framework="pipeline",
+                raw_output={"aesthetic_score": score}
+            )
+            results.append(result)
+
+        return results
 
     # _calculate_score メソッドは _format_predictions に統合されたため削除
 

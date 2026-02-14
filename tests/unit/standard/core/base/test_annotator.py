@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 
 from image_annotator_lib.core.base.annotator import BaseAnnotator
+from image_annotator_lib.core.types import UnifiedAnnotationResult
 from image_annotator_lib.exceptions.errors import OutOfMemoryError
 
 
@@ -19,6 +20,7 @@ def setup_test_model_config():
         "model_path": "/path/to/model",
         "device": "cpu",
         "class": "MockAnnotator",
+        "capabilities": ["tags"],
     }
     for key, value in config.items():
         config_registry.add_default_setting("test_model", key, value)
@@ -194,17 +196,15 @@ class TestBaseAnnotator:
             annotator = MockAnnotator("test_model")
             image = cast(Image.Image, Mock(spec=Image.Image))
 
-            with patch.object(annotator, "_calculate_phash", return_value="test_hash"):
-                result = annotator.predict([image])
+            result = annotator.predict([image])
 
             assert len(result) == 1
-            assert result[0].get("phash") == "test_hash"
-            assert result[0].get("tags") == [
+            assert isinstance(result[0], UnifiedAnnotationResult)
+            assert result[0].tags == [
                 "tag1_formatted_inference_processed_0",
                 "tag2_formatted_inference_processed_0",
             ]
-            assert result[0].get("formatted_output") == "formatted_inference_processed_0"
-            assert result[0].get("error") is None
+            assert result[0].error is None
 
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
@@ -217,22 +217,21 @@ class TestBaseAnnotator:
             annotator = MockAnnotator("test_model")
             images = [cast(Image.Image, Mock(spec=Image.Image)) for _ in range(3)]
 
-            with patch.object(annotator, "_calculate_phash", side_effect=["hash1", "hash2", "hash3"]):
-                result = annotator.predict(images)
+            result = annotator.predict(images)
 
             assert len(result) == 3
             for i, res in enumerate(result):
-                assert res.get("phash") == f"hash{i + 1}"
-                assert res.get("tags") == [
+                assert isinstance(res, UnifiedAnnotationResult)
+                assert res.tags == [
                     f"tag1_formatted_inference_processed_{i}",
                     f"tag2_formatted_inference_processed_{i}",
                 ]
-                assert res.get("error") is None
+                assert res.error is None
 
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_with_provided_phash(self, mock_logger):
-        """事前計算されたハッシュでの予測テスト"""
+        """事前計算されたハッシュでの予測テスト (phashはapi.pyレベルで処理)"""
         with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
             setup_mock_config_registry(
                 mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
@@ -244,8 +243,9 @@ class TestBaseAnnotator:
             result = annotator.predict(images, phash_list)
 
             assert len(result) == 2
-            assert result[0].get("phash") == "provided_hash1"
-            assert result[1].get("phash") == "provided_hash2"
+            for res in result:
+                assert isinstance(res, UnifiedAnnotationResult)
+                assert res.error is None
 
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
@@ -264,10 +264,8 @@ class TestBaseAnnotator:
             result = annotator.predict([image], phash_list)
 
             assert len(result) == 1
-            assert result[0].get("phash") == "test_hash"
-            assert result[0].get("tags") == []
-            assert result[0].get("formatted_output") is None
-            error_msg = result[0].get("error")
+            assert isinstance(result[0], UnifiedAnnotationResult)
+            error_msg = result[0].error
             assert error_msg is not None and "タグ生成エラー" in error_msg
             mock_logger.exception.assert_called_once()
 
@@ -283,16 +281,13 @@ class TestBaseAnnotator:
             annotator._preprocess_images = Mock(side_effect=OutOfMemoryError("Out of memory"))
 
             images = [cast(Image.Image, Mock(spec=Image.Image)) for _ in range(2)]
-            phash_list = ["hash1", "hash2"]
 
-            result = annotator.predict(images, phash_list)
+            result = annotator.predict(images)
 
             assert len(result) == 2
-            for i, res in enumerate(result):
-                assert res.get("phash") == f"hash{i + 1}"
-                assert res.get("tags") == []
-                assert res.get("formatted_output") is None
-                assert res.get("error") == "メモリ不足エラー"
+            for res in result:
+                assert isinstance(res, UnifiedAnnotationResult)
+                assert res.error == "メモリ不足エラー"
 
             mock_logger.error.assert_called_once()
 
@@ -313,10 +308,8 @@ class TestBaseAnnotator:
 
             assert len(result) == 2
             for res in result:
-                assert res.get("phash") is None
-                assert res.get("tags") == []
-                assert res.get("formatted_output") is None
-                error_msg = res.get("error")
+                assert isinstance(res, UnifiedAnnotationResult)
+                error_msg = res.error
                 assert error_msg is not None and "予期せぬエラー" in error_msg
 
             mock_logger.exception.assert_called_once()
@@ -340,8 +333,9 @@ class TestBaseAnnotator:
 
             assert len(result) == 2
             for res in result:
-                assert res.get("formatted_output") == "single_formatted_output"
-                assert res.get("tags") == ["tag1_single_formatted_output", "tag2_single_formatted_output"]
+                assert isinstance(res, UnifiedAnnotationResult)
+                assert res.raw_output == {"formatted_output": "single_formatted_output"}
+                assert res.tags == ["tag1_single_formatted_output", "tag2_single_formatted_output"]
 
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
@@ -414,27 +408,26 @@ class TestBaseAnnotator:
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_phash_list_shorter_than_images(self, mock_logger):
-        """ハッシュリストが画像リストより短い場合のテスト"""
+        """phash_listを渡しても結果は正常に返却されることのテスト (phashはapi.pyで処理)"""
         with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
             setup_mock_config_registry(
                 mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
             )
             annotator = MockAnnotator("test_model")
             images = [cast(Image.Image, Mock(spec=Image.Image)) for _ in range(3)]
-            phash_list = ["hash1", "hash2"]  # 画像より少ない
+            phash_list = ["hash1", "hash2"]
 
-            with patch.object(annotator, "_calculate_phash", return_value="calculated_hash"):
-                result = annotator.predict(images, phash_list)
+            result = annotator.predict(images, phash_list)
 
             assert len(result) == 3
-            assert result[0].get("phash") == "hash1"
-            assert result[1].get("phash") == "hash2"
-            assert result[2].get("phash") == "calculated_hash"  # 計算されたハッシュ
+            for res in result:
+                assert isinstance(res, UnifiedAnnotationResult)
+                assert res.error is None
 
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
     def test_predict_error_with_phash_list(self, mock_logger):
-        """エラー時にハッシュリストが正しく使用されることのテスト"""
+        """エラー時にphash_listを渡してもエラー結果が返ることのテスト"""
         with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
             setup_mock_config_registry(
                 mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
@@ -448,5 +441,6 @@ class TestBaseAnnotator:
             result = annotator.predict(images, phash_list)
 
             assert len(result) == 2
-            assert result[0].get("phash") == "error_hash1"
-            assert result[1].get("phash") == "error_hash2"
+            for res in result:
+                assert isinstance(res, UnifiedAnnotationResult)
+                assert res.error is not None

@@ -14,6 +14,7 @@ import pytest
 import torch
 from PIL import Image
 
+from image_annotator_lib.core.types import UnifiedAnnotationResult
 from image_annotator_lib.model_class.pipeline_scorers import AestheticShadow, CafePredictor
 from image_annotator_lib.model_class.scorer_clip import ImprovedAesthetic, WaifuAesthetic
 
@@ -176,7 +177,7 @@ def mock_capabilities_scorer():
     from image_annotator_lib.core.types import TaskCapability
 
     with patch("image_annotator_lib.core.utils.get_model_capabilities") as mock:
-        mock.return_value = {TaskCapability.SCORES}
+        mock.return_value = {TaskCapability.TAGS, TaskCapability.SCORES}
         yield mock
 
 
@@ -263,20 +264,19 @@ def test_pipeline_scorer_prediction(
 
             # Verify output structure
             assert len(formatted) == 1
-            assert isinstance(formatted[0], dict)
-            assert "hq" in formatted[0]
-            assert "lq" in formatted[0]
+            assert isinstance(formatted[0], UnifiedAnnotationResult)
+            assert "hq" in formatted[0].scores
+            assert "lq" in formatted[0].scores
 
             # Verify score range
-            assert 0.0 <= formatted[0]["hq"] <= 1.0
-            assert 0.0 <= formatted[0]["lq"] <= 1.0
+            assert 0.0 <= formatted[0].scores["hq"] <= 1.0
+            assert 0.0 <= formatted[0].scores["lq"] <= 1.0
 
-            # Verify tag generation
-            tags = scorer._generate_tags(formatted[0])
-            assert isinstance(tags, list)
-            assert len(tags) > 0
+            # Verify tag generation (already included in UnifiedAnnotationResult)
+            assert isinstance(formatted[0].tags, list)
+            assert len(formatted[0].tags) > 0
             # hq=0.85 should be >= 0.71 threshold
-            assert tags[0] == "very aesthetic"
+            assert formatted[0].tags[0] == "very aesthetic"
 
 
 @pytest.mark.unit
@@ -307,15 +307,14 @@ def test_cafe_scorer_prediction(mock_cafe_config, mock_cafe_pipeline, test_image
 
             # Verify output
             assert len(formatted) == 1
-            assert isinstance(formatted[0], float)
-            assert formatted[0] == 0.67
+            assert isinstance(formatted[0], UnifiedAnnotationResult)
+            assert formatted[0].scores["aesthetic"] == 0.67
 
-            # Verify tag generation with prefix
-            tags = scorer._generate_tags(formatted[0])
-            assert len(tags) == 1
-            assert tags[0].startswith("[CAFE]_score_")
+            # Verify tag generation with prefix (already included in UnifiedAnnotationResult)
+            assert len(formatted[0].tags) == 1
+            assert formatted[0].tags[0].startswith("[CAFE]_score_")
             # 0.67 * 10 = 6.7 → int() = 6
-            assert tags[0] == "[CAFE]_score_6"
+            assert formatted[0].tags[0] == "[CAFE]_score_6"
 
 
 @pytest.mark.unit
@@ -397,11 +396,11 @@ def test_scorer_batch_processing(
 
             # Verify all results valid
             for result in formatted:
-                assert isinstance(result, dict)
-                assert "hq" in result
-                assert "lq" in result
-                assert 0.0 <= result["hq"] <= 1.0
-                assert 0.0 <= result["lq"] <= 1.0
+                assert isinstance(result, UnifiedAnnotationResult)
+                assert "hq" in result.scores
+                assert "lq" in result.scores
+                assert 0.0 <= result.scores["hq"] <= 1.0
+                assert 0.0 <= result.scores["lq"] <= 1.0
 
 
 # ==============================================================================

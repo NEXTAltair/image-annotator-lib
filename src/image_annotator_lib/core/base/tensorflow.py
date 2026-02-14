@@ -13,7 +13,7 @@ from ...exceptions.errors import ModelLoadError, OutOfMemoryError
 from ..config import config_registry
 from ..model_config import BaseModelConfig
 from ..model_factory import ModelLoad
-from ..types import TensorFlowComponents
+from ..types import TensorFlowComponents, UnifiedAnnotationResult
 from ..utils import logger
 from .annotator import BaseAnnotator
 
@@ -129,7 +129,7 @@ class TensorflowBaseAnnotator(BaseAnnotator):
         return self._run_inference_tf(processed)
 
     @abstractmethod
-    def _format_predictions(self, raw_output: tf.Tensor) -> list[Any]:
+    def _format_predictions(self, raw_output: tf.Tensor) -> list[UnifiedAnnotationResult]:
         """モデルの生出力バッチをフォーマットします。"""
         raise NotImplementedError("TensorFlow サブクラスは _format_predictions を実装する必要があります。")
 
