@@ -10,7 +10,7 @@ import pytest
 from pydantic_ai import models
 
 from image_annotator_lib.core.base.pydantic_ai_annotator import AdvancedAgentFactory
-from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 
 
 class TestMemoryManagementSimple:
@@ -21,7 +21,7 @@ class TestMemoryManagementSimple:
         """Setup and teardown for each test."""
         # Clear all caches before each test
         AdvancedAgentFactory.clear_cache()
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
 
         # Disable real API requests for PydanticAI models
         models.ALLOW_MODEL_REQUESTS = False
@@ -33,7 +33,7 @@ class TestMemoryManagementSimple:
 
         # Clean up after each test
         AdvancedAgentFactory.clear_cache()
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
         gc.collect()
 
     @pytest.mark.integration
@@ -42,15 +42,15 @@ class TestMemoryManagementSimple:
         """Test basic PydanticAI provider factory operations."""
 
         # Verify factory starts with empty providers
-        assert len(PydanticAIProviderFactory._providers) == 0
+        assert len(PydanticAIAgentFactory._providers) == 0
 
         # Create a provider to test caching
-        provider1 = PydanticAIProviderFactory.get_provider("openai", api_key="test_key")
+        provider1 = PydanticAIAgentFactory.get_provider("openai", api_key="test_key")
         assert provider1 is not None
-        assert len(PydanticAIProviderFactory._providers) == 1
+        assert len(PydanticAIAgentFactory._providers) == 1
 
         # Get same provider again - should be cached
-        provider2 = PydanticAIProviderFactory.get_provider("openai", api_key="test_key")
+        provider2 = PydanticAIAgentFactory.get_provider("openai", api_key="test_key")
         assert provider1 is provider2  # Same instance due to caching
 
     @pytest.mark.integration
@@ -59,17 +59,17 @@ class TestMemoryManagementSimple:
         """Test cache clearing functionality."""
 
         # Verify initial state
-        len(PydanticAIProviderFactory._providers)
+        len(PydanticAIAgentFactory._providers)
 
         # Add a provider to cache
-        PydanticAIProviderFactory.get_provider("openai", api_key="test_key")
-        assert len(PydanticAIProviderFactory._providers) >= 1
+        PydanticAIAgentFactory.get_provider("openai", api_key="test_key")
+        assert len(PydanticAIAgentFactory._providers) >= 1
 
         # Clear cache
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
 
         # Verify cache is cleared
-        assert len(PydanticAIProviderFactory._providers) == 0
+        assert len(PydanticAIAgentFactory._providers) == 0
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -96,7 +96,7 @@ class TestMemoryManagementSimple:
 
         # Clear all caches
         AdvancedAgentFactory.clear_cache()
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
 
         # Force garbage collection
         gc.collect()
@@ -107,7 +107,7 @@ class TestMemoryManagementSimple:
 
         # Verify cache states after cleanup
         assert len(AdvancedAgentFactory._agent_cache) == 0
-        assert len(PydanticAIProviderFactory._providers) == 0
+        assert len(PydanticAIAgentFactory._providers) == 0
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -115,17 +115,17 @@ class TestMemoryManagementSimple:
         """Test provider key generation for caching."""
 
         # Test that different configurations create different cache keys
-        provider1 = PydanticAIProviderFactory.get_provider("openai", api_key="key1")
-        provider2 = PydanticAIProviderFactory.get_provider("openai", api_key="key2")
+        provider1 = PydanticAIAgentFactory.get_provider("openai", api_key="key1")
+        provider2 = PydanticAIAgentFactory.get_provider("openai", api_key="key2")
 
         # Different API keys should create different providers
         assert provider1 is not provider2
-        assert len(PydanticAIProviderFactory._providers) == 2
+        assert len(PydanticAIAgentFactory._providers) == 2
 
         # Same configuration should reuse provider
-        provider3 = PydanticAIProviderFactory.get_provider("openai", api_key="key1")
+        provider3 = PydanticAIAgentFactory.get_provider("openai", api_key="key1")
         assert provider1 is provider3
-        assert len(PydanticAIProviderFactory._providers) == 2
+        assert len(PydanticAIAgentFactory._providers) == 2
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -133,15 +133,15 @@ class TestMemoryManagementSimple:
         """Test different provider types."""
 
         # Test OpenAI provider
-        openai_provider = PydanticAIProviderFactory.get_provider("openai", api_key="test_key")
+        openai_provider = PydanticAIAgentFactory.get_provider("openai", api_key="test_key")
         assert openai_provider is not None
 
         # Test Anthropic provider
-        anthropic_provider = PydanticAIProviderFactory.get_provider("anthropic", api_key="test_key")
+        anthropic_provider = PydanticAIAgentFactory.get_provider("anthropic", api_key="test_key")
         assert anthropic_provider is not None
 
         # Test Google provider
-        google_provider = PydanticAIProviderFactory.get_provider("google", api_key="test_key")
+        google_provider = PydanticAIAgentFactory.get_provider("google", api_key="test_key")
         assert google_provider is not None
 
         # Verify they are different instances
@@ -150,4 +150,4 @@ class TestMemoryManagementSimple:
         assert anthropic_provider is not google_provider
 
         # Verify all are cached
-        assert len(PydanticAIProviderFactory._providers) == 3
+        assert len(PydanticAIAgentFactory._providers) == 3

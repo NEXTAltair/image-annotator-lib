@@ -10,7 +10,7 @@ import pytest
 
 from image_annotator_lib.api import annotate
 from image_annotator_lib.core.provider_manager import ProviderManager
-from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 from image_annotator_lib.core.types import AnnotationResult
 from image_annotator_lib.exceptions.errors import ModelLoadError, WebApiError
 
@@ -21,9 +21,9 @@ class TestErrorHandlingAndFallbackIntegration:
     @pytest.fixture(autouse=True)
     def setup_and_teardown(self):
         """Setup and teardown for each test."""
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
         yield
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
 
     @pytest.fixture
     def mixed_model_configs(self, managed_config_registry):
@@ -261,7 +261,7 @@ class TestErrorHandlingAndFallbackIntegration:
     def test_invalid_image_data_handling(self, mixed_model_configs):
         """Test handling of invalid or corrupted image data."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             mock_agent = MagicMock()
             mock_agent.run.return_value = MagicMock(data={"tags": ["should_not_reach"]})
@@ -338,7 +338,7 @@ class TestErrorHandlingAndFallbackIntegration:
     def test_cascading_failure_prevention(self, mixed_model_configs, lightweight_test_images):
         """Test that failures in one component don't cascade to others."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             with patch("image_annotator_lib.api._create_annotator_instance") as mock_load_model:
                 # Create a scenario where one failure type doesn't affect others
@@ -474,7 +474,7 @@ class TestErrorHandlingAndFallbackIntegration:
     def test_system_resilience_under_stress(self, mixed_model_configs, lightweight_test_images):
         """Test system resilience under multiple concurrent error conditions."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             with patch("image_annotator_lib.api._create_annotator_instance") as mock_load_model:
                 # Create a stress scenario with multiple error types

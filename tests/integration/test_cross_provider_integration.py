@@ -335,7 +335,7 @@ class TestConfigurationConsistency:
         """Test API key change creates new provider instance.
 
         REAL components:
-        - Real PydanticAIProviderFactory._providers cache
+        - Real PydanticAIAgentFactory._providers cache
         - Real provider key generation (includes API key)
 
         Scenario:
@@ -348,20 +348,20 @@ class TestConfigurationConsistency:
         - API key change creates new instance
         - Old and new instances have different IDs
         """
-        from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+        from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 
         # Act: Get provider with first API key
-        provider1 = PydanticAIProviderFactory.get_provider("openai", api_key="test_key_v1")
+        provider1 = PydanticAIAgentFactory.get_provider("openai", api_key="test_key_v1")
 
         # Act: Get provider with different API key
-        provider2 = PydanticAIProviderFactory.get_provider("openai", api_key="test_key_v2")
+        provider2 = PydanticAIAgentFactory.get_provider("openai", api_key="test_key_v2")
 
         # Assert: Different instances
         assert provider1 is not provider2, "異なるAPI keyでは異なるProviderインスタンス"
         assert id(provider1) != id(provider2), "Object IDが異なる"
 
         # Assert: Both providers cached
-        assert len(PydanticAIProviderFactory._providers) >= 2, "両Providerがキャッシュ済み"
+        assert len(PydanticAIAgentFactory._providers) >= 2, "両Providerがキャッシュ済み"
 
 
 # ==============================================================================

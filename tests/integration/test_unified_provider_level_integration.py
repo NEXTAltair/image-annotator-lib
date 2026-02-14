@@ -105,11 +105,11 @@ class TestProviderManagerIntegration:
 
 
 class TestProviderFactoryIntegration:
-    """PydanticAIProviderFactory統合テスト"""
+    """PydanticAIAgentFactory統合テスト"""
 
     def test_factory_required_methods(self):
         """Factory必要メソッド確認"""
-        from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+        from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 
         required_factory_methods = [
             "get_provider",
@@ -120,7 +120,7 @@ class TestProviderFactoryIntegration:
         ]
 
         for method in required_factory_methods:
-            assert hasattr(PydanticAIProviderFactory, method), f"Factory method {method} not found"
+            assert hasattr(PydanticAIAgentFactory, method), f"Factory method {method} not found"
 
     def test_mixin_required_methods(self):
         """Mixin必要メソッド確認"""

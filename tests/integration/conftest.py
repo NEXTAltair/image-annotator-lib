@@ -11,7 +11,7 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from image_annotator_lib.core.config import config_registry
-from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -30,9 +30,9 @@ def clear_pydantic_ai_cache():
     Automatically clear PydanticAI cache before and after each test
     to ensure test isolation.
     """
-    PydanticAIProviderFactory.clear_cache()
+    PydanticAIAgentFactory.clear_cache()
     yield
-    PydanticAIProviderFactory.clear_cache()
+    PydanticAIAgentFactory.clear_cache()
 
 
 @pytest.fixture(scope="function")

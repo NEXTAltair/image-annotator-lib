@@ -16,7 +16,7 @@ from image_annotator_lib.core.base.pydantic_ai_annotator import (
     AdvancedAgentFactory,
     PydanticAIWebAPIAnnotator,
 )
-from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 from image_annotator_lib.core.types import AnnotationSchema
 
 
@@ -32,7 +32,7 @@ class TestMemoryManagementIntegration:
 
         # 1. Clear all caches before each test
         AdvancedAgentFactory.clear_cache()
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
 
         # 2. Close any existing event loops
         try:
@@ -67,7 +67,7 @@ class TestMemoryManagementIntegration:
         # Clean up after each test
         # 1. Clear all caches
         AdvancedAgentFactory.clear_cache()
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
 
         # 2. Clean up test configurations again
         test_configs = [
@@ -165,10 +165,10 @@ class TestMemoryManagementIntegration:
                 MockAgent.side_effect = mock_agents
 
                 # Create agents for different models/keys
-                agent1 = PydanticAIProviderFactory.get_cached_agent("model1", "gpt-4o-mini", "key1")
-                agent2 = PydanticAIProviderFactory.get_cached_agent("model2", "gpt-4o-mini", "key2")
-                agent3 = PydanticAIProviderFactory.get_cached_agent("model3", "claude-3-sonnet", "key3")
-                agent4 = PydanticAIProviderFactory.get_cached_agent("model4", "claude-3-sonnet", "key4")
+                agent1 = PydanticAIAgentFactory.get_cached_agent("model1", "gpt-4o-mini", "key1")
+                agent2 = PydanticAIAgentFactory.get_cached_agent("model2", "gpt-4o-mini", "key2")
+                agent3 = PydanticAIAgentFactory.get_cached_agent("model3", "claude-3-sonnet", "key3")
+                agent4 = PydanticAIAgentFactory.get_cached_agent("model4", "claude-3-sonnet", "key4")
 
                 # Each should be unique (different cache keys)
                 assert agent1 is not agent2
@@ -188,7 +188,7 @@ class TestMemoryManagementIntegration:
                 assert agent4 is not None
 
         finally:
-            PydanticAIProviderFactory.clear_cache()
+            PydanticAIAgentFactory.clear_cache()
 
     def test_pydantic_ai_annotator_memory_efficiency(self, test_images, mock_annotation_result):
         """Test PydanticAIWebAPIAnnotator memory efficiency."""
@@ -256,20 +256,20 @@ class TestMemoryManagementIntegration:
             config = AnnotationAgentConfig(model_id="test-model", name="test")
             AdvancedAgentFactory.create_optimized_agent(config)
 
-            # Add items to PydanticAIProviderFactory cache
-            PydanticAIProviderFactory.get_provider("openai", api_key="test")
+            # Add items to PydanticAIAgentFactory cache
+            PydanticAIAgentFactory.get_provider("openai", api_key="test")
 
             # Verify both caches have items
             assert len(AdvancedAgentFactory._agent_cache) > 0
-            assert len(PydanticAIProviderFactory._providers) > 0
+            assert len(PydanticAIAgentFactory._providers) > 0
 
             # Clear both caches
             AdvancedAgentFactory.clear_cache()
-            PydanticAIProviderFactory.clear_cache()
+            PydanticAIAgentFactory.clear_cache()
 
             # Verify cleanup
             assert len(AdvancedAgentFactory._agent_cache) == 0
-            assert len(PydanticAIProviderFactory._providers) == 0
+            assert len(PydanticAIAgentFactory._providers) == 0
 
     def test_annotation_api_with_memory_management(self, test_images):
         """Test that the main annotate API works with memory management."""
@@ -318,7 +318,7 @@ class TestMemoryManagementIntegration:
         def create_providers():
             try:
                 for i in range(5):
-                    provider = PydanticAIProviderFactory.get_provider("openai", api_key=f"key_{i}")
+                    provider = PydanticAIAgentFactory.get_provider("openai", api_key=f"key_{i}")
                     results.append(provider)
                     time.sleep(0.01)  # Small delay to simulate real usage
             except Exception as e:
@@ -351,5 +351,5 @@ class TestMemoryManagementIntegration:
         assert len(results) > 0
 
         # Verify caches are populated
-        assert len(PydanticAIProviderFactory._providers) > 0
+        assert len(PydanticAIAgentFactory._providers) > 0
         assert len(AdvancedAgentFactory._agent_cache) > 0

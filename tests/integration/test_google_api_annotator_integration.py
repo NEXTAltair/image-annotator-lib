@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from image_annotator_lib.core.provider_manager import ProviderManager
-from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 
 # Note: No longer importing custom API exceptions - using PydanticAI unified error handling
 from image_annotator_lib.model_class.annotator_webapi.google_api import GoogleApiAnnotator
@@ -21,9 +21,9 @@ class TestGoogleApiAnnotatorIntegration:
     @pytest.fixture(autouse=True)
     def setup_and_teardown(self):
         """Setup and teardown for each test."""
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
         yield
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
 
     @pytest.fixture
     def google_annotator_config(self, managed_config_registry):
@@ -59,7 +59,7 @@ class TestGoogleApiAnnotatorIntegration:
     def test_context_manager_integration(self, google_annotator):
         """Test context manager setup and teardown."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             mock_agent = MagicMock()
             mock_get_agent.return_value = mock_agent
@@ -210,7 +210,7 @@ class TestGoogleApiAnnotatorIntegration:
     def test_google_api_generic_error_handling(self, google_annotator, lightweight_test_images):
         """Test handling of generic Google API errors."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             mock_agent = MagicMock()
             mock_agent.run = AsyncMock(side_effect=Exception("unknown error"))
@@ -230,7 +230,7 @@ class TestGoogleApiAnnotatorIntegration:
     def test_batch_processing_with_mixed_results(self, google_annotator, lightweight_test_images):
         """Test batch processing with some successes and some failures."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             call_count = 0
 
@@ -270,7 +270,7 @@ class TestGoogleApiAnnotatorIntegration:
     def test_image_preprocessing_integration(self, google_annotator, lightweight_test_images):
         """Test image preprocessing to binary content."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             # Track what gets passed to the agent
             captured_inputs = []
@@ -348,7 +348,7 @@ class TestGoogleApiAnnotatorIntegration:
     def test_provider_manager_integration(self, google_annotator_config, lightweight_test_images):
         """Test integration with Provider Manager."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             mock_agent = MagicMock()
             mock_response = MagicMock()
@@ -377,7 +377,7 @@ class TestGoogleApiAnnotatorIntegration:
     def test_rate_limiting_integration(self, google_annotator, lightweight_test_images):
         """Test rate limiting functionality."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             with patch.object(google_annotator, "_wait_for_rate_limit") as mock_rate_limit:
                 mock_agent = MagicMock()
@@ -402,7 +402,7 @@ class TestGoogleApiAnnotatorIntegration:
     ):
         """Test model ID override functionality through Provider Manager."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             captured_model_id = None
 
@@ -433,7 +433,7 @@ class TestGoogleApiAnnotatorIntegration:
     def test_concurrent_requests_handling(self, google_annotator, lightweight_test_images):
         """Test handling of concurrent requests to Google API."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             concurrent_calls = []
 

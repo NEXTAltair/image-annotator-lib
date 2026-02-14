@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from image_annotator_lib.core.provider_manager import ProviderManager
-from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 
 
 class TestPydanticAIFactoryApiKeyManagement:
@@ -26,7 +26,7 @@ class TestPydanticAIFactoryApiKeyManagement:
         from image_annotator_lib.core.config import config_registry
 
         # 1. Clear all caches before each test
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
         AdvancedAgentFactory.clear_cache()
 
         # 2. Close any existing event loops
@@ -61,7 +61,7 @@ class TestPydanticAIFactoryApiKeyManagement:
 
         # Clean up after each test
         # 1. Clear all caches
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
         AdvancedAgentFactory.clear_cache()
 
         # 2. Clean up test configurations again
@@ -148,7 +148,7 @@ class TestPydanticAIFactoryApiKeyManagement:
 
                 # Test OpenAI key from environment
                 try:
-                    agent = PydanticAIProviderFactory.get_cached_agent(
+                    agent = PydanticAIAgentFactory.get_cached_agent(
                         "test_model",
                         "gpt-4o-mini",
                         None,  # No explicit API key - should use environment
@@ -172,7 +172,7 @@ class TestPydanticAIFactoryApiKeyManagement:
 
                 # Test with config-provided API key
                 try:
-                    agent = PydanticAIProviderFactory.get_cached_agent(
+                    agent = PydanticAIAgentFactory.get_cached_agent(
                         "openai_test_model", "gpt-4o-mini", "test-openai-key-from-config"
                     )
                     assert agent is not None
@@ -202,7 +202,7 @@ class TestPydanticAIFactoryApiKeyManagement:
                 explicit_key = "explicit-api-key-override"
 
                 try:
-                    agent = PydanticAIProviderFactory.get_cached_agent(
+                    agent = PydanticAIAgentFactory.get_cached_agent(
                         "test_model", "gpt-4o-mini", explicit_key
                     )
 
@@ -242,7 +242,7 @@ class TestPydanticAIFactoryApiKeyManagement:
                 try:
                     # This should raise an appropriate error about missing API key
                     with pytest.raises(Exception) as exc_info:
-                        PydanticAIProviderFactory.get_cached_agent(
+                        PydanticAIAgentFactory.get_cached_agent(
                             "test_model",
                             "gpt-4o-mini",
                             None,  # No API key provided
@@ -290,7 +290,7 @@ class TestPydanticAIFactoryApiKeyManagement:
                     mock_provider_infer.return_value = mock_provider
 
                     try:
-                        agent = PydanticAIProviderFactory.get_cached_agent(
+                        agent = PydanticAIAgentFactory.get_cached_agent(
                             f"test_{provider_name}_model",
                             model_id,
                             None,  # Should use environment variable
@@ -315,17 +315,17 @@ class TestPydanticAIFactoryApiKeyManagement:
                 mock_provider_infer.return_value = mock_provider
 
                 # Get agent with first API key
-                agent1 = PydanticAIProviderFactory.get_cached_agent(
+                agent1 = PydanticAIAgentFactory.get_cached_agent(
                     "test_model", "gpt-4o-mini", "api-key-1"
                 )
 
                 # Get agent with different API key - should be different instance
-                agent2 = PydanticAIProviderFactory.get_cached_agent(
+                agent2 = PydanticAIAgentFactory.get_cached_agent(
                     "test_model", "gpt-4o-mini", "api-key-2"
                 )
 
                 # Get agent with same API key as first - should be cached instance
-                agent3 = PydanticAIProviderFactory.get_cached_agent(
+                agent3 = PydanticAIAgentFactory.get_cached_agent(
                     "test_model", "gpt-4o-mini", "api-key-1"
                 )
 
@@ -354,7 +354,7 @@ class TestPydanticAIFactoryApiKeyManagement:
                 }
 
                 try:
-                    agent = PydanticAIProviderFactory.create_openrouter_agent(
+                    agent = PydanticAIAgentFactory.create_openrouter_agent(
                         "openrouter_test_model",
                         "openrouter:anthropic/claude-3.5-sonnet",
                         "test-openrouter-key",
@@ -372,7 +372,7 @@ class TestPydanticAIFactoryApiKeyManagement:
     ):
         """Test ProviderManager integration with proper API key management."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             # Mock successful agent creation
             mock_agent = MagicMock()
@@ -427,15 +427,15 @@ class TestPydanticAIFactoryApiKeyManagement:
                 mock_provider_infer.return_value = mock_provider
 
                 # Create agent with first API key
-                agent1 = PydanticAIProviderFactory.get_cached_agent(
+                agent1 = PydanticAIAgentFactory.get_cached_agent(
                     "test_model", "gpt-4o-mini", "original-api-key"
                 )
 
                 # Clear cache explicitly
-                PydanticAIProviderFactory.clear_cache()
+                PydanticAIAgentFactory.clear_cache()
 
                 # Create agent with different API key after cache clear
-                agent2 = PydanticAIProviderFactory.get_cached_agent(
+                agent2 = PydanticAIAgentFactory.get_cached_agent(
                     "test_model", "gpt-4o-mini", "new-api-key"
                 )
 

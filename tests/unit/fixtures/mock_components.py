@@ -103,7 +103,7 @@ def mock_provider_manager():
 @pytest.fixture
 def mock_pydantic_ai_factory():
     """PydanticAI Factory のモック"""
-    with patch("image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory") as mock:
+    with patch("image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory") as mock:
         agent_mock = MagicMock()
         agent_mock.run_sync.return_value = MagicMock(data={"tags": ["test"], "caption": "test"})
 

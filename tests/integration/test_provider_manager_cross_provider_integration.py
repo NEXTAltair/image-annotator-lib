@@ -10,7 +10,7 @@ import pytest
 from PIL import Image
 
 from image_annotator_lib.core.provider_manager import ProviderManager
-from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 
 
 class TestProviderManagerCrossProviderIntegration:
@@ -20,10 +20,10 @@ class TestProviderManagerCrossProviderIntegration:
     def setup_and_teardown(self):
         """Setup and teardown for each test."""
         # Clear provider caches before each test
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
         yield
         # Clear after test
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
 
     @pytest.fixture
     def multi_provider_configs(self, managed_config_registry):
@@ -61,7 +61,7 @@ class TestProviderManagerCrossProviderIntegration:
     def test_sequential_multi_provider_usage(self, multi_provider_configs, lightweight_test_images):
         """Test sequential usage of different providers."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             # Mock successful agent creation and inference for all providers
             def mock_agent_creation(model_name, api_model_id, api_key, config_data=None):
@@ -343,7 +343,7 @@ class TestProviderManagerCrossProviderIntegration:
     def test_openrouter_provider_integration(self, multi_provider_configs, lightweight_test_images):
         """Test OpenRouter as a special case provider with custom handling."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.create_openrouter_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.create_openrouter_agent"
         ) as mock_create_openrouter:
             mock_agent = MagicMock()
             # Explicitly set AsyncMock for async run method
@@ -467,7 +467,7 @@ class TestProviderManagerCrossProviderIntegration:
             managed_config_registry.set(model_name, config)
 
             with patch(
-                "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+                "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
             ) as mock_get_agent:
                 mock_get_agent.side_effect = Exception("Configuration validation failed")
 
@@ -501,7 +501,7 @@ class TestProviderManagerCrossProviderIntegration:
         """
         Verify that agents are reused when using the same provider with identical configuration.
 
-        Tests PydanticAIProviderFactory's caching logic to ensure Agent instances
+        Tests PydanticAIAgentFactory's caching logic to ensure Agent instances
         are properly reused across multiple inference calls with same model_name, api_model_id, and api_key.
         """
         from unittest.mock import MagicMock, patch
@@ -510,7 +510,7 @@ class TestProviderManagerCrossProviderIntegration:
         managed_config_registry.set(model_name, {"provider": "openai", "api_key": "test_cache_key"})
 
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             # Create single mock agent that will be reused
             mock_agent = MagicMock()
@@ -564,7 +564,7 @@ class TestProviderManagerCrossProviderIntegration:
         managed_config_registry.set("model_b", {"provider": "openai", "api_key": "key_b"})
 
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             # Create new mock agent for each call
             mock_get_agent.side_effect = lambda **kwargs: MagicMock()
@@ -650,7 +650,7 @@ class TestProviderManagerCrossProviderIntegration:
             return mock_agent
 
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent",
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent",
             side_effect=mock_get_cached_agent_impl,
         ):
             with patch("image_annotator_lib.core.provider_manager.calculate_phash") as mock_phash:
@@ -715,7 +715,7 @@ class TestProviderManagerCrossProviderIntegration:
         managed_config_registry.set(model_name, {"provider": "openai", "api_key": "test_override_key"})
 
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             # Track which api_model_id was used for each call
             api_model_ids_used = []
@@ -782,7 +782,7 @@ class TestProviderManagerCrossProviderIntegration:
             managed_config_registry.set(model_name, {"provider": provider, "api_key": f"key_{provider}"})
 
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             # Create consistent AnnotationSchema response
             from image_annotator_lib.core.types import AnnotationSchema
@@ -871,7 +871,7 @@ class TestProviderManagerCrossProviderIntegration:
         )
 
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             # Mock agent with proper structure
             mock_agent = MagicMock()

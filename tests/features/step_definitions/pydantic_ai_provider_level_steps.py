@@ -11,7 +11,7 @@ from pytest_bdd import given, parsers, then, when
 
 from image_annotator_lib.api import annotate
 from image_annotator_lib.core.provider_manager import ProviderManager
-from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ def run_provider_level_annotation_with_two_models(model_1, model_2, single_image
     logger.info(f"Provider-level アノテーション実行: {model_1}, {model_2}")
 
     # 実行前にプロバイダーキャッシュをクリア
-    PydanticAIProviderFactory.clear_cache()
+    PydanticAIAgentFactory.clear_cache()
 
     # 2つのモデルでアノテーション実行
     result = annotate(images_list=[single_image], model_name_list=[model_1, model_2])
@@ -163,7 +163,7 @@ def run_provider_determination_test():
 @when("同一設定で複数回 Agent を取得する", target_fixture="agent_cache_results")
 def get_agents_multiple_times():
     """同一設定で複数回Agentを取得してキャッシュ動作を確認"""
-    PydanticAIProviderFactory.clear_cache()
+    PydanticAIAgentFactory.clear_cache()
 
     # 同一設定で3回Agent取得
     model_name = "test-openai-model"
@@ -172,12 +172,12 @@ def get_agents_multiple_times():
 
     agents = []
     for i in range(3):
-        agent = PydanticAIProviderFactory.get_cached_agent(model_name, api_model_id, api_key)
+        agent = PydanticAIAgentFactory.get_cached_agent(model_name, api_model_id, api_key)
         agents.append(agent)
         logger.info(f"Agent取得 #{i + 1}: {id(agent)}")
 
     # プロバイダーキャッシュ状況も確認
-    provider_cache_size = len(PydanticAIProviderFactory._providers)
+    provider_cache_size = len(PydanticAIAgentFactory._providers)
 
     return {"agents": agents, "provider_cache_size": provider_cache_size}
 
@@ -230,7 +230,7 @@ def run_concurrent_provider_level_annotation(multiple_images):
     start_time = time.time()
 
     # プロバイダーキャッシュクリア
-    PydanticAIProviderFactory.clear_cache()
+    PydanticAIAgentFactory.clear_cache()
 
     result = annotate(images_list=multiple_images, model_name_list=models)
 
@@ -238,7 +238,7 @@ def run_concurrent_provider_level_annotation(multiple_images):
     processing_time = end_time - start_time
 
     # プロバイダーキャッシュ使用状況確認
-    provider_cache_size = len(PydanticAIProviderFactory._providers)
+    provider_cache_size = len(PydanticAIAgentFactory._providers)
 
     return {
         "result": result,
@@ -280,7 +280,7 @@ def both_models_return_valid_results(provider_level_annotation_result):
 def same_provider_instance_shared():
     """同一プロバイダーインスタンスが共有されていることを確認"""
     # プロバイダーキャッシュに適切な数のインスタンスがあることを確認
-    provider_cache_size = len(PydanticAIProviderFactory._providers)
+    provider_cache_size = len(PydanticAIAgentFactory._providers)
 
     # 同一プロバイダーの複数モデルは1つのプロバイダーインスタンスを共有すべき
     assert provider_cache_size >= 1, "プロバイダーインスタンスが作成されていません"
@@ -358,7 +358,7 @@ def provider_instances_shared(agent_cache_results):
 def memory_usage_optimized():
     """メモリ使用量が最適化されていることを確認"""
     # プロバイダーキャッシュが適切に管理されていることを確認
-    provider_cache_size = len(PydanticAIProviderFactory._providers)
+    provider_cache_size = len(PydanticAIAgentFactory._providers)
     assert provider_cache_size <= 10, "プロバイダーキャッシュが過大になっています"
 
     logger.info(f"メモリ最適化確認 - プロバイダーキャッシュサイズ: {provider_cache_size}")

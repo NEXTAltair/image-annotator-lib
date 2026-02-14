@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 
 
 @pytest.fixture
@@ -13,13 +13,13 @@ def manage_factory_cache():
 
     # Event loop操作を削除
     # キャッシュクリアのみ実行
-    PydanticAIProviderFactory.clear_cache()
+    PydanticAIAgentFactory.clear_cache()
     AdvancedAgentFactory.clear_cache()
 
     yield
 
     # 後処理もキャッシュクリアのみ
-    PydanticAIProviderFactory.clear_cache()
+    PydanticAIAgentFactory.clear_cache()
     AdvancedAgentFactory.clear_cache()
 
 
@@ -41,8 +41,8 @@ class TestPydanticAIFactoryIntegration:
         MockAgent.return_value = mock_agent_instance
 
         # Create agents with same configuration - should return same Agent instance
-        agent1 = PydanticAIProviderFactory.get_cached_agent("model1", "openai:gpt-4", "same_key")
-        agent2 = PydanticAIProviderFactory.get_cached_agent("model1", "openai:gpt-4", "same_key")
+        agent1 = PydanticAIAgentFactory.get_cached_agent("model1", "openai:gpt-4", "same_key")
+        agent2 = PydanticAIAgentFactory.get_cached_agent("model1", "openai:gpt-4", "same_key")
 
         # Same model name and same configuration should return cached Agent
         assert agent1 is agent2, "同じ設定では同じAgentインスタンスが返されるべき"
@@ -59,13 +59,13 @@ class TestPydanticAIFactoryIntegration:
         MockAgent.side_effect = lambda *args, **kwargs: MagicMock()
 
         # Create agents with different model names - should create different Agents
-        agent1 = PydanticAIProviderFactory.get_cached_agent("model1", "openai:gpt-4", "key1")
-        agent2 = PydanticAIProviderFactory.get_cached_agent("model2", "openai:gpt-4", "key2")
+        agent1 = PydanticAIAgentFactory.get_cached_agent("model1", "openai:gpt-4", "key1")
+        agent2 = PydanticAIAgentFactory.get_cached_agent("model2", "openai:gpt-4", "key2")
 
         # Different model names should create different Agent instances
         assert agent1 is not agent2, "異なるモデル名では異なるAgentが返されるべき"
 
-    @patch("image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_provider")
+    @patch("image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_provider")
     @patch("image_annotator_lib.core.pydantic_ai_factory.Agent")
     @patch("image_annotator_lib.core.pydantic_ai_factory.OpenAIChatModel")
     @patch("image_annotator_lib.core.pydantic_ai_factory._is_test_environment", return_value=False)
@@ -90,7 +90,7 @@ class TestPydanticAIFactoryIntegration:
         config = {"referer": "http://my-app.com", "app_name": "My Great App"}
 
         # Execute
-        agent = PydanticAIProviderFactory.get_cached_agent(
+        agent = PydanticAIAgentFactory.get_cached_agent(
             "openrouter_model", "openrouter:some/model", "key1", config_data=config
         )
 
@@ -120,15 +120,15 @@ class TestPydanticAIFactoryIntegration:
         """
         Tests provider name extraction from model IDs.
         """
-        assert PydanticAIProviderFactory._extract_provider_name("openai:gpt-4") == "openai"
-        assert PydanticAIProviderFactory._extract_provider_name("anthropic:claude-3") == "anthropic"
-        assert PydanticAIProviderFactory._extract_provider_name("google:gemini-pro") == "google"
-        assert PydanticAIProviderFactory._extract_provider_name("openrouter:mistral/7b") == "openrouter"
+        assert PydanticAIAgentFactory._extract_provider_name("openai:gpt-4") == "openai"
+        assert PydanticAIAgentFactory._extract_provider_name("anthropic:claude-3") == "anthropic"
+        assert PydanticAIAgentFactory._extract_provider_name("google:gemini-pro") == "google"
+        assert PydanticAIAgentFactory._extract_provider_name("openrouter:mistral/7b") == "openrouter"
 
         # Auto-detection tests
-        assert PydanticAIProviderFactory._extract_provider_name("gpt-4") == "openai"
-        assert PydanticAIProviderFactory._extract_provider_name("claude-3-sonnet") == "anthropic"
-        assert PydanticAIProviderFactory._extract_provider_name("gemini-pro") == "google"
+        assert PydanticAIAgentFactory._extract_provider_name("gpt-4") == "openai"
+        assert PydanticAIAgentFactory._extract_provider_name("claude-3-sonnet") == "anthropic"
+        assert PydanticAIAgentFactory._extract_provider_name("gemini-pro") == "google"
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -137,17 +137,17 @@ class TestPydanticAIFactoryIntegration:
         Tests that cache clearing works correctly.
         """
         # Add some providers to cache
-        PydanticAIProviderFactory.get_provider("openai", api_key="test_key")
-        PydanticAIProviderFactory.get_provider("anthropic", api_key="test_key")
+        PydanticAIAgentFactory.get_provider("openai", api_key="test_key")
+        PydanticAIAgentFactory.get_provider("anthropic", api_key="test_key")
 
         # Verify providers are cached
-        assert len(PydanticAIProviderFactory._providers) >= 2
+        assert len(PydanticAIAgentFactory._providers) >= 2
 
         # Clear cache
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
 
         # Verify cache is cleared
-        assert len(PydanticAIProviderFactory._providers) == 0
+        assert len(PydanticAIAgentFactory._providers) == 0
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -159,13 +159,13 @@ class TestPydanticAIFactoryIntegration:
 
         for provider_name in supported_providers:
             try:
-                provider = PydanticAIProviderFactory.get_provider(provider_name, api_key="test_key")
+                provider = PydanticAIAgentFactory.get_provider(provider_name, api_key="test_key")
                 assert provider is not None
             except Exception as e:
                 pytest.fail(f"Failed to create {provider_name} provider: {e}")
 
         # Verify all providers are cached
-        assert len(PydanticAIProviderFactory._providers) == len(supported_providers)
+        assert len(PydanticAIAgentFactory._providers) == len(supported_providers)
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
@@ -174,7 +174,7 @@ class TestPydanticAIFactoryIntegration:
         Tests that unsupported provider names raise appropriate errors.
         """
         with pytest.raises(ValueError, match="Unsupported provider: invalid_provider"):
-            PydanticAIProviderFactory.get_provider("invalid_provider", api_key="test_key")
+            PydanticAIAgentFactory.get_provider("invalid_provider", api_key="test_key")
 
     # ========================================
     # Category 1: Agent Caching Logic Tests
@@ -196,10 +196,10 @@ class TestPydanticAIFactoryIntegration:
         MockAgent.return_value = mock_agent_instance
 
         # Execute: Request agents with the same configuration twice
-        agent1 = PydanticAIProviderFactory.get_cached_agent(
+        agent1 = PydanticAIAgentFactory.get_cached_agent(
             model_name="test_model", api_model_id="openai:gpt-4", api_key="test_key_123"
         )
-        agent2 = PydanticAIProviderFactory.get_cached_agent(
+        agent2 = PydanticAIAgentFactory.get_cached_agent(
             model_name="test_model", api_model_id="openai:gpt-4", api_key="test_key_123"
         )
 
@@ -225,16 +225,16 @@ class TestPydanticAIFactoryIntegration:
         MockAgent.side_effect = lambda *args, **kwargs: MagicMock()
 
         # Execute: Request agents with different configurations
-        agent1 = PydanticAIProviderFactory.get_cached_agent(
+        agent1 = PydanticAIAgentFactory.get_cached_agent(
             model_name="model_a", api_model_id="openai:gpt-4", api_key="key_1"
         )
-        agent2 = PydanticAIProviderFactory.get_cached_agent(
+        agent2 = PydanticAIAgentFactory.get_cached_agent(
             model_name="model_b", api_model_id="openai:gpt-4", api_key="key_1"
         )
-        agent3 = PydanticAIProviderFactory.get_cached_agent(
+        agent3 = PydanticAIAgentFactory.get_cached_agent(
             model_name="model_a", api_model_id="anthropic:claude-3", api_key="key_1"
         )
-        agent4 = PydanticAIProviderFactory.get_cached_agent(
+        agent4 = PydanticAIAgentFactory.get_cached_agent(
             model_name="model_a", api_model_id="openai:gpt-4", api_key="key_2"
         )
 
@@ -259,11 +259,11 @@ class TestPydanticAIFactoryIntegration:
         is properly cleared and new providers are created when requested again.
         """
         # Execute: Create some providers to populate cache
-        provider1 = PydanticAIProviderFactory.get_provider("openai", api_key="test_key_1")
-        provider2 = PydanticAIProviderFactory.get_provider("anthropic", api_key="test_key_2")
+        provider1 = PydanticAIAgentFactory.get_provider("openai", api_key="test_key_1")
+        provider2 = PydanticAIAgentFactory.get_provider("anthropic", api_key="test_key_2")
 
         # Verify: Providers are cached
-        initial_cache_size = len(PydanticAIProviderFactory._providers)
+        initial_cache_size = len(PydanticAIAgentFactory._providers)
         assert initial_cache_size >= 2, "Providers should be cached"
 
         # Save provider IDs for comparison
@@ -271,14 +271,14 @@ class TestPydanticAIFactoryIntegration:
         provider2_id = id(provider2)
 
         # Execute: Clear cache
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
 
         # Verify: Cache is cleared
-        assert len(PydanticAIProviderFactory._providers) == 0, "Cache should be empty after clear"
+        assert len(PydanticAIAgentFactory._providers) == 0, "Cache should be empty after clear"
 
         # Execute: Create providers again with same configuration
-        provider1_new = PydanticAIProviderFactory.get_provider("openai", api_key="test_key_1")
-        provider2_new = PydanticAIProviderFactory.get_provider("anthropic", api_key="test_key_2")
+        provider1_new = PydanticAIAgentFactory.get_provider("openai", api_key="test_key_1")
+        provider2_new = PydanticAIAgentFactory.get_provider("anthropic", api_key="test_key_2")
 
         # Verify: New provider instances are created (different object IDs)
         assert id(provider1_new) != provider1_id, (
@@ -317,7 +317,7 @@ class TestPydanticAIFactoryIntegration:
 
                 # Execute: Create agent for the provider
                 test_api_key = f"test_key_for_{provider_name}"
-                agent = PydanticAIProviderFactory.create_agent(
+                agent = PydanticAIAgentFactory.create_agent(
                     model_name=f"test_{provider_name}_model",
                     api_model_id=api_model_id,
                     api_key=test_api_key,
@@ -335,7 +335,7 @@ class TestPydanticAIFactoryIntegration:
                 assert "system_prompt" in call_kwargs, "Agent should have system_prompt"
                 assert "output_type" in call_kwargs, "Agent should have output_type"
 
-    @patch("image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_provider")
+    @patch("image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_provider")
     @patch("image_annotator_lib.core.pydantic_ai_factory.Agent")
     @patch("image_annotator_lib.core.pydantic_ai_factory.OpenAIChatModel")
     @patch("image_annotator_lib.core.pydantic_ai_factory._is_test_environment", return_value=False)
@@ -365,7 +365,7 @@ class TestPydanticAIFactoryIntegration:
         config_data = {"referer": "https://my-custom-app.com", "app_name": "MyCustomApp v2.0"}
 
         # Execute: Create OpenRouter agent with custom config
-        agent = PydanticAIProviderFactory.create_openrouter_agent(
+        agent = PydanticAIAgentFactory.create_openrouter_agent(
             model_name="test_openrouter",
             api_model_id="openrouter:anthropic/claude-3-opus",
             api_key="test_or_key",
@@ -426,7 +426,7 @@ class TestPydanticAIFactoryIntegration:
         - Custom model IDs with provider prefixes
         """
         # Execute: Extract provider name from model ID
-        extracted_provider = PydanticAIProviderFactory._extract_provider_name(api_model_id)
+        extracted_provider = PydanticAIAgentFactory._extract_provider_name(api_model_id)
 
         # Verify: Correct provider is inferred
         assert extracted_provider == expected_provider, (
@@ -457,7 +457,7 @@ class TestPydanticAIFactoryIntegration:
         MockAgent.return_value = mock_agent
 
         # Execute: Create agent
-        agent = PydanticAIProviderFactory.create_agent(
+        agent = PydanticAIAgentFactory.create_agent(
             model_name="test_prompt_model", api_model_id="openai:gpt-4", api_key="test_prompt_key"
         )
 
@@ -496,7 +496,7 @@ class TestPydanticAIFactoryIntegration:
         """
         with patch("pydantic_ai.models.ALLOW_MODEL_REQUESTS", False):
             # Execute: Create agent with ALLOW_MODEL_REQUESTS=False
-            agent = PydanticAIProviderFactory.create_agent(
+            agent = PydanticAIAgentFactory.create_agent(
                 model_name="test_safety_model", api_model_id="openai:gpt-4", api_key="test_safety_key"
             )
 

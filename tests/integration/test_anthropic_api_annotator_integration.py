@@ -12,7 +12,7 @@ import pytest
 from PIL import Image
 
 from image_annotator_lib.core.provider_manager import ProviderManager
-from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 from image_annotator_lib.exceptions.errors import (
     WebApiError,
 )
@@ -25,9 +25,9 @@ class TestAnthropicApiAnnotatorIntegration:
     @pytest.fixture(autouse=True)
     def setup_and_teardown(self):
         """Setup and teardown for each test."""
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
         yield
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
 
     @pytest.fixture
     def anthropic_annotator_config(self, managed_config_registry):
@@ -67,7 +67,7 @@ class TestAnthropicApiAnnotatorIntegration:
     def test_context_manager_integration(self, anthropic_annotator):
         """Test context manager setup and teardown."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             mock_agent = MagicMock()
             mock_get_agent.return_value = mock_agent
@@ -250,7 +250,7 @@ class TestAnthropicApiAnnotatorIntegration:
     def test_image_preprocessing_with_different_formats(self, anthropic_annotator, lightweight_test_images):
         """Test image preprocessing with different input formats."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             captured_inputs = []
 
@@ -353,7 +353,7 @@ class TestAnthropicApiAnnotatorIntegration:
     def test_rate_limiting_integration(self, anthropic_annotator, lightweight_test_images):
         """Test rate limiting functionality."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             with patch.object(anthropic_annotator, "_wait_for_rate_limit") as mock_rate_limit:
                 mock_agent = MagicMock()
@@ -378,7 +378,7 @@ class TestAnthropicApiAnnotatorIntegration:
     def test_image_preprocessing_error_handling(self, anthropic_annotator):
         """Test error handling in image preprocessing."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             mock_agent = MagicMock()
             mock_get_agent.return_value = mock_agent
@@ -458,7 +458,7 @@ class TestAnthropicApiAnnotatorIntegration:
     def test_large_image_handling(self, anthropic_annotator):
         """Test handling of large images with Claude."""
         with patch(
-            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIProviderFactory.get_cached_agent"
+            "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
             mock_agent = MagicMock()
             mock_response = MagicMock()

@@ -13,7 +13,7 @@ from PIL import Image
 
 from image_annotator_lib.api import _MODEL_INSTANCE_REGISTRY, annotate, list_available_annotators
 from image_annotator_lib.core.provider_manager import ProviderManager
-from image_annotator_lib.core.pydantic_ai_factory import PydanticAIProviderFactory
+from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 from image_annotator_lib.core.registry import get_cls_obj_registry
 from image_annotator_lib.core.types import AnnotationResult
 
@@ -26,14 +26,14 @@ class TestLocalMLModelsIntegration:
         """Comprehensive cleanup of all global state between tests"""
         # Clear before test
         _MODEL_INSTANCE_REGISTRY.clear()
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
         ProviderManager._provider_instances.clear()
 
         yield
 
         # Clear after test
         _MODEL_INSTANCE_REGISTRY.clear()
-        PydanticAIProviderFactory.clear_cache()
+        PydanticAIAgentFactory.clear_cache()
         ProviderManager._provider_instances.clear()
 
     @pytest.fixture(scope="function")
