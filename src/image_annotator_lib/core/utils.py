@@ -301,7 +301,9 @@ def determine_effective_device(requested_device: str, model_name: str | None = N
 
 
 def get_model_capabilities(model_name: str) -> set[Any]:
-    """モデル名からcapabilitiesを取得
+    """モデル名からcapabilitiesを取得する。
+
+    設定ファイルに明示的なcapabilitiesがない場合、typeフィールドから推論する。
 
     Args:
         model_name: モデル名
@@ -314,7 +316,20 @@ def get_model_capabilities(model_name: str) -> set[Any]:
 
     # 設定ファイルからcapabilitiesを取得
     capabilities_config = config_registry.get(model_name, "capabilities", [])
+
     if not capabilities_config:
+        # フォールバック: type フィールドから推論
+        model_type = config_registry.get(model_name, "type", "")
+        type_to_capabilities: dict[str, list[TaskCapability]] = {
+            "tagger": [TaskCapability.TAGS],
+            "scorer": [TaskCapability.SCORES],
+            "captioner": [TaskCapability.CAPTIONS],
+        }
+        inferred = type_to_capabilities.get(model_type, [])
+        if inferred:
+            logger.debug(f"モデル '{model_name}' のcapabilitiesをtypeから推論: {model_type} -> {inferred}")
+            return set(inferred)
+
         logger.warning(f"モデル '{model_name}' のcapabilitiesが設定されていません")
         return set()
 
