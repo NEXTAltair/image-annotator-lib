@@ -6,7 +6,7 @@ from PIL import Image
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
-from .api import PHashAnnotationResults
+from .api import PHashAnnotationResults as PHashAnnotationResults
 from .core.api_model_discovery import discover_available_vision_models
 from .core.config import config_registry
 from .core.constants import (
@@ -38,6 +38,7 @@ __all__ = [
     "ModelLoadError",
     "ModelNotFoundError",
     "OutOfMemoryError",
+    "PHashAnnotationResults",
     "annotate",
     "config_registry",
     "create_agent",
