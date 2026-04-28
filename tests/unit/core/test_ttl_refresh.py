@@ -11,6 +11,7 @@ import pytest
 
 import image_annotator_lib.core.api_model_discovery as _disc_module
 from image_annotator_lib.core.api_model_discovery import (
+    discover_available_vision_models,
     should_refresh,
     trigger_background_refresh,
 )
@@ -271,3 +272,65 @@ def test_trigger_background_refresh_dedupe(toml_path: Path) -> None:
         t2.join(timeout=2)
 
     assert call_count == 1, f"fetch が複数回実行されました: {call_count} 回"
+
+
+# --- should_refresh: naive datetime 安全性テスト ---
+
+
+@pytest.mark.unit
+def test_should_refresh_returns_true_on_naive_datetime(toml_path: Path) -> None:
+    """load_last_refresh が naive datetime を返しても TypeError を起こさず True を返す。"""
+    naive_dt = datetime(2026, 1, 1, 0, 0, 0)  # tzinfo なし
+    with patch("image_annotator_lib.core.api_model_discovery.load_last_refresh", return_value=naive_dt):
+        result = should_refresh()
+    assert result is True
+
+
+# --- discover_available_vision_models: ロック直列化テスト ---
+
+
+@pytest.mark.unit
+def test_discover_force_refresh_acquires_refresh_lock(toml_path: Path) -> None:
+    """force_refresh=True 時、_fetch_and_update_vision_models の実行中に _refresh_lock が保持される。"""
+    lock_held_during_fetch: list[bool] = []
+
+    def check_lock() -> dict:
+        lock_held_during_fetch.append(_disc_module._refresh_lock.locked())
+        return {}
+
+    with patch(
+        "image_annotator_lib.core.api_model_discovery._fetch_and_update_vision_models",
+        side_effect=check_lock,
+    ):
+        discover_available_vision_models(force_refresh=True)
+
+    assert lock_held_during_fetch == [True], "fetch 中に _refresh_lock が保持されていません"
+
+
+@pytest.mark.unit
+def test_discover_force_refresh_serializes_with_background_refresh(toml_path: Path) -> None:
+    """force_refresh とバックグラウンド refresh は同時に _fetch を実行しない。"""
+    concurrent_count = 0
+    active_count = 0
+    fetch_started = threading.Event()
+
+    def serialized_fetch() -> dict:
+        nonlocal concurrent_count, active_count
+        active_count += 1
+        if active_count > 1:
+            concurrent_count += 1
+        fetch_started.set()
+        time.sleep(0.05)
+        active_count -= 1
+        return {}
+
+    with patch(
+        "image_annotator_lib.core.api_model_discovery._fetch_and_update_vision_models",
+        side_effect=serialized_fetch,
+    ):
+        bg_thread = trigger_background_refresh()
+        fetch_started.wait(timeout=2)  # バックグラウンドが fetch 中になるまで待つ
+        discover_available_vision_models(force_refresh=True)  # ロック待ちして直列実行
+        bg_thread.join(timeout=2)
+
+    assert concurrent_count == 0, "fetch が同時実行されました"

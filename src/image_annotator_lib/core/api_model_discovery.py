@@ -179,7 +179,11 @@ def should_refresh(ttl_days: int | None = None) -> bool:
     if last is None:
         return True
 
-    age_seconds = (dt.now(datetime.UTC) - last).total_seconds()
+    try:
+        age_seconds = (dt.now(datetime.UTC) - last).total_seconds()
+    except TypeError:
+        logger.warning(f"last_refresh の型が不正のため refresh を実行します: {last!r}")
+        return True
     return age_seconds > ttl_days * 86400
 
 
@@ -244,7 +248,8 @@ def discover_available_vision_models(force_refresh: bool = False) -> dict[str, A
 
     try:
         logger.info("LiteLLM DB から最新のモデル情報を取得・更新します。")
-        updated_data = _fetch_and_update_vision_models()
+        with _refresh_lock:
+            updated_data = _fetch_and_update_vision_models()
         return {"models": list(updated_data.keys()), "toml_data": updated_data}
 
     except (ApiTimeoutError, ApiRequestError, ApiServerError, WebApiError) as e:
