@@ -598,30 +598,34 @@ def _discover_and_update_api_models(skip_api_discovery: bool) -> None:
     Args:
         skip_api_discovery: Trueの場合、API検出をスキップする。
     """
-    if not AVAILABLE_API_MODELS_CONFIG_PATH.exists():
-        if skip_api_discovery:
+    ttl_expired = False
+    if skip_api_discovery:
+        logger.info(
+            "環境変数 IMAGE_ANNOTATOR_SKIP_API_DISCOVERY=true のため、"
+            "API モデル情報の取得をスキップします。"
+        )
+    elif not AVAILABLE_API_MODELS_CONFIG_PATH.exists():
+        # 初回起動: 同期 fetch（後続の annotator_config 更新にデータが必要）
+        logger.info(
+            f"{AVAILABLE_API_MODELS_CONFIG_PATH} が見つかりません。APIから最新情報を取得します..."
+        )
+        try:
+            api_model_discovery._fetch_and_update_vision_models()
             logger.info(
-                "環境変数 IMAGE_ANNOTATOR_SKIP_API_DISCOVERY=true のため、"
-                "API モデル情報の取得をスキップします。"
+                f"API からモデル情報を取得し、{AVAILABLE_API_MODELS_CONFIG_PATH} を更新しました。"
             )
-        else:
-            logger.info(
-                f"{AVAILABLE_API_MODELS_CONFIG_PATH} が見つかりません。APIから最新情報を取得します..."
+        except Exception as api_e:
+            logger.error(
+                f"API からのモデル情報取得中にエラーが発生しました: {api_e}", exc_info=True
             )
-            try:
-                api_model_discovery._fetch_and_update_vision_models()
-                logger.info(
-                    f"API からモデル情報を取得し、{AVAILABLE_API_MODELS_CONFIG_PATH} を更新しました。"
-                )
-            except Exception as api_e:
-                logger.error(
-                    f"API からのモデル情報取得中にエラーが発生しました: {api_e}", exc_info=True
-                )
-                logger.warning(
-                    "APIからのモデル情報取得に失敗したため、Web API モデルの自動設定は行われない可能性があります。"
-                )
+            logger.warning(
+                "APIからのモデル情報取得に失敗したため、Web API モデルの自動設定は行われない可能性があります。"
+            )
+    elif api_model_discovery.should_refresh():
+        # TTL 超過: _update_config_with_api_models() のファイル読み取り後に起動する（書き込み競合を避けるため）
+        ttl_expired = True
     else:
-        logger.debug(f"{AVAILABLE_API_MODELS_CONFIG_PATH} が存在します。既存のファイルを使用します。")
+        logger.debug("API モデル情報は TTL 内のため、既存キャッシュを使用します。")
 
     # available_api_models.toml を読み込み、annotator_config.toml を更新
     if AVAILABLE_API_MODELS_CONFIG_PATH.exists():
@@ -629,6 +633,14 @@ def _discover_and_update_api_models(skip_api_discovery: bool) -> None:
     else:
         logger.warning(
             f"{AVAILABLE_API_MODELS_CONFIG_PATH} が存在しないため、Web API モデル設定を読み込めません。"
+        )
+
+    # ファイル読み取り完了後にバックグラウンド refresh を起動（read/write 競合を排除）
+    if ttl_expired:
+        api_model_discovery.trigger_background_refresh()
+        logger.info(
+            "TTL 超過のため API モデル情報の background refresh を起動しました。"
+            "次回起動時から最新モデル一覧が反映されます。"
         )
 
 

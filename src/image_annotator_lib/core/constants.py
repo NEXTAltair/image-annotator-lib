@@ -31,5 +31,11 @@ DEFAULT_PATHS = {
     "cache_dir": CACHE_DIR,  # プロジェクト models
 }
 
+# --- API モデル discovery TTL 設定 ---
+# available_api_models.toml の自動 refresh 間隔（既定 7 日）
+DEFAULT_API_MODELS_TTL_DAYS = 7
+# TTL を環境変数で上書きするためのキー名
+ENV_API_MODELS_TTL_DAYS = "IMAGE_ANNOTATOR_API_MODELS_TTL_DAYS"
+
 # テンプレートパスも必要に応じてエクスポート (config.py で使う)
 # (直接定数を使うのでエクスポート不要かも)
