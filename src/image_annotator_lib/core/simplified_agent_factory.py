@@ -1,8 +1,11 @@
 """Simplified PydanticAI Agent factory with API discovery integration."""
 
+from typing import Any
+
 from pydantic_ai import Agent
 
 from .api_model_discovery import discover_available_vision_models
+from .config import load_available_api_models
 from .simple_config import get_model_settings
 from .types import AnnotationSchema
 from .utils import logger
@@ -13,6 +16,7 @@ class SimplifiedAgentFactory:
 
     def __init__(self) -> None:
         self._available_models: list[str] = []
+        self._all_models_data: dict[str, Any] = {}
         self._agents_cache: dict[str, Agent] = {}
 
     def refresh_available_models(self, force_refresh: bool = False) -> list[str]:
@@ -28,15 +32,23 @@ class SimplifiedAgentFactory:
         try:
             result = discover_available_vision_models(force_refresh=force_refresh)
             if "models" in result:
-                self._available_models = result["models"]
-                logger.info(f"Discovered {len(self._available_models)} available models")
+                full_data = load_available_api_models()
+                self._all_models_data = full_data
+                self._available_models = [
+                    mid for mid, data in full_data.items()
+                    if isinstance(data, dict) and data.get("deprecated_on") is None
+                ]
+                logger.info(
+                    f"利用可能モデル: {len(self._available_models)} 件"
+                    f" (全 {len(full_data)} 件中)"
+                )
             else:
                 logger.error(f"Failed to discover models: {result.get('error', 'Unknown error')}")
-                if not self._available_models:  # Fallback to empty list
+                if not self._available_models:
                     self._available_models = []
         except Exception as e:
             logger.error(f"Error during model discovery: {e}")
-            if not self._available_models:  # Keep existing models on error
+            if not self._available_models:
                 self._available_models = []
 
         return self._available_models
@@ -101,6 +113,19 @@ class SimplifiedAgentFactory:
             self._agents_cache[cache_key] = self.create_agent(model_id, **kwargs)
 
         return self._agents_cache[cache_key]
+
+    def list_all_models(self) -> list[str]:
+        """廃止済みモデルを含む全モデル ID のリストを返す。"""
+        if not self._all_models_data:
+            self.refresh_available_models()
+        return list(self._all_models_data.keys())
+
+    def is_model_deprecated(self, model_id: str) -> bool:
+        """指定モデルが廃止済みかどうかを確認する。"""
+        if not self._all_models_data:
+            self.refresh_available_models()
+        data = self._all_models_data.get(model_id)
+        return isinstance(data, dict) and data.get("deprecated_on") is not None
 
     def is_model_available(self, model_id: str) -> bool:
         """
@@ -169,3 +194,26 @@ def get_available_models() -> list[str]:
         List of available model IDs
     """
     return get_agent_factory().get_available_models()
+
+
+def list_all_models() -> list[str]:
+    """
+    廃止済みモデルを含む全モデル ID のリストを返す。
+
+    Returns:
+        全モデル ID のリスト
+    """
+    return get_agent_factory().list_all_models()
+
+
+def is_model_deprecated(model_id: str) -> bool:
+    """
+    指定モデルが廃止済みかどうかを確認する。
+
+    Args:
+        model_id: 確認するモデルの ID
+
+    Returns:
+        廃止済みの場合 True
+    """
+    return get_agent_factory().is_model_deprecated(model_id)

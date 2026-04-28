@@ -18,32 +18,66 @@ from image_annotator_lib.core.simplified_agent_factory import (
     create_agent,
     get_agent_factory,
     get_available_models,
+    is_model_deprecated,
+    list_all_models,
 )
+
+
+_BASE_MODEL_IDS = [
+    "google/gemini-2.5-pro-preview-03-25",
+    "google/gemini-1.5-pro",
+    "openai/gpt-4o",
+    "anthropic/claude-3-5-sonnet-20241022",
+]
 
 
 @pytest.fixture
 def mock_model_discovery():
-    """Mock discover_available_vision_models.
+    """Mock discover_available_vision_models と load_available_api_models。
 
     Mock Strategy:
-    - Mock: API discovery calls
+    - Mock: API discovery calls, TOML full data
     - Real: Model list structure
 
     Returns:
         Mock function returning model discovery result
     """
-    with patch(
-        "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
-    ) as mock:
-        mock.return_value = {
-            "models": [
-                "google/gemini-2.5-pro-preview-03-25",
-                "google/gemini-1.5-pro",
-                "openai/gpt-4o",
-                "anthropic/claude-3-5-sonnet-20241022",
-            ]
-        }
-        yield mock
+    mock_toml_data = {
+        mid: {"provider": mid.split("/")[0].capitalize(), "deprecated_on": None}
+        for mid in _BASE_MODEL_IDS
+    }
+    with (
+        patch(
+            "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
+        ) as mock_discover,
+        patch(
+            "image_annotator_lib.core.simplified_agent_factory.load_available_api_models"
+        ) as mock_load,
+    ):
+        mock_discover.return_value = {"models": _BASE_MODEL_IDS}
+        mock_load.return_value = mock_toml_data
+        yield mock_discover
+
+
+@pytest.fixture
+def mock_model_discovery_with_deprecated():
+    """廃止済みモデルを含むモックデータ。"""
+    mock_toml_data = {
+        "openai/gpt-4o": {"provider": "OpenAI", "deprecated_on": None},
+        "openai/gpt-3.5-turbo": {"provider": "OpenAI", "deprecated_on": "2025-01-01T00:00:00Z"},
+        "anthropic/claude-3-5-sonnet-20241022": {"provider": "Anthropic", "deprecated_on": None},
+    }
+    with (
+        patch(
+            "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
+        ) as mock_discover,
+        patch(
+            "image_annotator_lib.core.simplified_agent_factory.load_available_api_models"
+        ) as mock_load,
+    ):
+        mock_discover.return_value = {"models": list(mock_toml_data.keys())}
+        mock_load.return_value = mock_toml_data
+        yield mock_discover, mock_load
 
 
 @pytest.fixture
@@ -363,3 +397,51 @@ def test_convenience_functions(mock_model_discovery, mock_simple_config, mock_ag
     assert len(models) == 4
     assert "google/gemini-2.5-pro-preview-03-25" in models
     mock_model_discovery.assert_called()
+
+
+# ==============================================================================
+# ISSUE C: deprecated_on フィルタとライフサイクル API テスト
+# ==============================================================================
+
+
+@pytest.mark.unit
+def test_get_available_models_excludes_deprecated(mock_model_discovery_with_deprecated):
+    """get_available_models() は deprecated_on が設定されたモデルを除外する。"""
+    factory = SimplifiedAgentFactory()
+    models = factory.get_available_models()
+
+    assert "openai/gpt-4o" in models
+    assert "anthropic/claude-3-5-sonnet-20241022" in models
+    assert "openai/gpt-3.5-turbo" not in models
+
+
+@pytest.mark.unit
+def test_list_all_models_includes_deprecated(mock_model_discovery_with_deprecated):
+    """list_all_models() は廃止済みモデルも含む全モデルを返す。"""
+    factory = SimplifiedAgentFactory()
+    models = factory.list_all_models()
+
+    assert "openai/gpt-4o" in models
+    assert "anthropic/claude-3-5-sonnet-20241022" in models
+    assert "openai/gpt-3.5-turbo" in models
+
+
+@pytest.mark.unit
+def test_is_model_deprecated_true(mock_model_discovery_with_deprecated):
+    """廃止済みモデルに is_model_deprecated() が True を返す。"""
+    factory = SimplifiedAgentFactory()
+    assert factory.is_model_deprecated("openai/gpt-3.5-turbo") is True
+
+
+@pytest.mark.unit
+def test_is_model_deprecated_false_for_active(mock_model_discovery_with_deprecated):
+    """アクティブなモデルに is_model_deprecated() が False を返す。"""
+    factory = SimplifiedAgentFactory()
+    assert factory.is_model_deprecated("openai/gpt-4o") is False
+
+
+@pytest.mark.unit
+def test_is_model_deprecated_false_for_unknown(mock_model_discovery_with_deprecated):
+    """未知のモデル ID に is_model_deprecated() が False を返す。"""
+    factory = SimplifiedAgentFactory()
+    assert factory.is_model_deprecated("unknown/nonexistent-model") is False
