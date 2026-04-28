@@ -386,7 +386,10 @@ def load_last_refresh() -> datetime | None:
     if isinstance(value, datetime):
         return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
     try:
-        return datetime.fromisoformat(str(value))
+        dt_val = datetime.fromisoformat(str(value))
+        if dt_val.tzinfo is None:
+            dt_val = dt_val.replace(tzinfo=timezone.utc)
+        return dt_val
     except ValueError:
         logger.warning(f"meta.last_refresh のパースに失敗しました: {value!r}")
         return None
@@ -408,7 +411,8 @@ def save_available_api_models(
 
         # 既存 meta を保持しつつ last_refresh のみ更新
         existing = _load_full_api_models_file()
-        meta: dict[str, Any] = dict(existing.get("meta", {}))
+        raw_meta = existing.get("meta", {})
+        meta: dict[str, Any] = dict(raw_meta) if isinstance(raw_meta, dict) else {}
         if last_refresh is not None:
             meta["last_refresh"] = last_refresh.isoformat()
 

@@ -85,6 +85,22 @@ def test_load_last_refresh_returns_timezone_aware_datetime(toml_path: Path, now_
     assert result.tzinfo is not None
 
 
+@pytest.mark.unit
+def test_load_last_refresh_normalizes_naive_datetime_to_utc(toml_path: Path) -> None:
+    """タイムゾーンなし文字列（手編集等）は UTC として扱い、aware datetime を返す。"""
+    import toml
+
+    toml_path.write_text(
+        '[meta]\nlast_refresh = "2026-04-20T10:00:00"\n[available_vision_models]\n',
+        encoding="utf-8",
+    )
+    load_available_api_models.cache_clear()
+    result = load_last_refresh()
+    assert result is not None
+    assert result.tzinfo is not None
+    assert result.tzinfo == timezone.utc
+
+
 # --- save_available_api_models + [meta] テスト ---
 
 
@@ -109,6 +125,19 @@ def test_save_preserves_meta_when_last_refresh_none(toml_path: Path, now_utc: da
     assert first_refresh is not None
     assert second_refresh is not None
     assert abs((first_refresh - second_refresh).total_seconds()) < 1
+
+
+@pytest.mark.unit
+def test_save_ignores_non_dict_meta_section(toml_path: Path, now_utc: datetime) -> None:
+    """TOML の [meta] が非 dict（破損）の場合でも save が正常完了し meta を上書きする。"""
+    toml_path.write_text(
+        'meta = "broken"\n[available_vision_models]\n',
+        encoding="utf-8",
+    )
+    load_available_api_models.cache_clear()
+    save_available_api_models({}, last_refresh=now_utc)
+    meta = load_api_models_meta()
+    assert "last_refresh" in meta
 
 
 @pytest.mark.unit
