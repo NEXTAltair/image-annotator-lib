@@ -21,7 +21,7 @@ from .core.registry import (
     list_available_annotators,
     list_available_annotators_with_metadata,
 )
-from .core.simplified_agent_factory import create_agent, get_available_models
+from .core.simplified_agent_factory import create_agent, get_available_models, is_model_deprecated, list_all_models
 from .core.types import AnnotationResult
 from .core.utils import init_logger
 from .exceptions.errors import AnnotatorError, ModelLoadError, ModelNotFoundError, OutOfMemoryError
@@ -44,6 +44,8 @@ __all__ = [
     "create_agent",
     "discover_available_vision_models",
     "get_available_models",
+    "is_model_deprecated",
+    "list_all_models",
     "list_available_annotators",
     "list_available_annotators_with_metadata",
 ]

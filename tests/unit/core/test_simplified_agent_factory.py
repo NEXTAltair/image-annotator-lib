@@ -18,32 +18,63 @@ from image_annotator_lib.core.simplified_agent_factory import (
     create_agent,
     get_agent_factory,
     get_available_models,
+    is_model_deprecated,
+    list_all_models,
 )
+
+
+_BASE_MODEL_IDS = [
+    "google/gemini-2.5-pro-preview-03-25",
+    "google/gemini-1.5-pro",
+    "openai/gpt-4o",
+    "anthropic/claude-3-5-sonnet-20241022",
+]
 
 
 @pytest.fixture
 def mock_model_discovery():
-    """Mock discover_available_vision_models.
+    """Mock discover_available_vision_models。
+
+    discover_available_vision_models は {"models": [...], "toml_data": {...}} を返す。
+    SimplifiedAgentFactory は toml_data を直接使用するため load_available_api_models は不要。
 
     Mock Strategy:
-    - Mock: API discovery calls
+    - Mock: API discovery calls（toml_data を含む完全な戻り値）
     - Real: Model list structure
 
     Returns:
         Mock function returning model discovery result
     """
+    mock_toml_data = {
+        mid: {"provider": mid.split("/")[0].capitalize(), "deprecated_on": None}
+        for mid in _BASE_MODEL_IDS
+    }
     with patch(
         "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
-    ) as mock:
-        mock.return_value = {
-            "models": [
-                "google/gemini-2.5-pro-preview-03-25",
-                "google/gemini-1.5-pro",
-                "openai/gpt-4o",
-                "anthropic/claude-3-5-sonnet-20241022",
-            ]
+    ) as mock_discover:
+        mock_discover.return_value = {"models": _BASE_MODEL_IDS, "toml_data": mock_toml_data}
+        yield mock_discover
+
+
+@pytest.fixture
+def mock_model_discovery_with_deprecated():
+    """廃止済みモデルを含むモックデータ。
+
+    discover_available_vision_models が toml_data（deprecated 含む）を返す。
+    """
+    mock_toml_data = {
+        "openai/gpt-4o": {"provider": "OpenAI", "deprecated_on": None},
+        "openai/gpt-3.5-turbo": {"provider": "OpenAI", "deprecated_on": "2025-01-01T00:00:00Z"},
+        "anthropic/claude-3-5-sonnet-20241022": {"provider": "Anthropic", "deprecated_on": None},
+    }
+    with patch(
+        "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
+    ) as mock_discover:
+        mock_discover.return_value = {
+            "models": list(mock_toml_data.keys()),
+            "toml_data": mock_toml_data,
         }
-        yield mock
+        yield mock_discover
 
 
 @pytest.fixture
@@ -363,3 +394,99 @@ def test_convenience_functions(mock_model_discovery, mock_simple_config, mock_ag
     assert len(models) == 4
     assert "google/gemini-2.5-pro-preview-03-25" in models
     mock_model_discovery.assert_called()
+
+
+# ==============================================================================
+# ISSUE C: deprecated_on フィルタとライフサイクル API テスト
+# ==============================================================================
+
+
+@pytest.mark.unit
+def test_get_available_models_excludes_deprecated(mock_model_discovery_with_deprecated):
+    """get_available_models() は deprecated_on が設定されたモデルを除外する。"""
+    factory = SimplifiedAgentFactory()
+    models = factory.get_available_models()
+
+    assert "openai/gpt-4o" in models
+    assert "anthropic/claude-3-5-sonnet-20241022" in models
+    assert "openai/gpt-3.5-turbo" not in models
+
+
+@pytest.mark.unit
+def test_list_all_models_includes_deprecated(mock_model_discovery_with_deprecated):
+    """list_all_models() は廃止済みモデルも含む全モデルを返す。"""
+    factory = SimplifiedAgentFactory()
+    models = factory.list_all_models()
+
+    assert "openai/gpt-4o" in models
+    assert "anthropic/claude-3-5-sonnet-20241022" in models
+    assert "openai/gpt-3.5-turbo" in models
+
+
+@pytest.mark.unit
+def test_is_model_deprecated_true(mock_model_discovery_with_deprecated):
+    """廃止済みモデルに is_model_deprecated() が True を返す。"""
+    factory = SimplifiedAgentFactory()
+    assert factory.is_model_deprecated("openai/gpt-3.5-turbo") is True
+
+
+@pytest.mark.unit
+def test_is_model_deprecated_false_for_active(mock_model_discovery_with_deprecated):
+    """アクティブなモデルに is_model_deprecated() が False を返す。"""
+    factory = SimplifiedAgentFactory()
+    assert factory.is_model_deprecated("openai/gpt-4o") is False
+
+
+@pytest.mark.unit
+def test_is_model_deprecated_false_for_unknown(mock_model_discovery_with_deprecated):
+    """未知のモデル ID に is_model_deprecated() が False を返す。"""
+    factory = SimplifiedAgentFactory()
+    assert factory.is_model_deprecated("unknown/nonexistent-model") is False
+
+
+@pytest.mark.unit
+def test_list_all_models_uses_toml_data_from_discovery():
+    """list_all_models() は discovery の toml_data（deprecated 含む全モデル）を返す。"""
+    toml_data = {
+        "openai/gpt-4o": {"provider": "OpenAI", "deprecated_on": None},
+        "openai/gpt-3.5-turbo": {"provider": "OpenAI", "deprecated_on": "2025-01-01T00:00:00Z"},
+        "anthropic/claude-3-5-sonnet-20241022": {"provider": "Anthropic", "deprecated_on": None},
+    }
+    with patch(
+        "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
+    ) as mock_discover:
+        mock_discover.return_value = {"models": list(toml_data.keys()), "toml_data": toml_data}
+
+        factory = SimplifiedAgentFactory()
+        all_models = factory.list_all_models()
+
+    assert set(all_models) == set(toml_data.keys())
+
+
+@pytest.mark.unit
+def test_get_available_models_uses_discovery_toml_data_not_stale_cache():
+    """TOML 書き込み失敗時も discovery の toml_data（in-memory）を使うため再アクティブ化モデルを除外しない。
+
+    以前のバグ:
+      - SimplifiedAgentFactory が load_available_api_models() を別途呼んでいたため、
+        TOML write 失敗 → キャッシュが stale → deprecated_on がクリアされず誤フィルタ。
+    修正後:
+      - discovery が返す toml_data を直接使用。TOML write 失敗の影響を受けない。
+    """
+    # discovery の toml_data では再アクティブ化済みで deprecated_on = None
+    toml_data_from_discovery = {
+        "openai/gpt-4o": {"provider": "OpenAI", "deprecated_on": None},
+        "openai/reactivated-model": {"provider": "OpenAI", "deprecated_on": None},
+    }
+    with patch(
+        "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
+    ) as mock_discover:
+        mock_discover.return_value = {
+            "models": list(toml_data_from_discovery.keys()),
+            "toml_data": toml_data_from_discovery,
+        }
+
+        factory = SimplifiedAgentFactory()
+        models = factory.get_available_models()
+
+    assert "openai/reactivated-model" in models
