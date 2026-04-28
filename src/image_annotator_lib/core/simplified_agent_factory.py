@@ -17,6 +17,7 @@ class SimplifiedAgentFactory:
     def __init__(self) -> None:
         self._available_models: list[str] = []
         self._all_models_data: dict[str, Any] = {}
+        self._discovered_model_ids: list[str] = []
         self._agents_cache: dict[str, Agent] = {}
 
     def refresh_available_models(self, force_refresh: bool = False) -> list[str]:
@@ -34,6 +35,7 @@ class SimplifiedAgentFactory:
             if "models" in result:
                 full_data = load_available_api_models()
                 self._all_models_data = full_data
+                self._discovered_model_ids = result["models"]
                 # result["models"] をベースに deprecated_on フィルタを適用。
                 # TOML 書き込み失敗時でも新鮮な discovery 結果を保持する。
                 self._available_models = [
@@ -121,9 +123,13 @@ class SimplifiedAgentFactory:
 
     def list_all_models(self) -> list[str]:
         """廃止済みモデルを含む全モデル ID のリストを返す。"""
-        if not self._all_models_data:
+        if not self._all_models_data and not self._discovered_model_ids:
             self.refresh_available_models()
-        return list(self._all_models_data.keys())
+        # TOML データが存在する場合はそちら優先（deprecated 含む完全なリスト）
+        if self._all_models_data:
+            return list(self._all_models_data.keys())
+        # フォールバック: TOML 書き込み失敗時は discovery 結果を使用
+        return list(self._discovered_model_ids)
 
     def is_model_deprecated(self, model_id: str) -> bool:
         """指定モデルが廃止済みかどうかを確認する。"""

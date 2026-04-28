@@ -445,3 +445,24 @@ def test_is_model_deprecated_false_for_unknown(mock_model_discovery_with_depreca
     """未知のモデル ID に is_model_deprecated() が False を返す。"""
     factory = SimplifiedAgentFactory()
     assert factory.is_model_deprecated("unknown/nonexistent-model") is False
+
+
+@pytest.mark.unit
+def test_list_all_models_falls_back_to_discovered_ids_when_toml_empty():
+    """TOML データが空（書き込み失敗等）の場合、list_all_models() は discovery 結果を返す。"""
+    discovered_ids = ["openai/gpt-4o", "openai/gpt-3.5-turbo", "anthropic/claude-3-5-sonnet-20241022"]
+    with (
+        patch(
+            "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
+        ) as mock_discover,
+        patch(
+            "image_annotator_lib.core.simplified_agent_factory.load_available_api_models"
+        ) as mock_load,
+    ):
+        mock_discover.return_value = {"models": discovered_ids}
+        mock_load.return_value = {}  # TOML 書き込み失敗 → 空
+
+        factory = SimplifiedAgentFactory()
+        all_models = factory.list_all_models()
+
+    assert set(all_models) == set(discovered_ids)
