@@ -96,6 +96,8 @@ def test_initialize_registry_api_models_file_not_exists_calls_fetch_and_update(
 
 
 @pytest.mark.unit
+@patch("image_annotator_lib.core.registry.os.getenv", return_value="false")
+@patch("image_annotator_lib.core.api_model_discovery.should_refresh", return_value=False)
 @patch("image_annotator_lib.core.registry.register_annotators")
 @patch("image_annotator_lib.core.registry._update_config_with_api_models")
 @patch("image_annotator_lib.core.api_model_discovery._fetch_and_update_vision_models")
@@ -107,6 +109,8 @@ def test_initialize_registry_api_models_file_exists_skips_fetch(
     mock_fetch_api_models,
     mock_update_config,
     mock_register,
+    _mock_should_refresh,
+    _mock_getenv,
 ):
     """Test initialize_registry skips API fetch but calls config update when file exists."""
     # Reset singleton state before test
@@ -117,7 +121,7 @@ def test_initialize_registry_api_models_file_exists_skips_fetch(
     registry.initialize_registry()
 
     mock_init_logger.assert_called_once()
-    # exists() is called twice: once in the first check, once before update
+    # exists() is called twice: once in the elif check, once before update
     assert mock_config_path.exists.call_count == 2
     mock_fetch_api_models.assert_not_called()
     mock_update_config.assert_called_once()
@@ -259,6 +263,8 @@ def test_update_config_with_api_models_no_classes(
 
 
 @pytest.mark.unit
+@patch("image_annotator_lib.core.registry.os.getenv", return_value="false")
+@patch("image_annotator_lib.core.api_model_discovery.should_refresh", return_value=False)
 @patch("image_annotator_lib.core.registry.register_annotators")
 @patch("image_annotator_lib.core.registry._update_config_with_api_models")
 @patch("image_annotator_lib.core.api_model_discovery._fetch_and_update_vision_models")
@@ -270,6 +276,8 @@ def test_initialize_registry_singleton_pattern(
     mock_fetch_api_models,
     mock_update_config,
     mock_register,
+    _mock_should_refresh,
+    _mock_getenv,
 ):
     """Test initialize_registry uses singleton pattern and only initializes once."""
     # Reset singleton state before test
@@ -282,9 +290,9 @@ def test_initialize_registry_singleton_pattern(
 
     # Verify first call executed all steps
     assert mock_init_logger.call_count == 1
-    # exists() called twice: first check and before update
+    # exists() called twice: once in elif check, once before update
     assert mock_config_path.exists.call_count == 2
-    assert mock_fetch_api_models.call_count == 0  # Should skip when file exists
+    assert mock_fetch_api_models.call_count == 0  # Should skip when file exists and within TTL
     assert mock_update_config.call_count == 1
     assert mock_register.call_count == 1
 

@@ -1,6 +1,7 @@
 import copy
 import importlib.resources
 import shutil
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -317,6 +318,23 @@ config_registry = _ConfigRegistryProxy()
 # --- available_api_models.toml 用のスタンドアロン関数 --- #
 
 
+def _load_full_api_models_file() -> dict[str, Any]:
+    """available_api_models.toml のファイル全体を dict で返す内部ヘルパー。
+
+    キャッシュなし。ファイル不存在・パースエラー時は空 dict を返す。
+    """
+    file_path = AVAILABLE_API_MODELS_CONFIG_PATH
+    if not file_path.is_file():
+        return {}
+    try:
+        with open(file_path, encoding="utf-8") as f:
+            data = toml.load(f)
+        return data if isinstance(data, dict) else {}
+    except (toml.TomlDecodeError, OSError) as e:
+        logger.error(f"{file_path} の読み込みエラー: {e}")
+        return {}
+
+
 @lru_cache(maxsize=1)
 def load_available_api_models() -> dict[str, Any]:
     """`available_api_models.toml` を読み込み、モデルデータを辞書として返す。
@@ -326,15 +344,13 @@ def load_available_api_models() -> dict[str, Any]:
     file_path = AVAILABLE_API_MODELS_CONFIG_PATH
     try:
         logger.debug(f"動的 API モデル情報を読み込みます: {file_path}")
-        # ファイルが存在しない場合でもエラーにならないように先にチェック
         if not file_path.is_file():
             logger.info(
                 f"{file_path} が見つかりません。初回実行の可能性があります。空のデータで開始します。"
             )
             return {}
-        with open(file_path, encoding="utf-8") as f:
-            data = toml.load(f)
-        if not isinstance(data, dict) or "available_vision_models" not in data:
+        data = _load_full_api_models_file()
+        if not data or "available_vision_models" not in data:
             logger.warning(
                 f"{file_path} の形式が不正か、[available_vision_models] セクションがありません。"
             )
@@ -345,35 +361,65 @@ def load_available_api_models() -> dict[str, Any]:
             return {}
         logger.debug(f"動的 API モデル情報を正常に読み込みました: {file_path}")
         return model_data
-    except toml.TomlDecodeError as e:
-        logger.error(f"{file_path} の TOML 解析に失敗しました: {e}")
-        return {}
-    except OSError as e:
-        logger.error(f"{file_path} の読み込み中に I/O エラーが発生しました: {e}")
-        return {}
     except Exception as e:
         logger.exception(f"{file_path} の読み込み中に予期せぬエラーが発生しました: {e}")
         return {}
 
 
-def save_available_api_models(data: dict[str, Any]) -> None:
+def load_api_models_meta() -> dict[str, Any]:
+    """`available_api_models.toml` の `[meta]` セクションを返す。欠落時は空 dict。"""
+    data = _load_full_api_models_file()
+    meta = data.get("meta", {})
+    return meta if isinstance(meta, dict) else {}
+
+
+def load_last_refresh() -> datetime | None:
+    """`meta.last_refresh` を timezone-aware datetime で返す。
+
+    欠落・パース失敗時は None を返す。
+    """
+    meta = load_api_models_meta()
+    value = meta.get("last_refresh")
+    if value is None:
+        return None
+    # toml ライブラリが datetime 型に変換している場合
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        logger.warning(f"meta.last_refresh のパースに失敗しました: {value!r}")
+        return None
+
+
+def save_available_api_models(
+    data: dict[str, Any],
+    last_refresh: datetime | None = None,
+) -> None:
     """与えられたモデルデータを `available_api_models.toml` に書き込む。
 
     Args:
         data: 保存するモデルデータ辞書 (available_vision_models セクションの内容)。
+        last_refresh: 書き込む refresh タイムスタンプ。None の場合は既存 meta を維持。
     """
     file_path = AVAILABLE_API_MODELS_CONFIG_PATH
     try:
-        # ディレクトリが存在しない場合に作成
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # 書き込むデータ全体を構築
-        full_data_to_save = {"available_vision_models": data}
+        # 既存 meta を保持しつつ last_refresh のみ更新
+        existing = _load_full_api_models_file()
+        meta: dict[str, Any] = dict(existing.get("meta", {}))
+        if last_refresh is not None:
+            meta["last_refresh"] = last_refresh.isoformat()
+
+        full_data_to_save: dict[str, Any] = {}
+        if meta:
+            full_data_to_save["meta"] = meta
+        full_data_to_save["available_vision_models"] = data
 
         logger.debug(f"動的 API モデル情報を書き込みます: {file_path}")
         with open(file_path, "w", encoding="utf-8") as f:
             toml.dump(full_data_to_save, f)
-        # キャッシュをクリア (次の load 呼び出しで再読み込みさせる)
         load_available_api_models.cache_clear()
         logger.debug(f"動的 API モデル情報を正常に書き込みました: {file_path}")
 

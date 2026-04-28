@@ -6,6 +6,8 @@
 
 import datetime
 import json
+import os
+import threading
 from datetime import datetime as dt
 from typing import Any
 
@@ -20,13 +22,21 @@ from ..exceptions.errors import (
 )
 from .config import (
     load_available_api_models,
+    load_last_refresh,
     save_available_api_models,
 )
-from .constants import AVAILABLE_API_MODELS_CONFIG_PATH
+from .constants import (
+    AVAILABLE_API_MODELS_CONFIG_PATH,
+    DEFAULT_API_MODELS_TTL_DAYS,
+    ENV_API_MODELS_TTL_DAYS,
+)
 from .utils import convert_unix_to_iso8601, logger
 
 _OPENROUTER_API_URL = "https://openrouter.ai/api/v1/models"
 _REQUEST_TIMEOUT = 10
+
+# 同時 background refresh を防ぐプロセス内ロック
+_refresh_lock = threading.Lock()
 
 
 def _fetch_from_litellm() -> list[dict[str, Any]]:
@@ -138,10 +148,67 @@ def _fetch_and_update_vision_models() -> dict[str, Any]:
     # === TOML 読み込み → 更新 → 書き込み ===
     existing_toml_data = load_available_api_models()
     updated_toml_data = _update_toml_with_api_results(existing_toml_data, all_models, current_time_iso)
-    save_available_api_models(updated_toml_data)
+    save_available_api_models(updated_toml_data, last_refresh=now)
 
     # TOML 書き込み失敗（save が例外を握りつぶす）でも in-memory の正確なデータを返す
     return updated_toml_data
+
+
+def should_refresh(ttl_days: int | None = None) -> bool:
+    """TTL 超過判定。
+
+    Args:
+        ttl_days: 有効期間（日数）。None の場合は環境変数 IMAGE_ANNOTATOR_API_MODELS_TTL_DAYS、
+                  未設定時は DEFAULT_API_MODELS_TTL_DAYS（7日）を使用。
+
+    Returns:
+        True なら refresh が必要。last_refresh が未記録の場合も True を返す。
+    """
+    if ttl_days is None:
+        env_val = os.environ.get(ENV_API_MODELS_TTL_DAYS)
+        if env_val is not None:
+            try:
+                ttl_days = int(env_val)
+            except ValueError:
+                logger.warning(f"{ENV_API_MODELS_TTL_DAYS}={env_val!r} が整数でないため既定値を使用します。")
+                ttl_days = DEFAULT_API_MODELS_TTL_DAYS
+        else:
+            ttl_days = DEFAULT_API_MODELS_TTL_DAYS
+
+    last = load_last_refresh()
+    if last is None:
+        return True
+
+    age_seconds = (dt.now(datetime.UTC) - last).total_seconds()
+    return age_seconds > ttl_days * 86400
+
+
+def _refresh_worker() -> None:
+    """バックグラウンドスレッドで実行する refresh タスク。例外はすべて捕捉する。"""
+    if not _refresh_lock.acquire(blocking=False):
+        logger.debug("API モデル refresh は既に実行中のため、新規起動をスキップします。")
+        return
+    try:
+        logger.info("バックグラウンド API モデル refresh を開始します。")
+        _fetch_and_update_vision_models()
+        logger.info("バックグラウンド API モデル refresh が完了しました。")
+    except Exception as e:
+        logger.warning(f"バックグラウンド API モデル refresh に失敗しました（次回 TTL 超過時に再試行）: {e}")
+    finally:
+        _refresh_lock.release()
+
+
+def trigger_background_refresh() -> threading.Thread:
+    """バックグラウンドで _fetch_and_update_vision_models() をキックする。
+
+    起動元スレッドをブロックしない。既に refresh 実行中なら _refresh_worker 内でスキップされる。
+
+    Returns:
+        起動した daemon スレッド（テスト用）。
+    """
+    thread = threading.Thread(target=_refresh_worker, daemon=True, name="api-model-refresh")
+    thread.start()
+    return thread
 
 
 def discover_available_vision_models(force_refresh: bool = False) -> dict[str, Any]:
