@@ -1,6 +1,8 @@
 import copy
 import importlib.resources
+import os
 import shutil
+import tempfile
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -422,8 +424,14 @@ def save_available_api_models(
         full_data_to_save["available_vision_models"] = data
 
         logger.debug(f"動的 API モデル情報を書き込みます: {file_path}")
-        with open(file_path, "w", encoding="utf-8") as f:
-            toml.dump(full_data_to_save, f)
+        fd, tmp_path = tempfile.mkstemp(dir=file_path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                toml.dump(full_data_to_save, f)
+            os.replace(tmp_path, file_path)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
         load_available_api_models.cache_clear()
         logger.debug(f"動的 API モデル情報を正常に書き込みました: {file_path}")
 
