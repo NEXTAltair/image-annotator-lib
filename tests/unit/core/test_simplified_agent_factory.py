@@ -466,3 +466,31 @@ def test_list_all_models_falls_back_to_discovered_ids_when_toml_empty():
         all_models = factory.list_all_models()
 
     assert set(all_models) == set(discovered_ids)
+
+
+@pytest.mark.unit
+def test_list_all_models_includes_newly_discovered_when_toml_stale():
+    """TOML が古くて非空（新規モデルが未反映）の場合、discovery 結果を取りこぼさない。"""
+    stale_toml_data = {
+        "openai/gpt-4o": {"provider": "OpenAI", "deprecated_on": None},
+        "openai/old-model": {"provider": "OpenAI", "deprecated_on": None},
+    }
+    # discovery では新規モデル new-model も発見されている
+    discovered_ids = ["openai/gpt-4o", "openai/old-model", "openai/new-model"]
+    with (
+        patch(
+            "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
+        ) as mock_discover,
+        patch(
+            "image_annotator_lib.core.simplified_agent_factory.load_available_api_models"
+        ) as mock_load,
+    ):
+        mock_discover.return_value = {"models": discovered_ids}
+        mock_load.return_value = stale_toml_data  # 非空だが古い（new-model なし）
+
+        factory = SimplifiedAgentFactory()
+        all_models = factory.list_all_models()
+
+    assert "openai/gpt-4o" in all_models
+    assert "openai/old-model" in all_models
+    assert "openai/new-model" in all_models  # 新規発見モデルが含まれる

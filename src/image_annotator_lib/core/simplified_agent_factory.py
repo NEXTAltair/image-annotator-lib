@@ -125,11 +125,10 @@ class SimplifiedAgentFactory:
         """廃止済みモデルを含む全モデル ID のリストを返す。"""
         if not self._all_models_data and not self._discovered_model_ids:
             self.refresh_available_models()
-        # TOML データが存在する場合はそちら優先（deprecated 含む完全なリスト）
-        if self._all_models_data:
-            return list(self._all_models_data.keys())
-        # フォールバック: TOML 書き込み失敗時は discovery 結果を使用
-        return list(self._discovered_model_ids)
+        # TOML（deprecated 含む履歴）と discovery 結果のユニオンを返す。
+        # TOML が古くて一部しか一致しない場合でも新規発見モデルを取りこぼさない。
+        all_ids = set(self._all_models_data.keys()) | set(self._discovered_model_ids)
+        return list(all_ids)
 
     def is_model_deprecated(self, model_id: str) -> bool:
         """指定モデルが廃止済みかどうかを確認する。"""
