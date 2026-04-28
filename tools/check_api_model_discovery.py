@@ -5,6 +5,7 @@ available_api_models.toml を更新して結果を検証する。
 """
 
 import pprint
+import sys
 import time
 
 import litellm
@@ -51,10 +52,18 @@ if __name__ == "__main__":
     elapsed = time.monotonic() - start
     print_result(f"強制リフレッシュ ({elapsed:.2f}秒)", result1)
 
+    if "error" in result1:
+        print(f"\nエラーが発生したため終了します: {result1['error']}", file=sys.stderr)
+        sys.exit(1)
+
     print("\n=== 2回目実行 (キャッシュ利用) ===")
     start = time.monotonic()
     result2 = discover_available_vision_models(force_refresh=False)
     elapsed = time.monotonic() - start
     print_result(f"キャッシュ利用 ({elapsed:.2f}秒)", result2)
+
+    if "error" in result2:
+        print(f"\nキャッシュ読み込みエラーが発生しました: {result2['error']}", file=sys.stderr)
+        sys.exit(1)
 
     print(f"\n完了。結果は {AVAILABLE_API_MODELS_CONFIG_PATH} に保存されています。")
