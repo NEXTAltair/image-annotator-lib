@@ -35,7 +35,7 @@ class TestGetModelCapabilities:
     @patch("image_annotator_lib.core.utils.logger")
     def test_get_model_capabilities_missing_config(self, mock_logger, mock_config_registry):
         """Test handling of missing capabilities configuration"""
-        mock_config_registry.get.return_value = []
+        mock_config_registry.get.side_effect = [[], ""]  # 1回目: capabilities=[], 2回目: type=""
 
         capabilities = get_model_capabilities("unknown-model")
 
