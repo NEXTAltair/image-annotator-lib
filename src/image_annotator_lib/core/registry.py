@@ -598,6 +598,7 @@ def _discover_and_update_api_models(skip_api_discovery: bool) -> None:
     Args:
         skip_api_discovery: Trueの場合、API検出をスキップする。
     """
+    ttl_expired = False
     if skip_api_discovery:
         logger.info(
             "環境変数 IMAGE_ANNOTATOR_SKIP_API_DISCOVERY=true のため、"
@@ -621,12 +622,8 @@ def _discover_and_update_api_models(skip_api_discovery: bool) -> None:
                 "APIからのモデル情報取得に失敗したため、Web API モデルの自動設定は行われない可能性があります。"
             )
     elif api_model_discovery.should_refresh():
-        # TTL 超過: バックグラウンドで非同期 refresh（起動をブロックしない）
-        api_model_discovery.trigger_background_refresh()
-        logger.info(
-            "TTL 超過のため API モデル情報の background refresh を起動しました。"
-            "次回起動時から最新モデル一覧が反映されます。"
-        )
+        # TTL 超過: _update_config_with_api_models() のファイル読み取り後に起動する（書き込み競合を避けるため）
+        ttl_expired = True
     else:
         logger.debug("API モデル情報は TTL 内のため、既存キャッシュを使用します。")
 
@@ -636,6 +633,14 @@ def _discover_and_update_api_models(skip_api_discovery: bool) -> None:
     else:
         logger.warning(
             f"{AVAILABLE_API_MODELS_CONFIG_PATH} が存在しないため、Web API モデル設定を読み込めません。"
+        )
+
+    # ファイル読み取り完了後にバックグラウンド refresh を起動（read/write 競合を排除）
+    if ttl_expired:
+        api_model_discovery.trigger_background_refresh()
+        logger.info(
+            "TTL 超過のため API モデル情報の background refresh を起動しました。"
+            "次回起動時から最新モデル一覧が反映されます。"
         )
 
 

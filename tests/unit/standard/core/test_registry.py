@@ -454,3 +454,34 @@ def test_try_register_model_overwrite_warning():
     result = registry._try_register_model(reg, "test-model", new_cls, BaseAnnotator)
     assert result is True
     assert reg["test-model"] is new_cls
+
+
+# ==============================================================================
+# Test _discover_and_update_api_models: background refresh ordering
+# ==============================================================================
+
+
+@pytest.mark.unit
+@patch("image_annotator_lib.core.registry.os.getenv", return_value="false")
+@patch("image_annotator_lib.core.api_model_discovery.trigger_background_refresh")
+@patch("image_annotator_lib.core.api_model_discovery.should_refresh", return_value=True)
+@patch("image_annotator_lib.core.registry._update_config_with_api_models")
+@patch("image_annotator_lib.core.registry.AVAILABLE_API_MODELS_CONFIG_PATH")
+def test_background_refresh_starts_after_update_config(
+    mock_config_path,
+    mock_update_config,
+    _mock_should_refresh,
+    mock_trigger,
+    _mock_getenv,
+) -> None:
+    """TTL 超過時、trigger_background_refresh は _update_config_with_api_models の後に呼ばれる。"""
+    call_order: list[str] = []
+    mock_config_path.exists.return_value = True
+    mock_update_config.side_effect = lambda: call_order.append("update_config")
+    mock_trigger.side_effect = lambda: call_order.append("trigger_refresh")
+
+    registry._discover_and_update_api_models(skip_api_discovery=False)
+
+    assert call_order == ["update_config", "trigger_refresh"], (
+        f"呼び出し順が期待と異なります: {call_order}"
+    )
