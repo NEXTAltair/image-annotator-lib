@@ -62,4 +62,8 @@ if __name__ == "__main__":
     elapsed = time.monotonic() - start
     print_result(f"キャッシュ利用 ({elapsed:.2f}秒)", result2)
 
+    if "error" in result2:
+        print(f"\nキャッシュ読み込みエラーが発生しました: {result2['error']}", file=sys.stderr)
+        sys.exit(1)
+
     print(f"\n完了。結果は {AVAILABLE_API_MODELS_CONFIG_PATH} に保存されています。")
