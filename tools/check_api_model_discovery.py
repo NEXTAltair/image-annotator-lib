@@ -1,27 +1,38 @@
-"""API モデル発見機能の動作確認用サンプルスクリプト。
+"""LiteLLM 駆動のモデル発見機能の動作確認スクリプト。
 
-実行した結果 OpenRouter API が Vision タスクに対応したモデルの一覧を取得できるかを確認するためのスクリプト。
-結果は PROJECTROOT/config/available_api_models.toml に保存される。
+LiteLLM のローカル DB から Vision 対応モデルを取得し、
+available_api_models.toml を更新して結果を検証する。
 """
 
 import pprint
 import time
 
+import litellm
+
 from image_annotator_lib import discover_available_vision_models
 from image_annotator_lib.core.constants import AVAILABLE_API_MODELS_CONFIG_PATH
 
 
-def print_result(title: str, result: dict):
+def show_litellm_stats() -> None:
+    """LiteLLM ローカル DB の Vision モデル統計を表示する。"""
+    all_ids = [k for k in litellm.model_cost.keys() if "/" in k]
+    vision_ids = [k for k in all_ids if litellm.supports_vision(k)]
+    print(f"LiteLLM 総モデル数 (provider-prefixed): {len(all_ids)}")
+    print(f"LiteLLM Vision 対応モデル数: {len(vision_ids)}")
+    print("Vision モデル (先頭10件):")
+    pprint.pprint(vision_ids[:10])
+    print(f"  ... (全 {len(vision_ids)} 件)")
+
+
+def print_result(title: str, result: dict) -> None:
     """結果を整形して表示するヘルパー関数。"""
     print(f"--- {title} ---")
     if "error" in result:
         print(f"エラー: {result['error']}")
     elif "models" in result:
         print(f"成功: {len(result['models'])} 件の Vision モデルが見つかりました。")
-        # 最初のいくつかを表示 (オプション)
-        # print("モデルリスト (一部):")
-        # pprint.pprint(result['models'][:10])
-        # print("...")
+        print("モデルリスト (先頭10件):")
+        pprint.pprint(result["models"][:10])
     else:
         print("不明な結果形式です。")
         pprint.pprint(result)
@@ -30,27 +41,20 @@ def print_result(title: str, result: dict):
 
 if __name__ == "__main__":
     print(f"モデル情報 TOML パス: {AVAILABLE_API_MODELS_CONFIG_PATH}")
-    # 必要なら設定ファイルパスを指定して config_registry をロードし直す
-    # config_registry.load(config_path="path/to/your/config/annotator_config.toml")
 
-    # 1. 初回実行 (キャッシュなし)
-    start_time = time.monotonic()
-    result1 = discover_available_vision_models()
-    end_time = time.monotonic()
-    print_result(f"初回実行 ({end_time - start_time:.2f}秒)", result1)
+    print("\n=== LiteLLM ローカル DB 統計 ===")
+    show_litellm_stats()
 
-    # 2. 2回目の実行 (キャッシュ利用を期待)
-    time.sleep(1)  # 念のため少し待つ
-    start_time = time.monotonic()
-    result2 = discover_available_vision_models()
-    end_time = time.monotonic()
-    print_result(f"2回目実行 (キャッシュ利用, {end_time - start_time:.2f}秒)", result2)
+    print("\n=== 初回実行 (強制リフレッシュ) ===")
+    start = time.monotonic()
+    result1 = discover_available_vision_models(force_refresh=True)
+    elapsed = time.monotonic() - start
+    print_result(f"強制リフレッシュ ({elapsed:.2f}秒)", result1)
 
-    # 3. 強制リフレッシュ実行
-    start_time = time.monotonic()
-    result3 = discover_available_vision_models(force_refresh=True)
-    end_time = time.monotonic()
-    print_result(f"強制リフレッシュ実行 ({end_time - start_time:.2f}秒)", result3)
+    print("\n=== 2回目実行 (キャッシュ利用) ===")
+    start = time.monotonic()
+    result2 = discover_available_vision_models(force_refresh=False)
+    elapsed = time.monotonic() - start
+    print_result(f"キャッシュ利用 ({elapsed:.2f}秒)", result2)
 
-    print("\n完了。")
-    print(f"結果は {AVAILABLE_API_MODELS_CONFIG_PATH} に保存されているはずです。")
+    print(f"\n完了。結果は {AVAILABLE_API_MODELS_CONFIG_PATH} に保存されています。")
