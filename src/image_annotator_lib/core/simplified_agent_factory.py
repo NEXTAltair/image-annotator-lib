@@ -34,13 +34,18 @@ class SimplifiedAgentFactory:
             if "models" in result:
                 full_data = load_available_api_models()
                 self._all_models_data = full_data
+                # result["models"] をベースに deprecated_on フィルタを適用。
+                # TOML 書き込み失敗時でも新鮮な discovery 結果を保持する。
                 self._available_models = [
-                    mid for mid, data in full_data.items()
-                    if isinstance(data, dict) and data.get("deprecated_on") is None
+                    mid for mid in result["models"]
+                    if not (
+                        isinstance(full_data.get(mid), dict)
+                        and full_data[mid].get("deprecated_on") is not None
+                    )
                 ]
                 logger.info(
                     f"利用可能モデル: {len(self._available_models)} 件"
-                    f" (全 {len(full_data)} 件中)"
+                    f" (全 {len(result['models'])} 件中)"
                 )
             else:
                 logger.error(f"Failed to discover models: {result.get('error', 'Unknown error')}")
