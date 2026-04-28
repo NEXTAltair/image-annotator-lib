@@ -1,0 +1,79 @@
+name: Refresh Model Registry
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # 毎週月曜 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  refresh:
+    name: Refresh API Model Registry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Update LiteLLM to latest
+        run: |
+          uv lock --upgrade-package litellm
+          uv sync
+
+      - name: Set date
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+
+      - name: Refresh model registry
+        run: uv run python tools/check_api_model_discovery.py
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        id: cpr
+        with:
+          commit-message: "chore(deps): refresh model registry ${{ steps.date.outputs.date }}"
+          branch: chore/refresh-model-registry
+          delete-branch: false
+          title: "chore(deps): refresh model registry (${{ steps.date.outputs.date }})"
+          labels: |
+            dependencies
+            model-registry
+          body: |
+            ## 自動生成 PR: モデルレジストリ週次更新
+
+            このPRは週次CI (`refresh-models.yml`) によって自動生成されました。
+
+            ### 変更内容
+            - LiteLLM を最新版に更新（新規モデル・廃止モデルを反映）
+            - `config/available_api_models.toml` を再生成
+            - `[meta] last_refresh` を現在時刻に更新
+
+            ### 確認手順
+            - [ ] 新規モデルが適切に追加されている
+            - [ ] `deprecated_on` が設定された廃止モデルが正しい
+            - [ ] CI (lint / typecheck / unit tests) が通過している
+          add-paths: |
+            config/available_api_models.toml
+            uv.lock
+
+      - name: PR 作成結果を出力
+        if: steps.cpr.outputs.pull-request-number != ''
+        run: |
+          echo "PR #${{ steps.cpr.outputs.pull-request-number }} を作成しました"
+          echo "URL: ${{ steps.cpr.outputs.pull-request-url }}"

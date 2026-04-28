@@ -7,8 +7,47 @@
 - 複数の画像タギングモデルと画像スコアリングモデルをサポート
 - 統一された API (`annotate`) による複数モデル･複数画像の一括処理
 - pHash に基づく画像と結果の紐付け
-- 設定ファイル (`annotator_config.toml`) によるモデル選択と設定
+- 設定ファイル (`annotator_config.toml`) によるモデル選択と設定（ローカル ML モデル専用）
 - メモリ使用量に基づく効率的なモデルキャッシュ管理 (LRU, CPU 退避/CUDA 復元)
+- **LiteLLM による WebAPI モデル自動検出**（追加設定不要）
+
+## WebAPI モデル自動検出
+
+本ライブラリは [LiteLLM](https://github.com/BerriAI/litellm) のローカル DB を使用して、OpenAI / Anthropic / Google などの WebAPI モデルを自動的に検出します。
+
+### 動作フロー
+
+1. **初回起動時**: LiteLLM のローカル DB から Vision 対応モデルを検出し、`config/available_api_models.toml` に保存
+2. **以降の起動時**: `[meta] last_refresh` の TTL（デフォルト 7 日）を確認し、超過時はバックグラウンドで再取得
+3. **週次 CI**: `refresh-models.yml` が最新 LiteLLM で `available_api_models.toml` を更新し PR を自動作成
+
+### 環境変数
+
+| 変数名 | 既定値 | 説明 |
+|---|---|---|
+| `IMAGE_ANNOTATOR_API_MODELS_TTL_DAYS` | `7` | モデルリストの有効期間（日数） |
+| `IMAGE_ANNOTATOR_SKIP_API_DISCOVERY` | `false` | `true` に設定すると起動時の API discovery を完全スキップ |
+
+### プログラムからの利用
+
+```python
+from image_annotator_lib import discover_available_vision_models
+from image_annotator_lib.core.api_model_discovery import should_refresh, trigger_background_refresh
+
+# キャッシュから読み込み（TTL 内なら再取得しない）
+result = discover_available_vision_models()
+if "models" in result:
+    print(f"{len(result['models'])} 件の Vision モデルが利用可能")
+
+# TTL 超過確認と手動 refresh
+if should_refresh():
+    trigger_background_refresh()  # 非同期・起動をブロックしない
+
+# 強制再取得
+result = discover_available_vision_models(force_refresh=True)
+```
+
+詳細は [`docs/integrations.md`](docs/integrations.md) を参照してください。
 
 ## インストール
 
