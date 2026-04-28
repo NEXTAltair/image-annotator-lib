@@ -33,10 +33,13 @@ _BASE_MODEL_IDS = [
 
 @pytest.fixture
 def mock_model_discovery():
-    """Mock discover_available_vision_models と load_available_api_models。
+    """Mock discover_available_vision_models。
+
+    discover_available_vision_models は {"models": [...], "toml_data": {...}} を返す。
+    SimplifiedAgentFactory は toml_data を直接使用するため load_available_api_models は不要。
 
     Mock Strategy:
-    - Mock: API discovery calls, TOML full data
+    - Mock: API discovery calls（toml_data を含む完全な戻り値）
     - Real: Model list structure
 
     Returns:
@@ -46,38 +49,32 @@ def mock_model_discovery():
         mid: {"provider": mid.split("/")[0].capitalize(), "deprecated_on": None}
         for mid in _BASE_MODEL_IDS
     }
-    with (
-        patch(
-            "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
-        ) as mock_discover,
-        patch(
-            "image_annotator_lib.core.simplified_agent_factory.load_available_api_models"
-        ) as mock_load,
-    ):
-        mock_discover.return_value = {"models": _BASE_MODEL_IDS}
-        mock_load.return_value = mock_toml_data
+    with patch(
+        "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
+    ) as mock_discover:
+        mock_discover.return_value = {"models": _BASE_MODEL_IDS, "toml_data": mock_toml_data}
         yield mock_discover
 
 
 @pytest.fixture
 def mock_model_discovery_with_deprecated():
-    """廃止済みモデルを含むモックデータ。"""
+    """廃止済みモデルを含むモックデータ。
+
+    discover_available_vision_models が toml_data（deprecated 含む）を返す。
+    """
     mock_toml_data = {
         "openai/gpt-4o": {"provider": "OpenAI", "deprecated_on": None},
         "openai/gpt-3.5-turbo": {"provider": "OpenAI", "deprecated_on": "2025-01-01T00:00:00Z"},
         "anthropic/claude-3-5-sonnet-20241022": {"provider": "Anthropic", "deprecated_on": None},
     }
-    with (
-        patch(
-            "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
-        ) as mock_discover,
-        patch(
-            "image_annotator_lib.core.simplified_agent_factory.load_available_api_models"
-        ) as mock_load,
-    ):
-        mock_discover.return_value = {"models": list(mock_toml_data.keys())}
-        mock_load.return_value = mock_toml_data
-        yield mock_discover, mock_load
+    with patch(
+        "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
+    ) as mock_discover:
+        mock_discover.return_value = {
+            "models": list(mock_toml_data.keys()),
+            "toml_data": mock_toml_data,
+        }
+        yield mock_discover
 
 
 @pytest.fixture
@@ -448,49 +445,48 @@ def test_is_model_deprecated_false_for_unknown(mock_model_discovery_with_depreca
 
 
 @pytest.mark.unit
-def test_list_all_models_falls_back_to_discovered_ids_when_toml_empty():
-    """TOML データが空（書き込み失敗等）の場合、list_all_models() は discovery 結果を返す。"""
-    discovered_ids = ["openai/gpt-4o", "openai/gpt-3.5-turbo", "anthropic/claude-3-5-sonnet-20241022"]
-    with (
-        patch(
-            "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
-        ) as mock_discover,
-        patch(
-            "image_annotator_lib.core.simplified_agent_factory.load_available_api_models"
-        ) as mock_load,
-    ):
-        mock_discover.return_value = {"models": discovered_ids}
-        mock_load.return_value = {}  # TOML 書き込み失敗 → 空
+def test_list_all_models_uses_toml_data_from_discovery():
+    """list_all_models() は discovery の toml_data（deprecated 含む全モデル）を返す。"""
+    toml_data = {
+        "openai/gpt-4o": {"provider": "OpenAI", "deprecated_on": None},
+        "openai/gpt-3.5-turbo": {"provider": "OpenAI", "deprecated_on": "2025-01-01T00:00:00Z"},
+        "anthropic/claude-3-5-sonnet-20241022": {"provider": "Anthropic", "deprecated_on": None},
+    }
+    with patch(
+        "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
+    ) as mock_discover:
+        mock_discover.return_value = {"models": list(toml_data.keys()), "toml_data": toml_data}
 
         factory = SimplifiedAgentFactory()
         all_models = factory.list_all_models()
 
-    assert set(all_models) == set(discovered_ids)
+    assert set(all_models) == set(toml_data.keys())
 
 
 @pytest.mark.unit
-def test_list_all_models_includes_newly_discovered_when_toml_stale():
-    """TOML が古くて非空（新規モデルが未反映）の場合、discovery 結果を取りこぼさない。"""
-    stale_toml_data = {
+def test_get_available_models_uses_discovery_toml_data_not_stale_cache():
+    """TOML 書き込み失敗時も discovery の toml_data（in-memory）を使うため再アクティブ化モデルを除外しない。
+
+    以前のバグ:
+      - SimplifiedAgentFactory が load_available_api_models() を別途呼んでいたため、
+        TOML write 失敗 → キャッシュが stale → deprecated_on がクリアされず誤フィルタ。
+    修正後:
+      - discovery が返す toml_data を直接使用。TOML write 失敗の影響を受けない。
+    """
+    # discovery の toml_data では再アクティブ化済みで deprecated_on = None
+    toml_data_from_discovery = {
         "openai/gpt-4o": {"provider": "OpenAI", "deprecated_on": None},
-        "openai/old-model": {"provider": "OpenAI", "deprecated_on": None},
+        "openai/reactivated-model": {"provider": "OpenAI", "deprecated_on": None},
     }
-    # discovery では新規モデル new-model も発見されている
-    discovered_ids = ["openai/gpt-4o", "openai/old-model", "openai/new-model"]
-    with (
-        patch(
-            "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
-        ) as mock_discover,
-        patch(
-            "image_annotator_lib.core.simplified_agent_factory.load_available_api_models"
-        ) as mock_load,
-    ):
-        mock_discover.return_value = {"models": discovered_ids}
-        mock_load.return_value = stale_toml_data  # 非空だが古い（new-model なし）
+    with patch(
+        "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
+    ) as mock_discover:
+        mock_discover.return_value = {
+            "models": list(toml_data_from_discovery.keys()),
+            "toml_data": toml_data_from_discovery,
+        }
 
         factory = SimplifiedAgentFactory()
-        all_models = factory.list_all_models()
+        models = factory.get_available_models()
 
-    assert "openai/gpt-4o" in all_models
-    assert "openai/old-model" in all_models
-    assert "openai/new-model" in all_models  # 新規発見モデルが含まれる
+    assert "openai/reactivated-model" in models

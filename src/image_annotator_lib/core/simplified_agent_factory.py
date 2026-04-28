@@ -5,7 +5,6 @@ from typing import Any
 from pydantic_ai import Agent
 
 from .api_model_discovery import discover_available_vision_models
-from .config import load_available_api_models
 from .simple_config import get_model_settings
 from .types import AnnotationSchema
 from .utils import logger
@@ -17,7 +16,6 @@ class SimplifiedAgentFactory:
     def __init__(self) -> None:
         self._available_models: list[str] = []
         self._all_models_data: dict[str, Any] = {}
-        self._discovered_model_ids: list[str] = []
         self._agents_cache: dict[str, Agent] = {}
 
     def refresh_available_models(self, force_refresh: bool = False) -> list[str]:
@@ -33,21 +31,18 @@ class SimplifiedAgentFactory:
         try:
             result = discover_available_vision_models(force_refresh=force_refresh)
             if "models" in result:
-                full_data = load_available_api_models()
-                self._all_models_data = full_data
-                self._discovered_model_ids = result["models"]
-                # result["models"] をベースに deprecated_on フィルタを適用。
-                # TOML 書き込み失敗時でも新鮮な discovery 結果を保持する。
+                # discovery の toml_data を直接使用する。
+                # TOML 書き込み失敗時も in-memory の正確なデータが渡されるため
+                # 別途 load_available_api_models() を呼ぶ必要がない。
+                toml_data: dict[str, Any] = result.get("toml_data", {})
+                self._all_models_data = toml_data
                 self._available_models = [
-                    mid for mid in result["models"]
-                    if not (
-                        isinstance(full_data.get(mid), dict)
-                        and full_data[mid].get("deprecated_on") is not None
-                    )
+                    mid for mid, data in toml_data.items()
+                    if isinstance(data, dict) and data.get("deprecated_on") is None
                 ]
                 logger.info(
                     f"利用可能モデル: {len(self._available_models)} 件"
-                    f" (全 {len(result['models'])} 件中)"
+                    f" (全 {len(toml_data)} 件中)"
                 )
             else:
                 logger.error(f"Failed to discover models: {result.get('error', 'Unknown error')}")
@@ -123,12 +118,9 @@ class SimplifiedAgentFactory:
 
     def list_all_models(self) -> list[str]:
         """廃止済みモデルを含む全モデル ID のリストを返す。"""
-        if not self._all_models_data and not self._discovered_model_ids:
+        if not self._all_models_data:
             self.refresh_available_models()
-        # TOML（deprecated 含む履歴）と discovery 結果のユニオンを返す。
-        # TOML が古くて一部しか一致しない場合でも新規発見モデルを取りこぼさない。
-        all_ids = set(self._all_models_data.keys()) | set(self._discovered_model_ids)
-        return list(all_ids)
+        return list(self._all_models_data.keys())
 
     def is_model_deprecated(self, model_id: str) -> bool:
         """指定モデルが廃止済みかどうかを確認する。"""

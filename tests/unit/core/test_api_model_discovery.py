@@ -230,7 +230,9 @@ def test_discover_uses_cache_when_toml_exists(mock_litellm, mock_toml_paths):
     result = discover_available_vision_models(force_refresh=False)
 
     assert "models" in result
+    assert "toml_data" in result
     assert "openai/gpt-4o" in result["models"]
+    assert "openai/gpt-4o" in result["toml_data"]
     mock_litellm.supports_vision.assert_not_called()
 
 
@@ -248,6 +250,7 @@ def test_discover_calls_litellm_when_toml_empty(mock_litellm, mock_toml_paths):
         result = discover_available_vision_models(force_refresh=False)
 
     assert "models" in result
+    assert "toml_data" in result
     mock_litellm.supports_vision.assert_called()
 
 
@@ -260,7 +263,9 @@ def test_discover_force_refresh_calls_litellm(mock_litellm, mock_toml_paths):
         result = discover_available_vision_models(force_refresh=True)
 
     assert "models" in result
+    assert "toml_data" in result
     assert "openai/gpt-4o" in result["models"]
+    assert "openai/gpt-4o" in result["toml_data"]
     mock_litellm.supports_vision.assert_called()
     assert mock_toml_paths.exists()
 

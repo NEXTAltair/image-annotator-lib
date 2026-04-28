@@ -113,8 +113,12 @@ def _fetch_from_openrouter_fallback() -> list[dict[str, Any]]:
         return []
 
 
-def _fetch_and_update_vision_models() -> list[str]:
-    """LiteLLM DB (メイン) + OpenRouter API (フォールバック) でモデル一覧を更新する。"""
+def _fetch_and_update_vision_models() -> dict[str, Any]:
+    """LiteLLM DB (メイン) + OpenRouter API (フォールバック) でモデル一覧を更新する。
+
+    Returns:
+        updated_toml_data: 更新済みの全モデルデータ（TOML 書き込み失敗時も in-memory の正確なデータを返す）
+    """
     now = dt.now(datetime.UTC)
     current_time_iso = now.isoformat(timespec="seconds") + "Z"
 
@@ -136,10 +140,11 @@ def _fetch_and_update_vision_models() -> list[str]:
     updated_toml_data = _update_toml_with_api_results(existing_toml_data, all_models, current_time_iso)
     save_available_api_models(updated_toml_data)
 
-    return list(updated_toml_data.keys())
+    # TOML 書き込み失敗（save が例外を握りつぶす）でも in-memory の正確なデータを返す
+    return updated_toml_data
 
 
-def discover_available_vision_models(force_refresh: bool = False) -> dict[str, list[str] | str]:
+def discover_available_vision_models(force_refresh: bool = False) -> dict[str, Any]:
     """
     利用可能な Vision 対応モデルの一覧を取得する。
 
@@ -152,11 +157,10 @@ def discover_available_vision_models(force_refresh: bool = False) -> dict[str, l
         force_refresh: True の場合、ローカルファイルを無視して強制的に再取得する。
 
     Returns:
-        モデル ID のリスト、またはエラーメッセージを含む辞書。
-        キーは "models" (成功時) または "error" (失敗時)。
-        例:
-            成功時: {"models": ["openai/gpt-4o", "google/gemini-1.5-pro", ...]}
-            失敗時: {"error": "エラー詳細"}
+        成功時: {"models": list[str], "toml_data": dict[str, Any]}
+            - "models": 全モデル ID のリスト（deprecated 含む）
+            - "toml_data": 全モデルのメタデータ辞書（TOML 書き込み失敗時も in-memory の正確なデータ）
+        失敗時: {"error": str}
     """
     if not force_refresh:
         existing_toml_data = load_available_api_models()
@@ -165,7 +169,7 @@ def discover_available_vision_models(force_refresh: bool = False) -> dict[str, l
             logger.info(
                 f"ローカルファイル ({AVAILABLE_API_MODELS_CONFIG_PATH}) から {len(model_ids)} 件のモデル情報を読み込みました。"
             )
-            return {"models": model_ids}
+            return {"models": model_ids, "toml_data": existing_toml_data}
         else:
             logger.info(
                 f"ローカルファイル ({AVAILABLE_API_MODELS_CONFIG_PATH}) が存在しないか空です。LiteLLM DB から取得します。"
@@ -173,8 +177,8 @@ def discover_available_vision_models(force_refresh: bool = False) -> dict[str, l
 
     try:
         logger.info("LiteLLM DB から最新のモデル情報を取得・更新します。")
-        updated_model_ids = _fetch_and_update_vision_models()
-        return {"models": updated_model_ids}
+        updated_data = _fetch_and_update_vision_models()
+        return {"models": list(updated_data.keys()), "toml_data": updated_data}
 
     except (ApiTimeoutError, ApiRequestError, ApiServerError, WebApiError) as e:
         logger.error(f"モデル取得中にエラーが発生: {e}")
