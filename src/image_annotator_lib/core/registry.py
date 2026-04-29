@@ -15,6 +15,7 @@ ModelClass = type[BaseAnnotator]
 
 _MODEL_CLASS_OBJ_REGISTRY: dict[str, ModelClass] = {}
 _REGISTRY_INITIALIZED: bool = False
+_WEBAPI_MODEL_METADATA: dict[str, dict[str, Any]] = {}
 
 
 # --- プライベートヘルパー関数 ---
@@ -432,7 +433,7 @@ def list_available_annotators_with_metadata() -> dict[str, dict[str, any]]:
         logger.debug(f"設定から{len(all_config)}件のモデル設定を取得しました")
 
         for model_name, model_class in _MODEL_CLASS_OBJ_REGISTRY.items():
-            model_config = all_config.get(model_name, {})
+            model_config = all_config.get(model_name) or _WEBAPI_MODEL_METADATA.get(model_name, {})
             result[model_name] = _build_annotator_metadata(model_name, model_class, model_config)
             logger.debug(f"モデル '{model_name}' のメタデータを生成しました")
 
@@ -527,43 +528,33 @@ def normalize_model_name(model_name: str) -> str | None:
     return result[0] if result else None
 
 
-def _find_annotator_class_by_provider(provider: str, available_classes: dict[str, ModelClass]) -> str:
-    """プロバイダー名に基づいてアノテータークラス名を決定する。
+def _register_webapi_models_from_discovery() -> None:
+    """available_api_models.toml を読み込み、WebAPI モデルをレジストリに直接登録する。
 
-    PydanticAI統一実装により、すべてのWebAPIプロバイダーは
-    PydanticAIWebAPIAnnotatorを使用します。
+    annotator_config.toml への書き込みを行わず、廃止済みモデルを除外する。
     """
-    # 常にPydanticAI統一実装を使用(すべてのWebAPIプロバイダーを統一)
-    logger.debug(f"プロバイダー '{provider}' に対してPydanticAI統一実装を使用します")
-    return "PydanticAIWebAPIAnnotator"
-
-
-def _update_config_with_api_models() -> None:
-    """available_api_models.toml を読み込み、annotator_config.toml にデフォルト設定を追加する。"""
-    logger.debug("Web API モデルに基づいて annotator_config.toml の更新を開始します...")
+    logger.debug("available_api_models.toml から WebAPI モデルの直接登録を開始します...")
     try:
-        # 利用可能なAPIモデル情報をロード
         api_models = load_available_api_models()
         if not api_models:
-            logger.debug("利用可能な Web API モデル情報が見つかりません。設定の更新をスキップします。")
+            logger.debug("利用可能な Web API モデル情報が見つかりません。登録をスキップします。")
             return
 
-        logger.debug(f"{len(api_models)} 件の利用可能な Web API モデル情報をロードしました。")
+        logger.debug(f"{len(api_models)} 件の Web API モデル情報をロードしました。")
 
-        # 利用可能なアノテータークラスを収集
         available_classes = _gather_available_classes("model_class")
-        if not available_classes:
-            logger.warning(
-                "利用可能なアノテータークラスが見つかりません。クラス名のマッピングができません。"
-            )
-            # 続行するが、クラス名は OpenRouterApiAnnotator にフォールバックされる
+        pydantic_ai_class = available_classes.get("PydanticAIWebAPIAnnotator")
+        if not pydantic_ai_class:
+            logger.error("PydanticAIWebAPIAnnotator クラスが見つかりません。WebAPI モデルは登録できません。")
+            return
 
-        # 各APIモデルについて設定を追加
+        registered_count = 0
         for model_id, model_info in api_models.items():
             if not isinstance(model_info, dict):
-                logger.warning(
-                    f"モデルID '{model_id}' の情報形式が不正です (辞書ではありません)。スキップします。"
-                )
+                logger.warning(f"モデルID '{model_id}' の情報形式が不正です。スキップします。")
+                continue
+
+            if model_info.get("deprecated_on") is not None:
                 continue
 
             model_name_short = model_info.get("model_name_short")
@@ -571,25 +562,29 @@ def _update_config_with_api_models() -> None:
 
             if not model_name_short or not provider:
                 logger.warning(
-                    f"モデルID '{model_id}' の情報に model_name_short または provider がありません。スキップします。"
+                    f"モデルID '{model_id}' に model_name_short または provider がありません。スキップします。"
                 )
                 continue
 
-            # プロバイダー名からクラス名を決定
-            target_class_name = _find_annotator_class_by_provider(provider, available_classes)
+            if _try_register_model(_MODEL_CLASS_OBJ_REGISTRY, model_name_short, pydantic_ai_class, BaseAnnotator):
+                registered_count += 1
+                metadata = {
+                    "api_model_id": model_id,
+                    "provider": provider,
+                    "max_output_tokens": 1800,
+                    "type": "webapi",
+                    "class": "PydanticAIWebAPIAnnotator",
+                }
+                _WEBAPI_MODEL_METADATA[model_name_short] = metadata
+                # PydanticAIWebAPIAnnotator が config_registry 経由で api_model_id を読むため
+                # ファイルに書かずにメモリ内の merged config に登録する
+                config_registry.set_system_value(model_name_short, "api_model_id", model_id)
+                config_registry.set_system_value(model_name_short, "class", "PydanticAIWebAPIAnnotator")
 
-            # デフォルト設定を追加 (class, max_output_tokens, api_model_id)
-            # add_default_setting はキーが存在しない場合のみ追加し、自動保存する
-            config_registry.add_default_setting(model_name_short, "class", target_class_name)
-            config_registry.add_default_setting(model_name_short, "max_output_tokens", 1800)
-            config_registry.add_default_setting(model_name_short, "api_model_id", model_id)
-
-        logger.debug("annotator_config.toml の Web API モデル設定の更新が完了しました。")
+        logger.info(f"WebAPI モデルの直接登録が完了しました。登録済み: {registered_count} 件。")
 
     except Exception as e:
-        logger.error(
-            f"annotator_config.toml の自動更新中に予期せぬエラーが発生しました: {e}", exc_info=True
-        )
+        logger.error(f"WebAPI モデルの直接登録中に予期せぬエラーが発生しました: {e}", exc_info=True)
 
 
 def _discover_and_update_api_models(skip_api_discovery: bool) -> None:
@@ -627,12 +622,12 @@ def _discover_and_update_api_models(skip_api_discovery: bool) -> None:
     else:
         logger.debug("API モデル情報は TTL 内のため、既存キャッシュを使用します。")
 
-    # available_api_models.toml を読み込み、annotator_config.toml を更新
+    # available_api_models.toml からWebAPIモデルをレジストリに直接登録
     if AVAILABLE_API_MODELS_CONFIG_PATH.exists():
-        _update_config_with_api_models()
+        _register_webapi_models_from_discovery()
     else:
         logger.warning(
-            f"{AVAILABLE_API_MODELS_CONFIG_PATH} が存在しないため、Web API モデル設定を読み込めません。"
+            f"{AVAILABLE_API_MODELS_CONFIG_PATH} が存在しないため、Web API モデルの登録をスキップします。"
         )
 
     # ファイル読み取り完了後にバックグラウンド refresh を起動（read/write 競合を排除）
