@@ -568,13 +568,18 @@ def _register_webapi_models_from_discovery() -> None:
 
             if _try_register_model(_MODEL_CLASS_OBJ_REGISTRY, model_name_short, pydantic_ai_class, BaseAnnotator):
                 registered_count += 1
-                _WEBAPI_MODEL_METADATA[model_name_short] = {
+                metadata = {
                     "api_model_id": model_id,
                     "provider": provider,
                     "max_output_tokens": 1800,
                     "type": "webapi",
                     "class": "PydanticAIWebAPIAnnotator",
                 }
+                _WEBAPI_MODEL_METADATA[model_name_short] = metadata
+                # PydanticAIWebAPIAnnotator が config_registry 経由で api_model_id を読むため
+                # ファイルに書かずにメモリ内の merged config に登録する
+                config_registry.set_system_value(model_name_short, "api_model_id", model_id)
+                config_registry.set_system_value(model_name_short, "class", "PydanticAIWebAPIAnnotator")
 
         logger.info(f"WebAPI モデルの直接登録が完了しました。登録済み: {registered_count} 件。")
 
