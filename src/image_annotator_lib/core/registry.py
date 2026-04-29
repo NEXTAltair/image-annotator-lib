@@ -210,6 +210,9 @@ def _try_register_model(
         return False
 
     if model_name in registry:
+        if registry[model_name] is model_cls:
+            logger.debug(f"モデル名 '{model_name}' は既に登録されています（同一クラス）。スキップします。")
+            return True
         logger.warning(f"モデル名 '{model_name}' は既に登録されています。クラス '{model_cls.__name__}' で上書きします。")
     registry[model_name] = model_cls
     logger.debug(f"モデル '{model_name}' をクラス '{model_cls.__name__}' でレジストリに登録しました。")
