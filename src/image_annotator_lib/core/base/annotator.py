@@ -11,7 +11,7 @@ from PIL import Image
 from ...exceptions.errors import OutOfMemoryError
 from ..config import config_registry
 from ..model_config import BaseModelConfig, ModelConfigFactory
-from ..types import AnnotationResult, LoaderComponents, UnifiedAnnotationResult
+from ..types import LoaderComponents, UnifiedAnnotationResult
 from ..utils import logger
 
 
@@ -112,18 +112,6 @@ class BaseAnnotator(ABC):
         """
         raise NotImplementedError("サブクラスは _format_predictions を実装する必要があります。")
 
-    @abstractmethod
-    def _generate_tags(self, formatted_output: Any) -> list[str]:
-        """整形済み出力からタグリストを生成します。
-
-        Args:
-            formatted_output: _format_predictions の出力。
-
-        Returns:
-            タグの文字列リスト。
-        """
-        raise NotImplementedError("サブクラスは _generate_tags を実装する必要があります。")
-
     def predict(
         self, images: list[Image.Image], phash_list: list[str] | None = None
     ) -> list[UnifiedAnnotationResult]:
@@ -182,8 +170,8 @@ class BaseAnnotator(ABC):
     ) -> list[UnifiedAnnotationResult]:
         """各画像の推論出力からアノテーション結果を構築する。
 
-        _format_predictionsがUnifiedAnnotationResultを返す場合はそのまま使用。
-        それ以外の場合はget_model_capabilitiesを使って変換する（後方互換）。
+        全アノテーターは `_format_predictions` で `UnifiedAnnotationResult` を返すことが必須。
+        旧形式 (dict / list[str] 等) を返した場合は TypeError を送出する。
 
         Args:
             images: 元画像リスト。
@@ -191,31 +179,18 @@ class BaseAnnotator(ABC):
 
         Returns:
             UnifiedAnnotationResult結果のリスト。
-        """
-        from ..utils import get_model_capabilities
 
+        Raises:
+            TypeError: `formatted_output` が UnifiedAnnotationResult でない場合。
+        """
         results: list[UnifiedAnnotationResult] = []
-        for i, (image, formatted_output) in enumerate(zip(images, formatted_outputs, strict=True)):
-            try:
-                if isinstance(formatted_output, UnifiedAnnotationResult):
-                    # _format_predictionsが既にUnifiedAnnotationResultを返す場合
-                    results.append(formatted_output)
-                else:
-                    # 後方互換: 旧形式の出力をUnifiedAnnotationResultに変換
-                    capabilities = get_model_capabilities(self.model_name)
-                    tags = self._generate_tags(formatted_output)
-                    result = UnifiedAnnotationResult(
-                        model_name=self.model_name,
-                        capabilities=capabilities,
-                        tags=tags or None,
-                        raw_output={"formatted_output": formatted_output}
-                        if formatted_output is not None
-                        else None,
-                    )
-                    results.append(result)
-            except Exception as e:
-                logger.exception(f"画像 {i} の処理中にエラー: {e}")
-                results.append(self._create_error_result(f"タグ生成エラー: {e}"))
+        for i, (_image, formatted_output) in enumerate(zip(images, formatted_outputs, strict=True)):
+            if not isinstance(formatted_output, UnifiedAnnotationResult):
+                raise TypeError(
+                    f"画像 {i}: _format_predictions は UnifiedAnnotationResult を返す必要があります "
+                    f"(モデル: {self.model_name}, 取得型: {type(formatted_output).__name__})"
+                )
+            results.append(formatted_output)
         return results
 
     def _create_error_result(self, error_message: str) -> UnifiedAnnotationResult:

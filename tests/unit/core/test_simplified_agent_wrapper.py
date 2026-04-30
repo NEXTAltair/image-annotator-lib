@@ -403,30 +403,7 @@ class TestSimplifiedWrapperFormatting:
     def test_simplified_wrapper_format_output_and_tags(
         self, mock_pydantic_ai_agent, mock_agent_result_with_tags, managed_config_registry
     ):
-        """Test tag extraction and output formatting.
-
-        Coverage: Lines 85-111, 113-126, 177-193 (_format_predictions, _generate_tags, _format_output)
-
-        REAL components:
-        - Real tag extraction logic
-        - Real dict formatting
-
-        MOCKED:
-        - Agent result with tags attribute
-
-        Scenario:
-        1. Initialize wrapper
-        2. Call _format_predictions with mock agent results
-        3. Verify tags extracted
-        4. Verify dict formatted correctly
-
-        Assertions:
-        - Tags list extracted from result.tags
-        - method field set to "simplified_pydantic_ai"
-        - tag_count matches tags length
-        - model_id included in output
-        """
-        # Setup: Register minimal config for test model
+        """Test tag extraction in _format_predictions returning UnifiedAnnotationResult."""
         managed_config_registry.set(
             "test/model-formatting",
             {
@@ -444,54 +421,23 @@ class TestSimplifiedWrapperFormatting:
 
             wrapper = SimplifiedAgentWrapper(model_id="test/model-formatting")
 
-            # Act: Format predictions
             formatted = wrapper._format_predictions([mock_agent_result_with_tags])
 
-            # Assert: Formatted output structure
             assert len(formatted) == 1, "1つのフォーマット済み結果"
-            output = formatted[0]
+            unified = formatted[0]
 
-            # Assert: Tags extracted
-            assert output["tags"] == ["mock_tag_1", "mock_tag_2", "mock_tag_3"], "タグ正しく抽出"
-            assert output["tag_count"] == 3, "tag_count正しい"
-
-            # Assert: Method field set
-            assert output["method"] == "simplified_pydantic_ai", "method: simplified_pydantic_ai"
-
-            # Assert: model_id included
-            assert output["model_id"] == "test/model-formatting", "model_id含まれる"
-
-            # Act: Generate tags from formatted output
-            tags = wrapper._generate_tags(output)
-
-            # Assert: Tags list returned
-            assert tags == ["mock_tag_1", "mock_tag_2", "mock_tag_3"], "_generate_tagsでタグ抽出"
+            assert unified.model_name == "test/model-formatting", "model_name 正しく設定"
+            assert unified.tags == ["mock_tag_1", "mock_tag_2", "mock_tag_3"], "タグ正しく抽出"
+            assert unified.framework == "pydantic_ai", "framework 識別子"
+            assert unified.raw_output is not None
+            assert unified.raw_output["tag_count"] == 3, "raw_output に tag_count"
+            assert unified.raw_output["method"] == "simplified_pydantic_ai"
 
     @pytest.mark.unit
     def test_simplified_wrapper_format_output_no_tags(
         self, mock_pydantic_ai_agent, managed_config_registry
     ):
-        """Test formatting when result has no tags.
-
-        Coverage: Lines 98-111 (_format_predictions edge case)
-
-        REAL components:
-        - Real empty tags handling
-
-        MOCKED:
-        - Agent result without tags attribute
-
-        Scenario:
-        1. Initialize wrapper
-        2. Pass result without tags attribute
-        3. Verify empty tags list used
-
-        Assertions:
-        - tags field is empty list
-        - tag_count is 0
-        - No exception raised
-        """
-        # Register config BEFORE wrapper initialization
+        """Test _format_predictions when result has no tags."""
         managed_config_registry.set(
             "test/model-no-tags",
             {
@@ -509,49 +455,24 @@ class TestSimplifiedWrapperFormatting:
 
             wrapper = SimplifiedAgentWrapper(model_id="test/model-no-tags")
 
-            # Mock result without tags
             mock_result_no_tags = MagicMock()
-            del mock_result_no_tags.tags  # Remove tags attribute
+            del mock_result_no_tags.tags
 
-            # Act: Format predictions
             formatted = wrapper._format_predictions([mock_result_no_tags])
 
-            # Assert: Empty tags list
-            assert formatted[0]["tags"] == [], "タグなし時は空リスト"
-            assert formatted[0]["tag_count"] == 0, "tag_count: 0"
+            assert formatted[0].tags is None, "タグなし時は None (capability validation 通過)"
+            assert formatted[0].raw_output is not None
+            assert formatted[0].raw_output["tag_count"] == 0, "raw_output の tag_count: 0"
 
 
-class TestSimplifiedWrapperRunInference:
-    """run_inference public method tests."""
+class TestSimplifiedWrapperPredict:
+    """predict() public pipeline tests for SimplifiedAgentWrapper."""
 
     @pytest.mark.unit
-    def test_simplified_wrapper_run_inference_success(
+    def test_simplified_wrapper_predict_success(
         self, mock_pydantic_ai_agent, mock_agent_result_with_tags, managed_config_registry
     ):
-        """Test run_inference public method with successful inference.
-
-        Coverage: Lines 195-238 (run_inference method - UPDATED for complete pipeline)
-
-        REAL components:
-        - Real AnnotationResult creation
-        - Real error handling
-        - Real complete 4-step pipeline (preprocess → inference → format → extract)
-
-        MOCKED:
-        - Agent operations
-
-        Scenario:
-        1. Initialize wrapper with config
-        2. Mock successful inference
-        3. Call run_inference (tests REAL pipeline)
-        4. Verify AnnotationResult returned
-
-        Assertions:
-        - AnnotationResult with tags from mock agent
-        - formatted_output contains expected fields
-        - error is None
-        """
-        # Register config BEFORE wrapper initialization
+        """Test predict() returns UnifiedAnnotationResult through complete pipeline."""
         managed_config_registry.set(
             "test/model-public",
             {
@@ -567,29 +488,17 @@ class TestSimplifiedWrapperRunInference:
             mock_factory_instance.get_cached_agent.return_value = mock_pydantic_ai_agent
             mock_factory.return_value = mock_factory_instance
 
-            # Mock successful run_sync
             mock_pydantic_ai_agent.run_sync.return_value = mock_agent_result_with_tags
 
             wrapper = SimplifiedAgentWrapper(model_id="test/model-public")
 
-            # Create test image
             test_image = Image.new("RGB", (64, 64), "blue")
 
-            # Act: Run inference (tests REAL complete pipeline)
-            result = wrapper.run_inference(test_image)
+            results = wrapper.predict([test_image])
 
-            # Assert: AnnotationResult structure (TypedDict doesn't support isinstance)
-            assert isinstance(result, dict), "AnnotationResult型はdict"
-            assert "tags" in result, "tagsキー存在"
-            assert "formatted_output" in result, "formatted_outputキー存在"
-            assert "error" in result, "errorキー存在"
-            assert result["error"] is None, "エラーなし"
-
-            # Assert: Real tags from mock_agent_result_with_tags
-            assert result["tags"] == ["mock_tag_1", "mock_tag_2", "mock_tag_3"], "タグ正しく抽出"
-
-            # Assert: formatted_output structure
-            assert "tags" in result["formatted_output"], "formatted_outputにtags存在"
-            assert "model_id" in result["formatted_output"], "formatted_outputにmodel_id存在"
-            assert "method" in result["formatted_output"], "formatted_outputにmethod存在"
-            assert result["formatted_output"]["method"] == "simplified_pydantic_ai"
+            assert len(results) == 1, "predict は画像数と同じ結果数を返す"
+            unified = results[0]
+            assert unified.model_name == "test/model-public", "model_name 設定"
+            assert unified.tags == ["mock_tag_1", "mock_tag_2", "mock_tag_3"], "タグ正しく抽出"
+            assert unified.error is None, "エラーなし"
+            assert unified.framework == "pydantic_ai", "framework 識別子"

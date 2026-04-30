@@ -180,7 +180,7 @@ model_path = "Minthy/ToriiGate-v0.3"
 class = "ToriiGateTagger"
 device = "cpu"
 estimated_size_gb = 37.828
-type = "tagger"
+type = "captioner"
 
 [deepdanbooru-v3-20211112-sgd-e28]
 model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v3-20211112-sgd-e28/deepdanbooru-v3-20211112-sgd-e28.zip"

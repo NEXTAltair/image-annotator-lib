@@ -13,6 +13,7 @@ import pytest
 
 from image_annotator_lib.core.base.annotator import BaseAnnotator
 from image_annotator_lib.core.model_config import LocalMLModelConfig
+from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
 from image_annotator_lib.exceptions.errors import ConfigurationError
 
 
@@ -37,12 +38,15 @@ class ConcreteTestAnnotator(BaseAnnotator):
         return processed
 
     def _format_predictions(self, raw_outputs):
-        """結果整形(テスト用スタブ)"""
-        return [{"score": 0.9}] * len(raw_outputs)
-
-    def _generate_tags(self, formatted_output):
-        """タグ生成(テスト用スタブ)"""
-        return ["test_tag"]
+        """結果整形(テスト用スタブ)。UnifiedAnnotationResult を返す。"""
+        return [
+            UnifiedAnnotationResult(
+                model_name=self.model_name,
+                capabilities={TaskCapability.TAGS},
+                tags=["test_tag"],
+            )
+            for _ in raw_outputs
+        ]
 
 
 @pytest.fixture

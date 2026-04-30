@@ -10,7 +10,7 @@ from transformers.models.clip import CLIPProcessor
 from ...exceptions.errors import ConfigurationError, ModelLoadError, OutOfMemoryError
 from ..config import config_registry
 from ..model_factory import ModelLoad
-from ..types import TransformersComponents
+from ..types import TransformersComponents, UnifiedAnnotationResult
 from ..utils import logger
 from .annotator import BaseAnnotator
 
@@ -153,14 +153,19 @@ class TransformersBaseAnnotator(BaseAnnotator):
                 outputs.append(model_out)
         return outputs
 
-    def _format_predictions(self, token_ids_list: list[torch.Tensor]) -> list[Any]:
+    def _format_predictions(self, token_ids_list: list[torch.Tensor]) -> list[UnifiedAnnotationResult]:
         """生出力バッチをフォーマットします (Transformers用、テキストデコード)。
+
+        capabilities に応じて captions / tags の両方または片方にデコード文字列を格納する。
+        TAGS と CAPTIONS の両方が capabilities に含まれるマルチタスクモデルでは
+        両フィールドに同じ payload を入れて情報損失を防ぐ
+        (UnifiedAnnotationResult は両フィールド同時設定を許可している)。
 
         Returns:
             list[UnifiedAnnotationResult]: 統一フォーマットのアノテーション結果リスト
         """
         # 関数レベルでインポート（循環インポート回避）
-        from ..types import UnifiedAnnotationResult
+        from ..types import TaskCapability, UnifiedAnnotationResult
         from ..utils import get_model_capabilities
 
         if (
@@ -171,7 +176,7 @@ class TransformersBaseAnnotator(BaseAnnotator):
             raise RuntimeError("Transformer プロセッサがロードされていません。")
 
         processor_obj = self.components["processor"]
-        all_formatted: list[Any] = []
+        all_formatted: list[UnifiedAnnotationResult] = []
 
         # get_model_capabilities を一度だけ呼び出す
         try:
@@ -200,12 +205,16 @@ class TransformersBaseAnnotator(BaseAnnotator):
                 else:
                     raise TypeError(f"Unsupported processor type: {type(processor_obj)}")
 
-                # UnifiedAnnotationResult に変換
+                payload = [decoded_text] if decoded_text else None
+                captions_value = (
+                    payload if (TaskCapability.CAPTIONS in capabilities and payload) else None
+                )
+                tags_value = payload if (TaskCapability.TAGS in capabilities and payload) else None
                 result = UnifiedAnnotationResult(
                     model_name=self.model_name,
                     capabilities=capabilities,
-                    captions=[decoded_text] if decoded_text else None,
-                    tags=[decoded_text] if decoded_text else None,
+                    captions=captions_value,
+                    tags=tags_value,
                     framework="transformers",
                 )
                 all_formatted.append(result)
@@ -221,22 +230,3 @@ class TransformersBaseAnnotator(BaseAnnotator):
                 framework="transformers",
             )
             return [error_result]
-
-    def _generate_tags(self, formatted_output: str | list[str]) -> list[str]:
-        """キャプション文字列を単一要素のリストに変換します。
-
-        formatted_outputは文字列型であるため、単純にそれを含む
-        リストを返します。文字列以外の型の場合は、エラーログを出力して
-        空のリストを返します。
-        """
-        try:
-            if isinstance(formatted_output, str):
-                return [formatted_output]
-            else:
-                logger.warning(
-                    f"_generate_tags: 期待される文字列型ではありません: {type(formatted_output)}"
-                )
-                return []
-        except Exception as e:
-            logger.exception(f"タグ生成中にエラー発生: {e}")
-            return []
