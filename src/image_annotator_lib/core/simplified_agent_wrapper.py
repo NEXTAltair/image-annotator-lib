@@ -10,8 +10,8 @@ from pydantic_ai.messages import BinaryContent
 
 from .base.annotator import BaseAnnotator
 from .simplified_agent_factory import get_agent_factory
-from .types import AnnotationResult
-from .utils import logger
+from .types import TaskCapability, UnifiedAnnotationResult
+from .utils import get_model_capabilities, logger
 
 
 class SimplifiedAgentWrapper(BaseAnnotator):
@@ -82,48 +82,35 @@ class SimplifiedAgentWrapper(BaseAnnotator):
             results.append(result)
         return results
 
-    def _format_predictions(self, raw_outputs: list[Any]) -> list[dict[str, Any]]:
+    def _format_predictions(self, raw_outputs: list[Any]) -> list[UnifiedAnnotationResult]:
         """
-        Format raw inference results.
+        Format raw inference results into UnifiedAnnotationResult.
 
         Args:
             raw_outputs: List of raw results from _run_inference
 
         Returns:
-            List of formatted prediction dictionaries
+            List of UnifiedAnnotationResult instances
         """
-        formatted = []
+        capabilities = get_model_capabilities(self.model_name)
+        if not capabilities:
+            # PydanticAI Agents は config に type が無いことがあるため TAGS をデフォルトとする
+            capabilities = {TaskCapability.TAGS}
+
+        formatted: list[UnifiedAnnotationResult] = []
         for output in raw_outputs:
-            # Extract tags from AnnotationSchema result
-            if hasattr(output, "tags") and output.tags:
-                tags = output.tags
-            else:
-                tags = []
+            tags = list(output.tags) if hasattr(output, "tags") and output.tags else []
 
             formatted.append(
-                {
-                    "model_id": self.model_id,
-                    "tags": tags,
-                    "tag_count": len(tags),
-                    "method": "simplified_pydantic_ai",
-                }
+                UnifiedAnnotationResult(
+                    model_name=self.model_id,
+                    capabilities=capabilities,
+                    tags=tags if (TaskCapability.TAGS in capabilities and tags) else None,
+                    framework="pydantic_ai",
+                    raw_output={"method": "simplified_pydantic_ai", "tag_count": len(tags)},
+                )
             )
         return formatted
-
-    def _generate_tags(self, formatted_output: Any) -> list[str]:
-        """
-        Extract tags from formatted output.
-
-        Args:
-            formatted_output: Formatted prediction dictionary from _format_predictions
-
-        Returns:
-            List of extracted tags
-        """
-        if isinstance(formatted_output, dict) and "tags" in formatted_output:
-            tags = formatted_output["tags"]
-            return tags if isinstance(tags, list) else []
-        return []
 
     def _pil_to_binary_content(self, image: Image.Image) -> BinaryContent:
         """Convert PIL Image to PydanticAI BinaryContent."""
@@ -174,57 +161,3 @@ class SimplifiedAgentWrapper(BaseAnnotator):
             future = executor.submit(run_with_new_loop)
             return future.result()
 
-    def _format_output(self, image: Image.Image, tags: list[str]) -> dict[str, Any]:
-        """
-        Format output for compatibility with existing API.
-
-        Args:
-            image: Original PIL Image
-            tags: Generated tags
-
-        Returns:
-            Formatted output dictionary
-        """
-        return {
-            "model_id": self.model_id,
-            "tags": tags,
-            "tag_count": len(tags),
-            "method": "simplified_pydantic_ai",
-        }
-
-    def run_inference(self, image: Image.Image) -> AnnotationResult:
-        """
-        Run inference on an image following the complete BaseAnnotator pipeline.
-
-        Args:
-            image: PIL Image to annotate
-
-        Returns:
-            AnnotationResult with tags and formatted output
-
-        Note:
-            Implements the full pipeline:
-            1. Preprocess: PIL Image → BinaryContent
-            2. Inference: BinaryContent → Agent result
-            3. Format: Agent result → structured dict
-            4. Extract: dict → tags list
-        """
-        try:
-            # Step 1: Preprocess image to BinaryContent
-            processed = self._preprocess_images([image])
-
-            # Step 2: Run inference with agent
-            raw_outputs = self._run_inference(processed)
-
-            # Step 3: Format agent results
-            formatted_outputs = self._format_predictions(raw_outputs)
-
-            # Step 4: Extract tags from formatted output
-            formatted_output = formatted_outputs[0] if formatted_outputs else {}
-            tags = self._generate_tags(formatted_output)
-
-            return AnnotationResult(tags=tags, formatted_output=formatted_output, error=None)
-        except Exception as e:
-            error_msg = f"Inference failed for {self.model_id}: {e}"
-            logger.error(error_msg)
-            return AnnotationResult(tags=[], formatted_output={"error": error_msg}, error=error_msg)

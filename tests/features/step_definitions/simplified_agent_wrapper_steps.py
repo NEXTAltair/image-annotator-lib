@@ -199,29 +199,22 @@ def call_run_inference(wrapper: SimplifiedAgentWrapper, load_image_files):
 
 @when("run_inference メソッドを呼び出す", target_fixture="run_inference_result")
 def call_run_inference_method(wrapper_with_error: SimplifiedAgentWrapper, load_image_files):
-    """run_inferenceメソッドを呼び出す"""
+    """predict() を経由して BaseAnnotator のパイプラインを呼び出す。
+
+    旧 run_inference (テスト専用 API) は撤去済みのため predict() 経由でテストする。
+    """
     pil_image = load_image_files(1)[0]
-    result = wrapper_with_error.run_inference([pil_image])
-    return result
+    return wrapper_with_error.predict([pil_image])
 
 
 @when("run_syncがRuntimeError (Event loop関連) を発生させる", target_fixture="async_fallback_result")
 def trigger_event_loop_error(wrapper: SimplifiedAgentWrapper, load_image_files):
-    """Event loop エラーを発生させてasync fallback をトリガー"""
+    """Event loop エラーを発生させて async fallback をトリガー (predict 経由)."""
     images = load_image_files(1)
-    # This should trigger the async fallback path
     with patch.object(
         wrapper._agent, "run_sync", side_effect=RuntimeError("Event loop is already running")
     ):
-        result = wrapper.run_inference(images)
-    return result
-
-
-@when("_generate_tags メソッドを呼び出す", target_fixture="tags_result")
-def call_generate_tags(wrapper: SimplifiedAgentWrapper, formatted_output_without_tags: dict):
-    """_generate_tagsメソッドを呼び出す"""
-    result = wrapper._generate_tags(formatted_output_without_tags)
-    return result
+        return wrapper.predict(images)
 
 
 # ============================================================================
@@ -351,19 +344,20 @@ def error_logged(log_message: str, caplog):
 
 @then("tagsは空リストである")
 def tags_are_empty(run_inference_result):
-    """tagsが空リストである"""
-    # run_inference returns a list of results
+    """tagsが空(None または []) である。
+
+    UnifiedAnnotationResult はエラー時に tags=None を取る (capability validation の都合)。
+    """
     if isinstance(run_inference_result, list):
         result = run_inference_result[0]
         if isinstance(result, dict):
-            assert result.get("tags", []) == [], f"Expected empty tags: {result}"
+            assert result.get("tags", []) in ([], None), f"Expected empty tags: {result}"
         else:
-            assert result.tags == [], f"Expected empty tags: {result}"
+            assert result.tags in ([], None), f"Expected empty tags: {result}"
+    elif isinstance(run_inference_result, dict):
+        assert run_inference_result.get("tags", []) in ([], None)
     else:
-        if isinstance(run_inference_result, dict):
-            assert run_inference_result.get("tags", []) == []
-        else:
-            assert run_inference_result.tags == []
+        assert run_inference_result.tags in ([], None)
 
 
 @then("空のtagsリストが返される")
