@@ -4,7 +4,8 @@ import torch
 from PIL import Image
 
 from ..core.base import TransformersBaseAnnotator
-from ..core.utils import logger
+from ..core.types import UnifiedAnnotationResult
+from ..core.utils import get_model_capabilities, logger
 from ..exceptions.errors import OutOfMemoryError
 
 
@@ -83,26 +84,30 @@ class ToriiGateTagger(TransformersBaseAnnotator):
             logger.error(error_message)
             raise OutOfMemoryError(error_message) from e
 
-    def _format_predictions(self, token_ids_list: list[torch.Tensor]) -> list[str]:
-        """モデルの出力をデコードしてテキストにします。Assistant部分のみを抽出します。"""
-        all_results = []
+    def _format_predictions(self, token_ids_list: list[torch.Tensor]) -> list[UnifiedAnnotationResult]:
+        """モデルの出力をデコードして UnifiedAnnotationResult に詰める。
+
+        ToriiGate はキャプション生成モデルなので captions に格納する。
+        Assistant: 以降を抽出する後処理は基底クラスの汎用デコードでは行えないため、
+        本クラスでオーバーライドしている。
+        """
+        capabilities = get_model_capabilities(self.model_name)
+        results: list[UnifiedAnnotationResult] = []
         for token_ids in token_ids_list:
-            # デコード
-            generated_text = self.components["processor"].batch_decode(token_ids, skip_special_tokens=True)[
-                0
-            ]
-            # 'Assistant: ' 以降の部分を取得
+            generated_text = self.components["processor"].batch_decode(
+                token_ids, skip_special_tokens=True
+            )[0]
             if "Assistant: " in generated_text:
                 caption = generated_text.split("Assistant: ")[1]
             else:
                 caption = generated_text
-            all_results.append(caption)
-        return all_results
 
-    def _generate_tags(self, formatted_output: str) -> list[str]:
-        """単一のキャプション文字列を単一要素のリストに変換します。
-        各キャプションを単一要素のリストとして返します。
-        ToriiGateの場合、キャプション全体を1つのタグとして扱います。
-        """
-        # formatted_output は単一の文字列と想定
-        return [formatted_output]
+            results.append(
+                UnifiedAnnotationResult(
+                    model_name=self.model_name,
+                    capabilities=capabilities,
+                    captions=[caption] if caption else None,
+                    framework="transformers",
+                )
+            )
+        return results
