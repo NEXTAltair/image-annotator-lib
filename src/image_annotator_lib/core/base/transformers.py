@@ -156,9 +156,10 @@ class TransformersBaseAnnotator(BaseAnnotator):
     def _format_predictions(self, token_ids_list: list[torch.Tensor]) -> list[UnifiedAnnotationResult]:
         """生出力バッチをフォーマットします (Transformers用、テキストデコード)。
 
-        capabilities に応じて captions / tags のどちらか一方にデコード文字列を格納する。
-        両方を設定すると capability バリデーションで弾かれるため、CAPTIONS が含まれれば
-        captions を優先し、そうでなければ tags にフォールバックする。
+        capabilities に応じて captions / tags の両方または片方にデコード文字列を格納する。
+        TAGS と CAPTIONS の両方が capabilities に含まれるマルチタスクモデルでは
+        両フィールドに同じ payload を入れて情報損失を防ぐ
+        (UnifiedAnnotationResult は両フィールド同時設定を許可している)。
 
         Returns:
             list[UnifiedAnnotationResult]: 統一フォーマットのアノテーション結果リスト
@@ -184,8 +185,6 @@ class TransformersBaseAnnotator(BaseAnnotator):
             logger.error(f"モデル '{self.model_name}' のcapabilities取得に失敗: {e}")
             capabilities = set()
 
-        use_captions = TaskCapability.CAPTIONS in capabilities
-
         try:
             for token_ids in token_ids_list:
                 # batch_decode属性の有無を安全に判定
@@ -207,11 +206,15 @@ class TransformersBaseAnnotator(BaseAnnotator):
                     raise TypeError(f"Unsupported processor type: {type(processor_obj)}")
 
                 payload = [decoded_text] if decoded_text else None
+                captions_value = (
+                    payload if (TaskCapability.CAPTIONS in capabilities and payload) else None
+                )
+                tags_value = payload if (TaskCapability.TAGS in capabilities and payload) else None
                 result = UnifiedAnnotationResult(
                     model_name=self.model_name,
                     capabilities=capabilities,
-                    captions=payload if use_captions else None,
-                    tags=payload if not use_captions else None,
+                    captions=captions_value,
+                    tags=tags_value,
                     framework="transformers",
                 )
                 all_formatted.append(result)
