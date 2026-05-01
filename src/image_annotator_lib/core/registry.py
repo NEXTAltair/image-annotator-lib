@@ -3,11 +3,12 @@ import inspect
 import os
 from pathlib import Path
 from types import ModuleType
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from . import api_model_discovery
 from .base import BaseAnnotator
 from .config import AVAILABLE_API_MODELS_CONFIG_PATH, config_registry, load_available_api_models
+from .types import AnnotatorInfo, ModelType, TaskCapability
 from .utils import logger
 
 T = TypeVar("T", bound=BaseAnnotator)
@@ -213,7 +214,9 @@ def _try_register_model(
         if registry[model_name] is model_cls:
             logger.debug(f"モデル名 '{model_name}' は既に登録されています（同一クラス）。スキップします。")
             return True
-        logger.warning(f"モデル名 '{model_name}' は既に登録されています。クラス '{model_cls.__name__}' で上書きします。")
+        logger.warning(
+            f"モデル名 '{model_name}' は既に登録されています。クラス '{model_cls.__name__}' で上書きします。"
+        )
     registry[model_name] = model_cls
     logger.debug(f"モデル '{model_name}' をクラス '{model_cls.__name__}' でレジストリに登録しました。")
     return True
@@ -266,7 +269,9 @@ def _register_models(
         for model_name, model_config in config.items():
             desired_class_name = model_config.get("class")
             if not desired_class_name:
-                logger.warning(f"設定でモデル '{model_name}' のクラス名が指定されていません。スキップします。")
+                logger.warning(
+                    f"設定でモデル '{model_name}' のクラス名が指定されていません。スキップします。"
+                )
                 continue
 
             model_cls = _resolve_model_class(
@@ -369,88 +374,18 @@ def list_available_annotators() -> list[str]:
     return list(_MODEL_CLASS_OBJ_REGISTRY.keys())
 
 
-def _build_annotator_metadata(
-    model_name: str, model_class: ModelClass, model_config: dict[str, any]
-) -> dict[str, any]:
-    """単一アノテーターのメタデータ辞書を構築する。
-
-    Args:
-        model_name: モデル名。
-        model_class: モデルクラス。
-        model_config: TOMLからの設定辞書。
-
-    Returns:
-        メタデータ辞書。
-    """
-    return {
-        "class": model_class.__name__,
-        "provider": model_config.get("provider"),
-        "api_model_id": model_config.get("api_model_id"),
-        "model_type": _determine_model_type(model_name, model_class, model_config),
-        "estimated_size_gb": model_config.get("estimated_size_gb"),
-        "requires_api_key": _requires_api_key(model_class, model_config),
-        "max_output_tokens": model_config.get("max_output_tokens"),
-        "discontinued_at": model_config.get("discontinued_at"),
-    }
+_VALID_MODEL_TYPES: frozenset[str] = frozenset(("tagger", "scorer", "captioner", "vision"))
 
 
-def _build_fallback_metadata(model_class: ModelClass) -> dict[str, any]:
-    """エラー時のフォールバックメタデータを構築する。
+def _determine_model_type(
+    model_name: str, model_class: ModelClass, model_config: dict[str, Any]
+) -> ModelType:
+    """モデルタイプを判定する。
 
-    Args:
-        model_class: モデルクラス。
-
-    Returns:
-        最小限のメタデータ辞書。
-    """
-    return {
-        "class": model_class.__name__,
-        "provider": None,
-        "api_model_id": None,
-        "model_type": "unknown",
-        "estimated_size_gb": None,
-        "requires_api_key": False,
-        "max_output_tokens": None,
-        "discontinued_at": None,
-    }
-
-
-def list_available_annotators_with_metadata() -> dict[str, dict[str, any]]:
-    """利用可能なアノテータモデルとそのメタデータを返す。
-
-    LoRAIro統合用の拡張API。各モデルの詳細情報(プロバイダー、APIモデルID、
-    サイズ、APIキー要件等)を含む辞書を返す。
-
-    Returns:
-        モデル名をキーとし、メタデータ辞書を値とする辞書。
-    """
-    logger.debug("メタデータ付きアノテーターリストの生成を開始します")
-
-    if not _REGISTRY_INITIALIZED:
-        initialize_registry()
-
-    result = {}
-
-    try:
-        all_config = config_registry.get_all_config()
-        logger.debug(f"設定から{len(all_config)}件のモデル設定を取得しました")
-
-        for model_name, model_class in _MODEL_CLASS_OBJ_REGISTRY.items():
-            model_config = all_config.get(model_name) or _WEBAPI_MODEL_METADATA.get(model_name, {})
-            result[model_name] = _build_annotator_metadata(model_name, model_class, model_config)
-            logger.debug(f"モデル '{model_name}' のメタデータを生成しました")
-
-    except Exception as e:
-        logger.error(f"メタデータ付きアノテーターリスト生成中にエラー: {e}", exc_info=True)
-        for model_name, model_class in _MODEL_CLASS_OBJ_REGISTRY.items():
-            result[model_name] = _build_fallback_metadata(model_class)
-
-    logger.info(f"メタデータ付きアノテーターリスト生成完了: {len(result)}件")
-    return result
-
-
-def _determine_model_type(model_name: str, model_class: ModelClass, model_config: dict[str, Any]) -> str:
-    """モデルタイプを判定する
+    優先順位:
+      1. 設定ファイルの `type` フィールド (annotator_config.toml で実際に使用)
+      2. モデル名・クラス名からのキーワード推論
+      3. デフォルト "vision"
 
     Args:
         model_name: モデル名
@@ -458,11 +393,12 @@ def _determine_model_type(model_name: str, model_class: ModelClass, model_config
         model_config: モデル設定
 
     Returns:
-        str: モデルタイプ("vision", "score", "tagger")
+        ModelType: "tagger" / "scorer" / "captioner" / "vision" のいずれか
     """
-    # 設定から直接取得できる場合
-    if "model_type" in model_config:
-        return model_config["model_type"]
+    # 設定の `type` を最優先で参照 (実際の config キーは "type")
+    config_type = model_config.get("type")
+    if isinstance(config_type, str) and config_type in _VALID_MODEL_TYPES:
+        return cast(ModelType, config_type)
 
     # モデル名やクラス名から推定
     model_name_lower = model_name.lower()
@@ -470,9 +406,9 @@ def _determine_model_type(model_name: str, model_class: ModelClass, model_config
 
     # スコア系モデルの判定
     if any(keyword in model_name_lower for keyword in ["aesthetic", "score", "rating", "quality"]):
-        return "score"
+        return "scorer"
     if any(keyword in class_name_lower for keyword in ["aesthetic", "score", "rating", "quality"]):
-        return "score"
+        return "scorer"
 
     # タガー系モデルの判定
     if any(keyword in model_name_lower for keyword in ["tagger", "tag", "wd", "deepdanbooru"]):
@@ -480,8 +416,13 @@ def _determine_model_type(model_name: str, model_class: ModelClass, model_config
     if any(keyword in class_name_lower for keyword in ["tagger", "tag", "wd", "deepdanbooru"]):
         return "tagger"
 
-    # ビジョン系モデル(デフォルト)
-    # API系、キャプション系、汎用画像解析は全てvisionとする
+    # キャプショナー系モデルの判定
+    if any(keyword in model_name_lower for keyword in ["caption", "blip", "git"]):
+        return "captioner"
+    if any(keyword in class_name_lower for keyword in ["caption", "blip", "git"]):
+        return "captioner"
+
+    # 汎用 vision モデル (デフォルト)
     return "vision"
 
 
@@ -518,6 +459,65 @@ def _requires_api_key(model_class: ModelClass, model_config: dict[str, Any]) -> 
     return False
 
 
+def _build_annotator_info_for_registry_model(
+    model_name: str, model_class: ModelClass, model_config: dict[str, Any]
+) -> AnnotatorInfo:
+    """レジストリ登録済みモデルから AnnotatorInfo を構築する。
+
+    Args:
+        model_name: モデル名 (レジストリキー)
+        model_class: モデルクラス
+        model_config: TOML 由来の設定辞書 (空辞書の場合もある)
+
+    Returns:
+        AnnotatorInfo: 型安全なメタデータ
+    """
+    from .utils import get_model_capabilities
+
+    is_api = _requires_api_key(model_class, model_config)
+    is_local = not is_api
+    device = model_config.get("device") if is_local else None
+
+    return AnnotatorInfo(
+        name=model_name,
+        model_type=_determine_model_type(model_name, model_class, model_config),
+        capabilities=frozenset(get_model_capabilities(model_name)),
+        is_local=is_local,
+        is_api=is_api,
+        device=device if isinstance(device, str) else None,
+    )
+
+
+# PydanticAI 直接モデルが提供する capability の既定集合。
+# SimplifiedAgentWrapper は AnnotationSchema (tags / captions / score) を返すため、
+# 全 3 種を能力として申告する。
+_DIRECT_MODEL_DEFAULT_CAPABILITIES: frozenset[TaskCapability] = frozenset(
+    {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
+)
+
+
+def _build_annotator_info_for_direct_model(model_id: str) -> AnnotatorInfo:
+    """PydanticAI 直接モデル (例: ``google/gemini-2.5-pro``) から AnnotatorInfo を構築する。
+
+    これらのモデルはレジストリには登録されておらず、SimplifiedAgentFactory 経由で
+    実行される。すべて WebAPI 呼び出しなので ``is_api=True``、device は持たない。
+
+    Args:
+        model_id: ``provider/model_name`` 形式のモデル ID
+
+    Returns:
+        AnnotatorInfo: 型安全なメタデータ。model_type は "vision" 固定 (汎用 VLM)。
+    """
+    return AnnotatorInfo(
+        name=model_id,
+        model_type="vision",
+        capabilities=_DIRECT_MODEL_DEFAULT_CAPABILITIES,
+        is_local=False,
+        is_api=True,
+        device=None,
+    )
+
+
 def normalize_model_name(model_name: str) -> str | None:
     """モデル名を正規化(大文字・小文字を区別しない検索で実際のキー名を返す)
 
@@ -548,7 +548,9 @@ def _register_webapi_models_from_discovery() -> None:
         available_classes = _gather_available_classes("model_class")
         pydantic_ai_class = available_classes.get("PydanticAIWebAPIAnnotator")
         if not pydantic_ai_class:
-            logger.error("PydanticAIWebAPIAnnotator クラスが見つかりません。WebAPI モデルは登録できません。")
+            logger.error(
+                "PydanticAIWebAPIAnnotator クラスが見つかりません。WebAPI モデルは登録できません。"
+            )
             return
 
         registered_count = 0
@@ -569,7 +571,9 @@ def _register_webapi_models_from_discovery() -> None:
                 )
                 continue
 
-            if _try_register_model(_MODEL_CLASS_OBJ_REGISTRY, model_name_short, pydantic_ai_class, BaseAnnotator):
+            if _try_register_model(
+                _MODEL_CLASS_OBJ_REGISTRY, model_name_short, pydantic_ai_class, BaseAnnotator
+            ):
                 registered_count += 1
                 metadata = {
                     "api_model_id": model_id,
@@ -604,18 +608,12 @@ def _discover_and_update_api_models(skip_api_discovery: bool) -> None:
         )
     elif not AVAILABLE_API_MODELS_CONFIG_PATH.exists():
         # 初回起動: 同期 fetch（後続の annotator_config 更新にデータが必要）
-        logger.info(
-            f"{AVAILABLE_API_MODELS_CONFIG_PATH} が見つかりません。APIから最新情報を取得します..."
-        )
+        logger.info(f"{AVAILABLE_API_MODELS_CONFIG_PATH} が見つかりません。APIから最新情報を取得します...")
         try:
             api_model_discovery._fetch_and_update_vision_models()
-            logger.info(
-                f"API からモデル情報を取得し、{AVAILABLE_API_MODELS_CONFIG_PATH} を更新しました。"
-            )
+            logger.info(f"API からモデル情報を取得し、{AVAILABLE_API_MODELS_CONFIG_PATH} を更新しました。")
         except Exception as api_e:
-            logger.error(
-                f"API からのモデル情報取得中にエラーが発生しました: {api_e}", exc_info=True
-            )
+            logger.error(f"API からのモデル情報取得中にエラーが発生しました: {api_e}", exc_info=True)
             logger.warning(
                 "APIからのモデル情報取得に失敗したため、Web API モデルの自動設定は行われない可能性があります。"
             )
