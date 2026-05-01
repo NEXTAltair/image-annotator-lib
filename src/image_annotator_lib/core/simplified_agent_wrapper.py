@@ -17,6 +17,13 @@ from .utils import get_model_capabilities, logger
 class SimplifiedAgentWrapper(BaseAnnotator):
     """Wrapper to integrate simplified PydanticAI Agents with existing BaseAnnotator API."""
 
+    # AnnotationSchema が tags / captions / score を返すため 3 種すべてを宣言する。
+    # registry.py の _build_annotator_info_for_direct_model がこの値を参照するため、
+    # 実装と申告を常に一致させる唯一の真実の源 (single source of truth) とする。
+    ADVERTISED_CAPABILITIES: frozenset[TaskCapability] = frozenset(
+        {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
+    )
+
     def __init__(self, model_id: str):
         """
         Initialize the wrapper with a model ID.
@@ -87,27 +94,40 @@ class SimplifiedAgentWrapper(BaseAnnotator):
         Format raw inference results into UnifiedAnnotationResult.
 
         Args:
-            raw_outputs: List of raw results from _run_inference
+            raw_outputs: List of AgentRunResult objects from _run_inference
 
         Returns:
             List of UnifiedAnnotationResult instances
         """
-        capabilities = get_model_capabilities(self.model_name)
-        if not capabilities:
-            # PydanticAI Agents は config に type が無いことがあるため TAGS をデフォルトとする
-            capabilities = {TaskCapability.TAGS}
+        capabilities = get_model_capabilities(self.model_name) or self.ADVERTISED_CAPABILITIES
 
         formatted: list[UnifiedAnnotationResult] = []
-        for output in raw_outputs:
-            tags = list(output.tags) if hasattr(output, "tags") and output.tags else []
+        for run_result in raw_outputs:
+            # AgentRunResult.output が AnnotationSchema インスタンスを保持する
+            schema = run_result.output if hasattr(run_result, "output") else run_result
+
+            raw_tags: list[str] = list(schema.tags) if getattr(schema, "tags", None) else []
+            raw_captions: list[str] = list(schema.captions) if getattr(schema, "captions", None) else []
+            score_val: float | None = getattr(schema, "score", None)
+
+            tags = raw_tags if (TaskCapability.TAGS in capabilities and raw_tags) else None
+            captions = raw_captions if (TaskCapability.CAPTIONS in capabilities and raw_captions) else None
+            # scores は dict[str, float]; "overall" はモデル非依存の汎用スコアキー
+            scores = (
+                {"overall": float(score_val)}
+                if (TaskCapability.SCORES in capabilities and score_val is not None)
+                else None
+            )
 
             formatted.append(
                 UnifiedAnnotationResult(
                     model_name=self.model_id,
                     capabilities=capabilities,
-                    tags=tags if (TaskCapability.TAGS in capabilities and tags) else None,
+                    tags=tags,
+                    captions=captions,
+                    scores=scores,
                     framework="pydantic_ai",
-                    raw_output={"method": "simplified_pydantic_ai", "tag_count": len(tags)},
+                    raw_output={"method": "simplified_pydantic_ai"},
                 )
             )
         return formatted

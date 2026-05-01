@@ -15,6 +15,7 @@ from PIL import Image
 from pydantic_ai.messages import BinaryContent
 
 from image_annotator_lib.core.simplified_agent_wrapper import SimplifiedAgentWrapper
+from image_annotator_lib.core.types import TaskCapability
 
 # ==============================================================================
 # Fixtures
@@ -32,9 +33,14 @@ def mock_pydantic_ai_agent():
 
 @pytest.fixture
 def mock_agent_result_with_tags():
-    """Mock Agent result with tags attribute."""
+    """Mock AgentRunResult whose .output is an AnnotationSchema with all 3 fields."""
+    mock_schema = MagicMock()
+    mock_schema.tags = ["mock_tag_1", "mock_tag_2", "mock_tag_3"]
+    mock_schema.captions = ["A beautiful image"]
+    mock_schema.score = 0.85
+
     mock_result = MagicMock()
-    mock_result.tags = ["mock_tag_1", "mock_tag_2", "mock_tag_3"]
+    mock_result.output = mock_schema
     return mock_result
 
 
@@ -403,7 +409,7 @@ class TestSimplifiedWrapperFormatting:
     def test_simplified_wrapper_format_output_and_tags(
         self, mock_pydantic_ai_agent, mock_agent_result_with_tags, managed_config_registry
     ):
-        """Test tag extraction in _format_predictions returning UnifiedAnnotationResult."""
+        """Test _format_predictions extracts tags/captions/scores from AgentRunResult.output."""
         managed_config_registry.set(
             "test/model-formatting",
             {
@@ -428,16 +434,17 @@ class TestSimplifiedWrapperFormatting:
 
             assert unified.model_name == "test/model-formatting", "model_name 正しく設定"
             assert unified.tags == ["mock_tag_1", "mock_tag_2", "mock_tag_3"], "タグ正しく抽出"
+            assert unified.captions == ["A beautiful image"], "キャプション正しく抽出"
+            assert unified.scores == {"overall": 0.85}, "スコアは overall キーで抽出"
             assert unified.framework == "pydantic_ai", "framework 識別子"
             assert unified.raw_output is not None
-            assert unified.raw_output["tag_count"] == 3, "raw_output に tag_count"
             assert unified.raw_output["method"] == "simplified_pydantic_ai"
 
     @pytest.mark.unit
     def test_simplified_wrapper_format_output_no_tags(
         self, mock_pydantic_ai_agent, managed_config_registry
     ):
-        """Test _format_predictions when result has no tags."""
+        """Test _format_predictions when AnnotationSchema has empty tags/captions/score."""
         managed_config_registry.set(
             "test/model-no-tags",
             {
@@ -455,14 +462,21 @@ class TestSimplifiedWrapperFormatting:
 
             wrapper = SimplifiedAgentWrapper(model_id="test/model-no-tags")
 
-            mock_result_no_tags = MagicMock()
-            del mock_result_no_tags.tags
+            # AnnotationSchema with empty fields
+            mock_schema = MagicMock()
+            mock_schema.tags = []
+            mock_schema.captions = []
+            mock_schema.score = None
 
-            formatted = wrapper._format_predictions([mock_result_no_tags])
+            mock_result_empty = MagicMock()
+            mock_result_empty.output = mock_schema
 
-            assert formatted[0].tags is None, "タグなし時は None (capability validation 通過)"
+            formatted = wrapper._format_predictions([mock_result_empty])
+
+            assert formatted[0].tags is None, "空タグは None"
+            assert formatted[0].captions is None, "空キャプションは None"
+            assert formatted[0].scores is None, "score=None は scores=None"
             assert formatted[0].raw_output is not None
-            assert formatted[0].raw_output["tag_count"] == 0, "raw_output の tag_count: 0"
 
 
 class TestSimplifiedWrapperPredict:
@@ -500,5 +514,62 @@ class TestSimplifiedWrapperPredict:
             unified = results[0]
             assert unified.model_name == "test/model-public", "model_name 設定"
             assert unified.tags == ["mock_tag_1", "mock_tag_2", "mock_tag_3"], "タグ正しく抽出"
+            assert unified.captions == ["A beautiful image"], "キャプション正しく抽出"
+            assert unified.scores == {"overall": 0.85}, "スコアは overall キーで抽出"
             assert unified.error is None, "エラーなし"
             assert unified.framework == "pydantic_ai", "framework 識別子"
+
+
+class TestAdvertisedCapabilities:
+    """ADVERTISED_CAPABILITIES クラス変数の不変条件検証 (Option B / Codex P1)."""
+
+    @pytest.mark.unit
+    def test_advertised_capabilities_contains_all_three(self):
+        """ADVERTISED_CAPABILITIES が tags/captions/scores を全て含む。"""
+        caps = SimplifiedAgentWrapper.ADVERTISED_CAPABILITIES
+        assert TaskCapability.TAGS in caps
+        assert TaskCapability.CAPTIONS in caps
+        assert TaskCapability.SCORES in caps
+
+    @pytest.mark.unit
+    def test_advertised_capabilities_is_frozenset(self):
+        """ADVERTISED_CAPABILITIES は frozenset で hashable。"""
+        caps = SimplifiedAgentWrapper.ADVERTISED_CAPABILITIES
+        assert isinstance(caps, frozenset)
+        # hashable であること
+        assert hash(caps) is not None
+
+    @pytest.mark.unit
+    def test_scores_key_is_overall(self, mock_pydantic_ai_agent, managed_config_registry):
+        """_format_predictions が score を {"overall": float} に変換する。"""
+        managed_config_registry.set(
+            "test/model-scores-key",
+            {
+                "class": "SimplifiedAgentWrapper",
+                "model_name_on_provider": "test/model-scores-key",
+                "api_model_id": "test/model-scores-key",
+                "api_key": "test_key",
+            },
+        )
+
+        with patch("image_annotator_lib.core.simplified_agent_wrapper.get_agent_factory") as mock_factory:
+            mock_factory_instance = MagicMock()
+            mock_factory_instance.get_cached_agent.return_value = mock_pydantic_ai_agent
+            mock_factory.return_value = mock_factory_instance
+
+            wrapper = SimplifiedAgentWrapper(model_id="test/model-scores-key")
+
+            mock_schema = MagicMock()
+            mock_schema.tags = []
+            mock_schema.captions = []
+            mock_schema.score = 0.42
+
+            mock_run_result = MagicMock()
+            mock_run_result.output = mock_schema
+
+            formatted = wrapper._format_predictions([mock_run_result])
+
+            scores = formatted[0].scores
+            assert scores is not None, "scores は None でない"
+            assert "overall" in scores, "scores のキーは 'overall'"
+            assert abs(scores["overall"] - 0.42) < 1e-9, "scores['overall'] == 0.42"

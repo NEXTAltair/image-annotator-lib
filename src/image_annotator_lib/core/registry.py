@@ -488,19 +488,14 @@ def _build_annotator_info_for_registry_model(
     )
 
 
-# PydanticAI 直接モデルが提供する capability の既定集合。
-# SimplifiedAgentWrapper は AnnotationSchema (tags / captions / score) を返すため、
-# 全 3 種を能力として申告する。
-_DIRECT_MODEL_DEFAULT_CAPABILITIES: frozenset[TaskCapability] = frozenset(
-    {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
-)
-
-
 def _build_annotator_info_for_direct_model(model_id: str) -> AnnotatorInfo:
     """PydanticAI 直接モデル (例: ``google/gemini-2.5-pro``) から AnnotatorInfo を構築する。
 
     これらのモデルはレジストリには登録されておらず、SimplifiedAgentFactory 経由で
     実行される。すべて WebAPI 呼び出しなので ``is_api=True``、device は持たない。
+
+    capabilities は SimplifiedAgentWrapper.ADVERTISED_CAPABILITIES を参照する。
+    申告値と実装が常に一致するよう、循環インポートを避けるため関数内で遅延 import する。
 
     Args:
         model_id: ``provider/model_name`` 形式のモデル ID
@@ -508,10 +503,12 @@ def _build_annotator_info_for_direct_model(model_id: str) -> AnnotatorInfo:
     Returns:
         AnnotatorInfo: 型安全なメタデータ。model_type は "vision" 固定 (汎用 VLM)。
     """
+    from .simplified_agent_wrapper import SimplifiedAgentWrapper  # 循環 import 回避のため遅延
+
     return AnnotatorInfo(
         name=model_id,
         model_type="vision",
-        capabilities=_DIRECT_MODEL_DEFAULT_CAPABILITIES,
+        capabilities=SimplifiedAgentWrapper.ADVERTISED_CAPABILITIES,
         is_local=False,
         is_api=True,
         device=None,
