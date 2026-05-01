@@ -459,6 +459,37 @@ def _requires_api_key(model_class: ModelClass, model_config: dict[str, Any]) -> 
     return False
 
 
+def _resolve_registry_capabilities(model_name: str, is_api: bool) -> frozenset[TaskCapability]:
+    """レジストリモデルの capabilities を解決する。
+
+    設定ファイルに明示的な capabilities がある場合はそれを使用する。
+    WebAPI モデル (is_api=True) で capabilities が未設定の場合は、
+    PydanticAI AnnotationSchema が返す全3種 (TAGS/CAPTIONS/SCORES) を申告する。
+
+    Args:
+        model_name: モデル名
+        is_api: WebAPI モデルか
+
+    Returns:
+        frozenset[TaskCapability]
+    """
+    from .utils import get_model_capabilities
+
+    caps = get_model_capabilities(model_name)
+    if caps:
+        return frozenset(caps)
+
+    if is_api:
+        # PydanticAIWebAPIAnnotator は AnnotationSchema (tags/captions/score) を返すため
+        # 設定に capabilities が無くても全3種を申告する。
+        # SimplifiedAgentWrapper と同じ AnnotationSchema を使用するため同値を参照する。
+        from .simplified_agent_wrapper import SimplifiedAgentWrapper  # 循環 import 回避のため遅延
+
+        return SimplifiedAgentWrapper.ADVERTISED_CAPABILITIES
+
+    return frozenset()
+
+
 def _build_annotator_info_for_registry_model(
     model_name: str, model_class: ModelClass, model_config: dict[str, Any]
 ) -> AnnotatorInfo:
@@ -472,8 +503,6 @@ def _build_annotator_info_for_registry_model(
     Returns:
         AnnotatorInfo: 型安全なメタデータ
     """
-    from .utils import get_model_capabilities
-
     is_api = _requires_api_key(model_class, model_config)
     is_local = not is_api
     device = model_config.get("device") if is_local else None
@@ -481,7 +510,7 @@ def _build_annotator_info_for_registry_model(
     return AnnotatorInfo(
         name=model_name,
         model_type=_determine_model_type(model_name, model_class, model_config),
-        capabilities=frozenset(get_model_capabilities(model_name)),
+        capabilities=_resolve_registry_capabilities(model_name, is_api),
         is_local=is_local,
         is_api=is_api,
         device=device if isinstance(device, str) else None,

@@ -154,6 +154,36 @@ def test_webapi_model_classification(patched_registry):
 
 @pytest.mark.unit
 @pytest.mark.fast
+def test_webapi_model_capabilities_fallback(patched_registry):
+    """config に capabilities が未設定の WebAPI モデルは全3種にフォールバックする (P1修正)。
+
+    type="vision" のみで capabilities を省略した場合、get_model_capabilities は空を返すが、
+    _resolve_registry_capabilities が SimplifiedAgentWrapper.ADVERTISED_CAPABILITIES を採用する。
+    """
+    with patched_registry(
+        model_dict={"GPT-4o-mini": PydanticAIWebAPIAnnotator},
+        config_dict={
+            "GPT-4o-mini": {
+                "api_model_id": "gpt-4o-mini",
+                "type": "vision",
+                # capabilities は意図的に省略
+            }
+        },
+    ):
+        result = list_annotator_info()
+
+    assert len(result) == 1
+    info = result[0]
+    assert info.is_api is True
+    # capabilities が空でないこと (P1 の核心)
+    assert len(info.capabilities) > 0, "WebAPI モデルは capabilities が空であってはならない"
+    assert TaskCapability.TAGS in info.capabilities
+    assert TaskCapability.CAPTIONS in info.capabilities
+    assert TaskCapability.SCORES in info.capabilities
+
+
+@pytest.mark.unit
+@pytest.mark.fast
 def test_pydanticai_direct_model_inclusion(patched_registry):
     """PydanticAI 直接モデル (provider/model 形式) が結果に含まれ、is_api=True で分類される。"""
     direct_id = "google/gemini-2.5-pro"
