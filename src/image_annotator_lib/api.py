@@ -61,7 +61,7 @@ def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None 
         # Create a simplified wrapper for PydanticAI agents
         from .core.simplified_agent_wrapper import SimplifiedAgentWrapper
 
-        return SimplifiedAgentWrapper(model_name, api_keys=api_keys)
+        return SimplifiedAgentWrapper(model_name)
 
     # Fallback to traditional registry-based approach
     model_result = find_model_class_case_insensitive(model_name)
