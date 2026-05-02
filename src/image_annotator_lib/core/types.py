@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, Union
 
@@ -357,7 +358,7 @@ class UnifiedAnnotationResult(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_capabilities_not_empty(self) -> "UnifiedAnnotationResult":
+    def validate_capabilities_not_empty(self) -> UnifiedAnnotationResult:
         """エラー結果以外はcapabilitiesが必須。"""
         if self.error is None and not self.capabilities:
             raise ValueError("capabilities cannot be empty for non-error results")
@@ -366,3 +367,44 @@ class UnifiedAnnotationResult(BaseModel):
 
 # === 新しい統一型システム ===
 UnifiedPHashAnnotationResults = dict[str, dict[str, UnifiedAnnotationResult]]
+
+
+# --- アノテーターメタデータ用の型定義 (Issue #19) ---
+
+
+ModelType = Literal["tagger", "scorer", "captioner", "vision"]
+"""アノテーターモデルの主用途分類。
+
+`is_api` と直交した capability 軸の分類。WebAPI モデルでも tagger/scorer/captioner
+の区別はあり得るため、"webapi" は含めない。
+
+- "tagger": タグ予測モデル (WD-Tagger, DeepDanbooru 等)
+- "scorer": 数値スコアモデル (aesthetic scorer 等)
+- "captioner": キャプション生成モデル (BLIP, GIT 等)
+- "vision": 汎用 vision モデル / 未分類 (汎用 VLM 等)
+"""
+
+
+@dataclass(frozen=True)
+class AnnotatorInfo:
+    """アノテーターモデルのメタデータ。
+
+    Attributes:
+        name: モデル名 (レジストリキー)。
+        model_type: モデルの主用途分類 (tagger/scorer/captioner/vision)。
+        capabilities: モデルが提供する出力種別の集合。
+        is_local: ローカル実行モデルか。
+        is_api: 外部 API を呼ぶモデルか (API キー必要)。
+        device: ローカル実行時のデバイス指定。API モデルでは None。
+
+    Invariants (検証はテスト側で担保):
+        - is_local XOR is_api == True
+        - is_api == True のとき device is None
+    """
+
+    name: str
+    model_type: ModelType
+    capabilities: frozenset[TaskCapability]
+    is_local: bool
+    is_api: bool
+    device: str | None = None
