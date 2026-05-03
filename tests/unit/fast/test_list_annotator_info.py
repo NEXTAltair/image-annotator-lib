@@ -126,6 +126,10 @@ def test_local_ml_model_classification(patched_registry):
     assert info.is_api is False
     assert info.device == "cuda"
     assert TaskCapability.TAGS in info.capabilities
+    # Phase 2: ローカルモデルは provider="local"、API 関連は None
+    assert info.provider == "local"
+    assert info.api_model_id is None
+    assert info.max_output_tokens is None
 
 
 @pytest.mark.unit
@@ -150,6 +154,9 @@ def test_webapi_model_classification(patched_registry):
     assert info.is_api is True
     assert info.is_local is False
     assert info.device is None
+    # Phase 2: config に provider がない WebAPI モデルは provider=None
+    assert info.provider is None
+    assert info.api_model_id == "claude-3-opus-20240229"
 
 
 @pytest.mark.unit
@@ -205,6 +212,9 @@ def test_pydanticai_direct_model_inclusion(patched_registry):
     assert TaskCapability.TAGS in info.capabilities
     assert TaskCapability.CAPTIONS in info.capabilities
     assert TaskCapability.SCORES in info.capabilities
+    # Phase 2: provider は "google/..." の slash 前から推論
+    assert info.provider == "google"
+    assert info.api_model_id == direct_id
 
 
 @pytest.mark.unit
@@ -254,3 +264,90 @@ def test_invariants_is_local_xor_is_api(patched_registry):
 
     # frozenset により hashable であることを確認 (frozen=True dataclass の必須条件)
     assert hash(result[0]) is not None
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: 詳細メタデータフィールドのテスト
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_local_model_has_estimated_size_gb(patched_registry):
+    """ローカルモデルは estimated_size_gb が config から取れる。"""
+    with patched_registry(
+        model_dict={"aesthetic-scorer": _DummyScorer},
+        config_dict={
+            "aesthetic-scorer": {"type": "scorer", "estimated_size_gb": 4.065, "capabilities": ["scores"]}
+        },
+    ):
+        result = list_annotator_info()
+
+    assert len(result) == 1
+    info = result[0]
+    assert info.estimated_size_gb == pytest.approx(4.065)
+    assert info.provider == "local"
+    assert info.api_model_id is None
+    assert info.max_output_tokens is None
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_webapi_model_with_provider_and_max_tokens(patched_registry):
+    """config に provider / api_model_id / max_output_tokens がある WebAPI モデルは正しく取れる。"""
+    with patched_registry(
+        model_dict={"GPT-4o": PydanticAIWebAPIAnnotator},
+        config_dict={
+            "GPT-4o": {
+                "provider": "openai",
+                "api_model_id": "gpt-4o-2024-11-20",
+                "max_output_tokens": 1800,
+                "type": "vision",
+                "capabilities": ["tags", "captions", "scores"],
+            }
+        },
+    ):
+        result = list_annotator_info()
+
+    assert len(result) == 1
+    info = result[0]
+    assert info.provider == "openai"
+    assert info.api_model_id == "gpt-4o-2024-11-20"
+    assert info.max_output_tokens == 1800
+    assert info.is_api is True
+    assert info.estimated_size_gb is None
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+@pytest.mark.parametrize(
+    "model_id,expected_provider",
+    [
+        ("google/gemini-2.5-pro", "google"),
+        ("anthropic/claude-3-7-sonnet", "anthropic"),
+        ("openai/gpt-4o", "openai"),
+        ("openrouter/google/gemini-flash", "openrouter"),
+    ],
+)
+def test_pydanticai_direct_model_provider_inferred(patched_registry, model_id: str, expected_provider: str):
+    """PydanticAI 直接モデルは model_id の slash 前から provider を推論する。"""
+    with patched_registry(model_dict={}, config_dict={}, direct_models=[model_id]):
+        result = list_annotator_info()
+
+    assert len(result) == 1
+    info = result[0]
+    assert info.provider == expected_provider
+    assert info.api_model_id == model_id
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_discontinued_at_none_for_active_model(patched_registry):
+    """現役モデルの discontinued_at は None。"""
+    with patched_registry(
+        model_dict={"active-tagger": _DummyTagger},
+        config_dict={"active-tagger": {"type": "tagger", "capabilities": ["tags"]}},
+    ):
+        result = list_annotator_info()
+
+    assert result[0].discontinued_at is None

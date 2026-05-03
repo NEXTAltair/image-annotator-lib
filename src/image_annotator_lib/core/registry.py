@@ -490,6 +490,33 @@ def _resolve_registry_capabilities(model_name: str, is_api: bool) -> frozenset[T
     return frozenset()
 
 
+def _infer_provider_from_model_id(model_id: str) -> str | None:
+    """PydanticAI 直接モデルの ``provider`` を model_id から推論する。
+
+    "provider/model_name" 形式 (例: "google/gemini-2.5-pro") は slash 前を返す。
+    slash のない model_id は PydanticAI の infer_provider_class でフォールバック。
+
+    Args:
+        model_id: PydanticAI 直接モデルの ID。
+
+    Returns:
+        推論された provider 名。判定できない場合は None。
+    """
+    if "/" in model_id:
+        return model_id.split("/", 1)[0]
+    try:
+        from pydantic_ai.providers import infer_provider_class
+
+        cls = infer_provider_class(model_id)
+        cls_name = (type(cls).__name__ if not isinstance(cls, type) else cls.__name__).lower()
+        for known in ("openai", "anthropic", "google"):
+            if known in cls_name:
+                return known
+    except Exception:
+        pass
+    return None
+
+
 def _build_annotator_info_for_registry_model(
     model_name: str, model_class: ModelClass, model_config: dict[str, Any]
 ) -> AnnotatorInfo:
@@ -507,6 +534,15 @@ def _build_annotator_info_for_registry_model(
     is_local = not is_api
     device = model_config.get("device") if is_local else None
 
+    # provider: config 優先、ローカルモデルは "local" にフォールバック
+    _raw_provider = model_config.get("provider")
+    provider: str | None = (
+        str(_raw_provider) if _raw_provider is not None else ("local" if is_local else None)
+    )
+
+    _raw_size = model_config.get("estimated_size_gb")
+    _raw_tokens = model_config.get("max_output_tokens")
+
     return AnnotatorInfo(
         name=model_name,
         model_type=_determine_model_type(model_name, model_class, model_config),
@@ -514,6 +550,13 @@ def _build_annotator_info_for_registry_model(
         is_local=is_local,
         is_api=is_api,
         device=device if isinstance(device, str) else None,
+        provider=provider,
+        api_model_id=str(model_config["api_model_id"])
+        if model_config.get("api_model_id") is not None
+        else None,
+        estimated_size_gb=float(_raw_size) if _raw_size is not None else None,
+        discontinued_at=model_config.get("discontinued_at"),
+        max_output_tokens=int(_raw_tokens) if _raw_tokens is not None else None,
     )
 
 
@@ -541,6 +584,8 @@ def _build_annotator_info_for_direct_model(model_id: str) -> AnnotatorInfo:
         is_local=False,
         is_api=True,
         device=None,
+        provider=_infer_provider_from_model_id(model_id),
+        api_model_id=model_id,  # 直接モデルは model_id 自体が上流 API の識別子
     )
 
 
