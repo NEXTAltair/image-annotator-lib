@@ -3,6 +3,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from image_annotator_lib import api
+from image_annotator_lib.core import annotation_runner
+from image_annotator_lib.core.types import PHashAnnotationResults
 
 # Import the real classes for the registry
 from image_annotator_lib.model_class.annotator_webapi.anthropic_api import AnthropicApiAnnotator
@@ -36,9 +38,9 @@ MOCK_AVAILABLE_API_MODELS = {
 @pytest.fixture(autouse=True)
 def clear_instance_registry():  # Renamed fixture, removed mock resets
     """Clear the internal instance registry before each test."""
-    api._MODEL_INSTANCE_REGISTRY.clear()
+    annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
     yield
-    api._MODEL_INSTANCE_REGISTRY.clear()
+    annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -94,8 +96,8 @@ def setup_test_model_configs():
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.api.get_agent_factory")
-@patch("image_annotator_lib.api.find_model_class_case_insensitive")
+@patch("image_annotator_lib.core.annotation_runner.get_agent_factory")
+@patch("image_annotator_lib.core.annotation_runner.find_model_class_case_insensitive")
 def test_create_web_api_instance_success(mock_find_model, mock_get_factory):
     """Test successful instantiation for a Web API annotator."""
     model_name_short = "Gemini 1.5 Pro"
@@ -108,16 +110,16 @@ def test_create_web_api_instance_success(mock_find_model, mock_get_factory):
     # Mock find_model_class to return GoogleApiAnnotator
     mock_find_model.return_value = (model_name_short, GoogleApiAnnotator)
 
-    instance = api._create_annotator_instance(model_name_short)
+    instance = annotation_runner._create_annotator_instance(model_name_short)
 
     # Test actual behavior
-    assert isinstance(instance, api.PydanticAIWebAPIWrapper)
+    assert isinstance(instance, annotation_runner.PydanticAIWebAPIWrapper)
     assert instance.model_name == model_name_short
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.api.get_agent_factory")
-@patch("image_annotator_lib.api.find_model_class_case_insensitive")
+@patch("image_annotator_lib.core.annotation_runner.get_agent_factory")
+@patch("image_annotator_lib.core.annotation_runner.find_model_class_case_insensitive")
 def test_create_local_model_instance_success(mock_find_model, mock_get_factory):
     """Test successful instantiation for a local model annotator."""
     model_name = "wd-v1-4-convnext-tagger-v2"
@@ -131,15 +133,15 @@ def test_create_local_model_instance_success(mock_find_model, mock_get_factory):
     mock_find_model.return_value = (model_name, WDTagger)
 
     with patch.object(WDTagger, "__init__", return_value=None):
-        instance = api._create_annotator_instance(model_name)
+        instance = annotation_runner._create_annotator_instance(model_name)
 
     # Test actual behavior
     assert isinstance(instance, WDTagger)
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.api.get_agent_factory")
-@patch("image_annotator_lib.api.find_model_class_case_insensitive")
+@patch("image_annotator_lib.core.annotation_runner.get_agent_factory")
+@patch("image_annotator_lib.core.annotation_runner.find_model_class_case_insensitive")
 def test_create_web_api_instance_model_not_found_in_toml(mock_find_model, mock_get_factory):
     """Test KeyError when Web API model info is missing in available_api_models.toml."""
     model_name_short = "NonExistentWebModel"
@@ -157,7 +159,7 @@ def test_create_web_api_instance_model_not_found_in_toml(mock_find_model, mock_g
     with pytest.raises(
         KeyError, match=f"Model '{model_name_short}' not found in registry or available models."
     ):
-        api._create_annotator_instance(model_name_short)
+        annotation_runner._create_annotator_instance(model_name_short)
 
 
 @pytest.mark.unit
@@ -168,15 +170,15 @@ def test_get_annotator_instance_caches_instance():
     RealLocalAnnotatorClass = MOCK_CLASS_REGISTRY_WITH_REAL_CLASSES[model_name]
 
     mock_instance = MagicMock(spec=RealLocalAnnotatorClass)
-    with patch("image_annotator_lib.api._create_annotator_instance", return_value=mock_instance):
+    with patch("image_annotator_lib.core.annotation_runner._create_annotator_instance", return_value=mock_instance):
         # Test caching behavior through actual state
-        instance1 = api.get_annotator_instance(model_name)
+        instance1 = annotation_runner.get_annotator_instance(model_name)
         assert instance1 is mock_instance
-        assert model_name in api._MODEL_INSTANCE_REGISTRY
-        assert api._MODEL_INSTANCE_REGISTRY[model_name] is mock_instance
+        assert model_name in annotation_runner._MODEL_INSTANCE_REGISTRY
+        assert annotation_runner._MODEL_INSTANCE_REGISTRY[model_name] is mock_instance
 
         # Second call should return cached instance
-        instance2 = api.get_annotator_instance(model_name)
+        instance2 = annotation_runner.get_annotator_instance(model_name)
         assert instance2 is mock_instance
         assert instance1 is instance2  # Same cached object
 
@@ -185,7 +187,7 @@ def test_get_annotator_instance_caches_instance():
 
 @pytest.mark.unit
 @patch("image_annotator_lib.core.simplified_agent_wrapper.SimplifiedAgentWrapper")
-@patch("image_annotator_lib.api.get_agent_factory")
+@patch("image_annotator_lib.core.annotation_runner.get_agent_factory")
 def test_create_annotator_with_simplified_agent_wrapper(mock_get_factory, mock_wrapper):
     """Test creating annotator using SimplifiedAgentWrapper for direct model_id."""
     model_id = "google/gemini-2.5-pro-preview-03-25"
@@ -195,7 +197,7 @@ def test_create_annotator_with_simplified_agent_wrapper(mock_get_factory, mock_w
     mock_factory.is_model_available.return_value = True
     mock_get_factory.return_value = mock_factory
 
-    instance = api._create_annotator_instance(model_id)
+    instance = annotation_runner._create_annotator_instance(model_id)
 
     # Verify SimplifiedAgentWrapper was called
     mock_wrapper.assert_called_once_with(model_id, api_keys=None)
@@ -204,7 +206,7 @@ def test_create_annotator_with_simplified_agent_wrapper(mock_get_factory, mock_w
 
 @pytest.mark.unit
 @patch("image_annotator_lib.core.simplified_agent_wrapper.SimplifiedAgentWrapper")
-@patch("image_annotator_lib.api.get_agent_factory")
+@patch("image_annotator_lib.core.annotation_runner.get_agent_factory")
 def test_get_annotator_instance_with_api_keys_no_cache(mock_get_factory, mock_wrapper):
     """Test that get_annotator_instance doesn't use cache when api_keys are provided."""
     model_name = "test-model"
@@ -216,13 +218,13 @@ def test_get_annotator_instance_with_api_keys_no_cache(mock_get_factory, mock_wr
     mock_get_factory.return_value = mock_factory
 
     # First call with api_keys
-    api.get_annotator_instance(model_name, api_keys=api_keys)
+    annotation_runner.get_annotator_instance(model_name, api_keys=api_keys)
     # Second call with api_keys
-    api.get_annotator_instance(model_name, api_keys=api_keys)
+    annotation_runner.get_annotator_instance(model_name, api_keys=api_keys)
 
     # Should create new instances each time (no caching)
     assert mock_wrapper.call_count == 2
-    assert model_name not in api._MODEL_INSTANCE_REGISTRY
+    assert model_name not in annotation_runner._MODEL_INSTANCE_REGISTRY
 
 
 @pytest.mark.unit
@@ -234,7 +236,7 @@ def test_pydanticai_wrapper_predict_without_api_model_id(mock_config):
     # Mock config to return None for api_model_id
     mock_config.get.return_value = None
 
-    wrapper = api.PydanticAIWebAPIWrapper("test-model", MagicMock())
+    wrapper = annotation_runner.PydanticAIWebAPIWrapper("test-model", MagicMock())
 
     # Enter context to trigger config loading
     with wrapper:
@@ -264,7 +266,7 @@ def test_pydanticai_wrapper_predict_handles_provider_error(
     # Mock ProviderManager to raise exception
     mock_run_inference.side_effect = Exception("API Error")
 
-    wrapper = api.PydanticAIWebAPIWrapper("test-model", MagicMock())
+    wrapper = annotation_runner.PydanticAIWebAPIWrapper("test-model", MagicMock())
 
     test_images = [Image.new("RGB", (100, 100)), Image.new("RGB", (100, 100))]
     phash_list = ["phash1", "phash2"]
@@ -282,11 +284,11 @@ def test_pydanticai_wrapper_predict_handles_provider_error(
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.api.calculate_phash")
-@patch("image_annotator_lib.api.get_annotator_instance")
-@patch("image_annotator_lib.api._annotate_model")
-@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
-@patch("image_annotator_lib.core.registry.initialize_registry")
+@patch("image_annotator_lib.core.annotation_runner.calculate_phash")
+@patch("image_annotator_lib.core.annotation_runner.get_annotator_instance")
+@patch("image_annotator_lib.core.annotation_runner._annotate_model")
+@patch("image_annotator_lib.core.annotation_runner.get_cls_obj_registry")
+@patch("image_annotator_lib.core.annotation_runner.initialize_registry")
 def test_annotate_with_single_model_success(
     mock_init_registry, mock_get_registry, mock_annotate_model, mock_get_instance, mock_calc_phash
 ):
@@ -326,11 +328,11 @@ def test_annotate_with_single_model_success(
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.api.calculate_phash")
-@patch("image_annotator_lib.api.get_annotator_instance")
-@patch("image_annotator_lib.api._annotate_model")
-@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
-@patch("image_annotator_lib.core.registry.initialize_registry")
+@patch("image_annotator_lib.core.annotation_runner.calculate_phash")
+@patch("image_annotator_lib.core.annotation_runner.get_annotator_instance")
+@patch("image_annotator_lib.core.annotation_runner._annotate_model")
+@patch("image_annotator_lib.core.annotation_runner.get_cls_obj_registry")
+@patch("image_annotator_lib.core.annotation_runner.initialize_registry")
 def test_annotate_with_multiple_models_success(
     mock_init_registry, mock_get_registry, mock_annotate_model, mock_get_instance, mock_calc_phash
 ):
@@ -371,10 +373,10 @@ def test_annotate_with_multiple_models_success(
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.api.get_annotator_instance")
-@patch("image_annotator_lib.api._annotate_model")
-@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
-@patch("image_annotator_lib.core.registry.initialize_registry")
+@patch("image_annotator_lib.core.annotation_runner.get_annotator_instance")
+@patch("image_annotator_lib.core.annotation_runner._annotate_model")
+@patch("image_annotator_lib.core.annotation_runner.get_cls_obj_registry")
+@patch("image_annotator_lib.core.annotation_runner.initialize_registry")
 def test_annotate_with_phash_provided(
     mock_init_registry, mock_get_registry, mock_annotate_model, mock_get_instance
 ):
@@ -407,11 +409,11 @@ def test_annotate_with_phash_provided(
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.api.calculate_phash")
-@patch("image_annotator_lib.api.get_annotator_instance")
-@patch("image_annotator_lib.api._annotate_model")
-@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
-@patch("image_annotator_lib.core.registry.initialize_registry")
+@patch("image_annotator_lib.core.annotation_runner.calculate_phash")
+@patch("image_annotator_lib.core.annotation_runner.get_annotator_instance")
+@patch("image_annotator_lib.core.annotation_runner._annotate_model")
+@patch("image_annotator_lib.core.annotation_runner.get_cls_obj_registry")
+@patch("image_annotator_lib.core.annotation_runner.initialize_registry")
 def test_annotate_with_phash_none(
     mock_init_registry, mock_get_registry, mock_annotate_model, mock_get_instance, mock_calc_phash
 ):
@@ -446,11 +448,11 @@ def test_annotate_with_phash_none(
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.api.calculate_phash")
-@patch("image_annotator_lib.api.get_annotator_instance")
-@patch("image_annotator_lib.api._annotate_model")
-@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
-@patch("image_annotator_lib.core.registry.initialize_registry")
+@patch("image_annotator_lib.core.annotation_runner.calculate_phash")
+@patch("image_annotator_lib.core.annotation_runner.get_annotator_instance")
+@patch("image_annotator_lib.core.annotation_runner._annotate_model")
+@patch("image_annotator_lib.core.annotation_runner.get_cls_obj_registry")
+@patch("image_annotator_lib.core.annotation_runner.initialize_registry")
 def test_annotate_with_api_keys(
     mock_init_registry, mock_get_registry, mock_annotate_model, mock_get_instance, mock_calc_phash
 ):
@@ -487,11 +489,11 @@ def test_annotate_with_api_keys(
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.api.calculate_phash")
-@patch("image_annotator_lib.api.get_annotator_instance")
-@patch("image_annotator_lib.api._annotate_model")
-@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
-@patch("image_annotator_lib.core.registry.initialize_registry")
+@patch("image_annotator_lib.core.annotation_runner.calculate_phash")
+@patch("image_annotator_lib.core.annotation_runner.get_annotator_instance")
+@patch("image_annotator_lib.core.annotation_runner._annotate_model")
+@patch("image_annotator_lib.core.annotation_runner.get_cls_obj_registry")
+@patch("image_annotator_lib.core.annotation_runner.initialize_registry")
 def test_annotate_empty_registry_initialization(
     mock_init_registry, mock_get_registry, mock_annotate_model, mock_get_instance, mock_calc_phash
 ):
@@ -525,11 +527,11 @@ def test_annotate_empty_registry_initialization(
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.api.calculate_phash")
-@patch("image_annotator_lib.api.get_annotator_instance")
-@patch("image_annotator_lib.api._annotate_model")
-@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
-@patch("image_annotator_lib.core.registry.initialize_registry")
+@patch("image_annotator_lib.core.annotation_runner.calculate_phash")
+@patch("image_annotator_lib.core.annotation_runner.get_annotator_instance")
+@patch("image_annotator_lib.core.annotation_runner._annotate_model")
+@patch("image_annotator_lib.core.annotation_runner.get_cls_obj_registry")
+@patch("image_annotator_lib.core.annotation_runner.initialize_registry")
 @patch("image_annotator_lib.core.utils.get_model_capabilities")
 def test_annotate_model_error_handling(
     mock_get_capabilities,
@@ -573,11 +575,11 @@ def test_annotate_model_error_handling(
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.api.calculate_phash")
-@patch("image_annotator_lib.api.get_annotator_instance")
-@patch("image_annotator_lib.api._annotate_model")
-@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
-@patch("image_annotator_lib.core.registry.initialize_registry")
+@patch("image_annotator_lib.core.annotation_runner.calculate_phash")
+@patch("image_annotator_lib.core.annotation_runner.get_annotator_instance")
+@patch("image_annotator_lib.core.annotation_runner._annotate_model")
+@patch("image_annotator_lib.core.annotation_runner.get_cls_obj_registry")
+@patch("image_annotator_lib.core.annotation_runner.initialize_registry")
 @patch("image_annotator_lib.core.utils.get_model_capabilities")
 def test_annotate_result_length_mismatch(
     mock_get_capabilities,
@@ -629,11 +631,11 @@ def test_annotate_result_length_mismatch(
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.api.calculate_phash")
-@patch("image_annotator_lib.api.get_annotator_instance")
-@patch("image_annotator_lib.api._annotate_model")
-@patch("image_annotator_lib.core.registry.get_cls_obj_registry")
-@patch("image_annotator_lib.core.registry.initialize_registry")
+@patch("image_annotator_lib.core.annotation_runner.calculate_phash")
+@patch("image_annotator_lib.core.annotation_runner.get_annotator_instance")
+@patch("image_annotator_lib.core.annotation_runner._annotate_model")
+@patch("image_annotator_lib.core.annotation_runner.get_cls_obj_registry")
+@patch("image_annotator_lib.core.annotation_runner.initialize_registry")
 def test_annotate_phash_list_longer_than_images(
     mock_init_registry, mock_get_registry, mock_annotate_model, mock_get_instance, mock_calc_phash
 ):
@@ -685,7 +687,7 @@ def test_annotate_model_context_manager():
     # Execute
     test_images = [Image.new("RGB", (100, 100))]
     phash_list = ["test_phash"]
-    results = api._annotate_model(mock_annotator, test_images, phash_list)
+    results = annotation_runner._annotate_model(mock_annotator, test_images, phash_list)
 
     # Verify context manager was used
     mock_annotator.__enter__.assert_called_once()
@@ -715,10 +717,10 @@ def test_process_model_results_uses_actual_phash():
     }
 
     # Create empty results dict
-    results_by_phash = api.PHashAnnotationResults()
+    results_by_phash = PHashAnnotationResults()
 
     # Execute
-    api._process_model_results("test-model", annotation_results, results_by_phash, phash_map)
+    annotation_runner._process_model_results("test-model", annotation_results, results_by_phash, phash_map)
 
     # Verify results use actual pHash keys
     assert len(results_by_phash) == 2
@@ -758,10 +760,10 @@ def test_process_model_results_missing_phash():
     }
 
     # Create empty results dict
-    results_by_phash = api.PHashAnnotationResults()
+    results_by_phash = PHashAnnotationResults()
 
     # Execute
-    api._process_model_results("test-model", annotation_results, results_by_phash, phash_map)
+    annotation_runner._process_model_results("test-model", annotation_results, results_by_phash, phash_map)
 
     # Verify only results with valid pHash are added
     assert len(results_by_phash) == 2
@@ -784,11 +786,11 @@ def test_handle_error(mock_get_capabilities):
     mock_get_capabilities.return_value = {TaskCapability.TAGS}
 
     # Create empty results dict
-    results_dict = api.PHashAnnotationResults()
+    results_dict = PHashAnnotationResults()
 
     # Execute
     test_error = ValueError("Test error message")
-    api._handle_error(
+    annotation_runner._handle_error(
         e=test_error,
         model_name="test-model",
         image_hash="test_phash",
@@ -807,10 +809,10 @@ def test_handle_error(mock_get_capabilities):
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.core.registry.list_available_annotators")
+@patch("image_annotator_lib.api._registry_list_annotators")
 def test_list_available_annotators(mock_list_annotators):
     """Test list_available_annotators() delegates to registry."""
-    # Mock registry function
+    # Mock registry function (api モジュール内で alias 化された参照を patch)
     mock_list_annotators.return_value = ["model1", "model2", "model3"]
 
     # Execute

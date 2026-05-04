@@ -357,7 +357,7 @@ class UnifiedAnnotationResult(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_capabilities_not_empty(self) -> "UnifiedAnnotationResult":
+    def validate_capabilities_not_empty(self) -> UnifiedAnnotationResult:
         """エラー結果以外はcapabilitiesが必須。"""
         if self.error is None and not self.capabilities:
             raise ValueError("capabilities cannot be empty for non-error results")
@@ -366,3 +366,15 @@ class UnifiedAnnotationResult(BaseModel):
 
 # === 新しい統一型システム ===
 UnifiedPHashAnnotationResults = dict[str, dict[str, UnifiedAnnotationResult]]
+
+
+class PHashAnnotationResults(dict[str, dict[str, UnifiedAnnotationResult]]):
+    """統一バリデーションスキーマ用の画像pHashをキーとする評価結果辞書。
+
+    Attributes:
+        [phash]: 画像のpHashをキーとする辞書。
+                 各キーの値は、モデル名をキーとする辞書。
+                 各モデル名の値は、型安全なUnifiedAnnotationResult。
+    """
+
+    pass
