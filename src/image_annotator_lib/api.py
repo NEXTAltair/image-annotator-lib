@@ -85,7 +85,12 @@ def list_annotator_info() -> list[AnnotatorInfo]:
         all_config = {}
 
     for model_name, model_class in _MODEL_CLASS_OBJ_REGISTRY.items():
-        model_config = all_config.get(model_name) or _WEBAPI_MODEL_METADATA.get(model_name, {})
+        # discovery メタデータ (`_WEBAPI_MODEL_METADATA`) と config_registry の値を
+        # マージする (どちらか片方では provider / max_output_tokens 等が dropped される)。
+        # 優先順位: ユーザー/システム設定 (all_config) > discovery メタデータ。
+        discovery_meta = _WEBAPI_MODEL_METADATA.get(model_name) or {}
+        user_config = all_config.get(model_name) or {}
+        model_config = {**discovery_meta, **user_config}
         try:
             infos.append(_build_annotator_info_for_registry_model(model_name, model_class, model_config))
             seen_names.add(model_name)

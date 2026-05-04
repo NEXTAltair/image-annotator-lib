@@ -51,13 +51,24 @@ def patched_registry():
     """`_MODEL_CLASS_OBJ_REGISTRY` を直接書き換えるためのフィクスチャ。
     呼び出し側が辞書と config を渡す。"""
 
-    def _setup(model_dict: dict, config_dict: dict | None = None, direct_models: list[str] | None = None):
-        """戻り値: () のコンテキストマネージャ。withで使う。"""
+    def _setup(
+        model_dict: dict,
+        config_dict: dict | None = None,
+        direct_models: list[str] | None = None,
+        webapi_metadata: dict | None = None,
+    ):
+        """戻り値: () のコンテキストマネージャ。withで使う。
+
+        Args:
+            webapi_metadata: ``_WEBAPI_MODEL_METADATA`` を上書きする辞書。
+                discovery 経由で登録された WebAPI モデルのメタデータ検証で使う。
+        """
         config_dict = config_dict or {}
         direct_models = direct_models or []
+        webapi_metadata = webapi_metadata or {}
 
         # _config が dict の場合はそれを書き換え、なければ get_all_config を patch
-        return _PatchedRegistryCtx(model_dict, config_dict, direct_models)
+        return _PatchedRegistryCtx(model_dict, config_dict, direct_models, webapi_metadata)
 
     return _setup
 
@@ -65,10 +76,11 @@ def patched_registry():
 class _PatchedRegistryCtx:
     """_MODEL_CLASS_OBJ_REGISTRY と get_all_config と agent_factory を一括 patch するコンテキスト。"""
 
-    def __init__(self, model_dict: dict, config_dict: dict, direct_models: list[str]):
+    def __init__(self, model_dict: dict, config_dict: dict, direct_models: list[str], webapi_metadata: dict):
         self.model_dict = model_dict
         self.config_dict = config_dict
         self.direct_models = direct_models
+        self.webapi_metadata = webapi_metadata
         self._patches: list = []
 
     def __enter__(self):
@@ -77,7 +89,7 @@ class _PatchedRegistryCtx:
 
         self._patches.append(patch.object(registry, "_MODEL_CLASS_OBJ_REGISTRY", self.model_dict))
         self._patches.append(patch.object(registry, "_REGISTRY_INITIALIZED", True))
-        self._patches.append(patch.object(registry, "_WEBAPI_MODEL_METADATA", {}))
+        self._patches.append(patch.object(registry, "_WEBAPI_MODEL_METADATA", self.webapi_metadata))
         # config_registry の get / get_all_config は _merged_config_data を読むので、
         # 内部データを差し替えれば両方一貫した値を返せる。proxy の delattr 問題も回避できる。
         real_registry = get_config_registry()
@@ -413,6 +425,90 @@ def test_parse_discontinued_at_normalizes_quoted_string():
 
     # 予期しない型 → None
     assert _parse_discontinued_at(123, "m") is None
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_webapi_model_merges_discovery_metadata(patched_registry):
+    """discovery 経由 (`_WEBAPI_MODEL_METADATA`) と config_registry の値を merge した上で
+    AnnotatorInfo を構築する (Codex P2 #22 第 3 指摘)。
+
+    `_register_webapi_models_from_discovery()` は provider/max_output_tokens を
+    `_WEBAPI_MODEL_METADATA` に保存するが、`set_system_value()` は class/api_model_id
+    のみを config_registry に永続化する。両方を merge しないと Phase 2 メタデータが
+    silently dropped される。
+    """
+    # config_registry は class/api_model_id のみ
+    user_config = {
+        "openai/gpt-4o": {
+            "class": "PydanticAIWebAPIAnnotator",
+            "api_model_id": "gpt-4o",
+            "type": "vision",
+            "capabilities": ["tags", "captions"],
+        }
+    }
+    # discovery は provider/max_output_tokens を含む
+    discovery_meta = {
+        "openai/gpt-4o": {
+            "class": "PydanticAIWebAPIAnnotator",
+            "api_model_id": "gpt-4o",
+            "provider": "openai",
+            "max_output_tokens": 1800,
+            "type": "vision",
+            "capabilities": ["tags", "captions"],
+        }
+    }
+    with patched_registry(
+        model_dict={"openai/gpt-4o": PydanticAIWebAPIAnnotator},
+        config_dict=user_config,
+        webapi_metadata=discovery_meta,
+    ):
+        result = list_annotator_info()
+
+    assert len(result) == 1
+    info = result[0]
+    # discovery のメタデータが反映されている (両方を merge した結果)
+    assert info.provider == "openai"
+    assert info.max_output_tokens == 1800
+    assert info.api_model_id == "gpt-4o"
+    assert info.is_api is True
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_user_config_overrides_discovery_metadata(patched_registry):
+    """config_registry の値は discovery メタデータより優先される (merge 優先順位)。"""
+    user_config = {
+        "openai/gpt-4o": {
+            "class": "PydanticAIWebAPIAnnotator",
+            "api_model_id": "gpt-4o",
+            "provider": "user-override",  # ユーザー側で provider を上書き
+            "type": "vision",
+            "capabilities": ["tags"],
+        }
+    }
+    discovery_meta = {
+        "openai/gpt-4o": {
+            "class": "PydanticAIWebAPIAnnotator",
+            "api_model_id": "gpt-4o",
+            "provider": "openai",  # discovery 側はデフォルト
+            "max_output_tokens": 2048,
+            "type": "vision",
+            "capabilities": ["tags"],
+        }
+    }
+    with patched_registry(
+        model_dict={"openai/gpt-4o": PydanticAIWebAPIAnnotator},
+        config_dict=user_config,
+        webapi_metadata=discovery_meta,
+    ):
+        result = list_annotator_info()
+
+    info = result[0]
+    # ユーザー設定の provider が discovery を上書き
+    assert info.provider == "user-override"
+    # ユーザー設定にない max_output_tokens は discovery から取得
+    assert info.max_output_tokens == 2048
 
 
 @pytest.mark.unit
