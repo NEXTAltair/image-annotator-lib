@@ -11,7 +11,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from image_annotator_lib.api import _MODEL_INSTANCE_REGISTRY, annotate, list_available_annotators
+from image_annotator_lib.api import annotate, list_available_annotators
+from image_annotator_lib.core.annotation_runner import _MODEL_INSTANCE_REGISTRY
 from image_annotator_lib.core.provider_manager import ProviderManager
 from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 from image_annotator_lib.core.registry import get_cls_obj_registry
@@ -120,7 +121,7 @@ class TestLocalMLModelsIntegration:
 
         try:
             # Test model loading through the annotate API
-            with patch("image_annotator_lib.api._create_annotator_instance") as mock_create:
+            with patch("image_annotator_lib.core.annotation_runner._create_annotator_instance") as mock_create:
                 mock_annotator = MagicMock()
                 # Mock context manager support
                 mock_annotator.__enter__ = MagicMock(return_value=mock_annotator)
@@ -183,7 +184,7 @@ class TestLocalMLModelsIntegration:
 
         try:
             # Test model loading through the annotate API
-            with patch("image_annotator_lib.api._create_annotator_instance") as mock_create:
+            with patch("image_annotator_lib.core.annotation_runner._create_annotator_instance") as mock_create:
                 mock_annotator = MagicMock()
                 # Mock context manager support
                 mock_annotator.__enter__ = MagicMock(return_value=mock_annotator)
@@ -243,7 +244,7 @@ class TestLocalMLModelsIntegration:
             ]
 
         for model_name in test_models:
-            with patch("image_annotator_lib.api._create_annotator_instance") as mock_create:
+            with patch("image_annotator_lib.core.annotation_runner._create_annotator_instance") as mock_create:
                 # Mock annotator with realistic inference
                 mock_annotator = MagicMock()
                 # Mock context manager support
@@ -301,7 +302,7 @@ class TestLocalMLModelsIntegration:
         test_models = ["wd14_vit_v1_vit_large_p14_336_e1_tagger"]  # Use a known ONNX model
 
         for model_name in test_models:
-            with patch("image_annotator_lib.api._create_annotator_instance") as mock_create:
+            with patch("image_annotator_lib.core.annotation_runner._create_annotator_instance") as mock_create:
                 # Mock model that raises an error during inference
                 mock_annotator = MagicMock()
                 mock_annotator.run_inference.side_effect = RuntimeError("Model inference error")
@@ -330,7 +331,7 @@ class TestLocalMLModelsIntegration:
     @pytest.mark.fast_integration
     def test_memory_management_with_local_models(self, lightweight_test_images):
         """Test memory management integration with local ML models."""
-        with patch("image_annotator_lib.api._create_annotator_instance") as mock_create:
+        with patch("image_annotator_lib.core.annotation_runner._create_annotator_instance") as mock_create:
             # Track annotator creation calls
             created_annotators = {}
 
@@ -390,7 +391,7 @@ class TestLocalMLModelsIntegration:
     @pytest.mark.fast_integration
     def test_image_preprocessing_for_local_models(self, lightweight_test_images):
         """Test image preprocessing pipeline for different local model types."""
-        with patch("image_annotator_lib.api._create_annotator_instance") as mock_load:
+        with patch("image_annotator_lib.core.annotation_runner._create_annotator_instance") as mock_load:
             # Mock annotator that expects specific image formats
             mock_annotator = MagicMock()
             # Mock context manager support
@@ -439,7 +440,7 @@ class TestLocalMLModelsIntegration:
     @pytest.mark.fast_integration
     def test_concurrent_local_model_loading(self, lightweight_test_images):
         """Test concurrent loading of multiple local models."""
-        with patch("image_annotator_lib.api._create_annotator_instance") as mock_load:
+        with patch("image_annotator_lib.core.annotation_runner._create_annotator_instance") as mock_load:
             # Mock concurrent model loading
             load_call_count = 0
 

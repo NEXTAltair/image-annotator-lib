@@ -3,7 +3,6 @@
 Plan 1: Unified implementation eliminating 4 ProviderInstance classes.
 """
 
-from io import BytesIO
 
 from PIL import Image
 

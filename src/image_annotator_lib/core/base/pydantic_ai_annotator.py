@@ -22,7 +22,7 @@ from pydantic_ai.settings import ModelSettings
 
 from ...exceptions.errors import ConfigurationError
 from ..config import config_registry
-from ..types import AnnotationResult, AnnotationSchema, UnifiedAnnotationResult
+from ..types import AnnotationSchema, UnifiedAnnotationResult
 from ..utils import get_model_capabilities, logger
 from .annotator import BaseAnnotator
 

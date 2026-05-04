@@ -5,21 +5,15 @@ PydanticAI Model Factory 統一テスト用ステップ定義
 実装詳細に依存しない汎用的なアプローチを採用。
 """
 
-import asyncio
 import logging
-import os
 import time
-from io import BytesIO
-from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 from PIL import Image
-from pydantic_ai import Agent
-from pydantic_ai.models.test import TestModel
 from pytest_bdd import given, parsers, then, when
 
 from image_annotator_lib.core.types import AnnotationResult
+
 
 # ApiAuthenticationError は使用するが、直接参照しない（可視性は保つ）
 class ApiAuthenticationError(Exception):

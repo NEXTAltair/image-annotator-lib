@@ -3,7 +3,7 @@ import importlib.resources
 import os
 import shutil
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -386,11 +386,11 @@ def load_last_refresh() -> datetime | None:
         return None
     # toml ライブラリが datetime 型に変換している場合
     if isinstance(value, datetime):
-        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
     try:
         dt_val = datetime.fromisoformat(str(value))
         if dt_val.tzinfo is None:
-            dt_val = dt_val.replace(tzinfo=timezone.utc)
+            dt_val = dt_val.replace(tzinfo=UTC)
         return dt_val
     except ValueError:
         logger.warning(f"meta.last_refresh のパースに失敗しました: {value!r}")

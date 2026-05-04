@@ -5,7 +5,6 @@
 """
 
 import datetime
-import json
 import os
 import threading
 from datetime import datetime as dt
