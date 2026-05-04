@@ -513,6 +513,37 @@ def test_user_config_overrides_discovery_metadata(patched_registry):
 
 @pytest.mark.unit
 @pytest.mark.fast
+def test_list_annotator_info_skips_only_malformed_model_section(patched_registry):
+    """1 モデルの config セクションが非マッピング (scalar/list) でも、
+    他モデルの listing は継続される (Codex P2 #22 第 4 指摘)。
+
+    malformed: TOML で `[model.section]` の代わりに `model.section = "scalar"` のように
+    書かれた場合、`{**user_config}` のスプレッドが TypeError を投げて関数全体が abort
+    する問題があった。merge を try ブロックに含めて per-model 失敗にする。
+    """
+    # 2 モデル: "good" は dict、"malformed" は scalar (TOML の typo を想定)
+    user_config = {
+        "good-tagger": {"type": "tagger", "capabilities": ["tags"]},
+        "malformed-tagger": "this-should-be-a-dict",  # 不正な型
+    }
+    with patched_registry(
+        model_dict={"good-tagger": _DummyTagger, "malformed-tagger": _DummyTagger},
+        config_dict=user_config,
+    ):
+        result = list_annotator_info()
+
+    # malformed-tagger は build 失敗で skip されるが、good-tagger は listing に残る
+    names = [info.name for info in result]
+    assert "good-tagger" in names
+    # malformed の挙動: 非マッピングは warning + 空 dict 扱いされ、build には進む
+    # ただし最低限の config (capabilities/type) がないため capabilities フォールバックで
+    # 構築されるか、もしくは build 失敗で skip。どちらでも他モデルが残ることが要件。
+    # ここでは少なくとも 1 件以上残ることを保証。
+    assert len(result) >= 1
+
+
+@pytest.mark.unit
+@pytest.mark.fast
 def test_list_annotator_info_keeps_model_with_invalid_metadata(patched_registry):
     """estimated_size_gb / max_output_tokens / discontinued_at が malformed でも
     モデル自体は listing に残り、該当フィールドのみ None になる (Codex P2 #22)。"""

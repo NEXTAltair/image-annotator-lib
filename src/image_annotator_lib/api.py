@@ -85,13 +85,27 @@ def list_annotator_info() -> list[AnnotatorInfo]:
         all_config = {}
 
     for model_name, model_class in _MODEL_CLASS_OBJ_REGISTRY.items():
-        # discovery メタデータ (`_WEBAPI_MODEL_METADATA`) と config_registry の値を
-        # マージする (どちらか片方では provider / max_output_tokens 等が dropped される)。
-        # 優先順位: ユーザー/システム設定 (all_config) > discovery メタデータ。
-        discovery_meta = _WEBAPI_MODEL_METADATA.get(model_name) or {}
-        user_config = all_config.get(model_name) or {}
-        model_config = {**discovery_meta, **user_config}
         try:
+            # discovery メタデータ (`_WEBAPI_MODEL_METADATA`) と config_registry の値を
+            # マージする (どちらか片方では provider / max_output_tokens 等が dropped される)。
+            # 優先順位: ユーザー/システム設定 (all_config) > discovery メタデータ。
+            # malformed config (scalar/list 等の非マッピング値) は warning + 空 dict 扱いとし、
+            # 該当モデルだけが失敗するようにして他モデルの listing を継続させる。
+            discovery_meta = _WEBAPI_MODEL_METADATA.get(model_name) or {}
+            if not isinstance(discovery_meta, dict):
+                logger.warning(
+                    f"モデル '{model_name}' の discovery メタデータが非マッピング "
+                    f"({type(discovery_meta).__name__}): {discovery_meta!r}"
+                )
+                discovery_meta = {}
+            user_config = all_config.get(model_name) or {}
+            if not isinstance(user_config, dict):
+                logger.warning(
+                    f"モデル '{model_name}' の config_registry 値が非マッピング "
+                    f"({type(user_config).__name__}): {user_config!r}"
+                )
+                user_config = {}
+            model_config = {**discovery_meta, **user_config}
             infos.append(_build_annotator_info_for_registry_model(model_name, model_class, model_config))
             seen_names.add(model_name)
         except Exception as e:
