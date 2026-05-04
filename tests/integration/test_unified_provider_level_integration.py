@@ -171,7 +171,7 @@ class TestAPIWrapperBackwardCompatibility:
 
     def test_pydantic_ai_detection(self):
         """PydanticAI annotator検出テスト"""
-        from image_annotator_lib.api import _is_pydantic_ai_webapi_annotator
+        from image_annotator_lib.core.annotation_runner import _is_pydantic_ai_webapi_annotator
         from image_annotator_lib.model_class.annotator_webapi.anthropic_api import AnthropicApiAnnotator
         from image_annotator_lib.model_class.annotator_webapi.google_api import GoogleApiAnnotator
         from image_annotator_lib.model_class.annotator_webapi.openai_api_response import OpenAIApiAnnotator
@@ -190,7 +190,7 @@ class TestAPIWrapperBackwardCompatibility:
 
     def test_wrapper_methods(self, managed_config_registry):
         """ラッパー必要メソッドテスト"""
-        from image_annotator_lib.api import PydanticAIWebAPIWrapper
+        from image_annotator_lib.core.annotation_runner import PydanticAIWebAPIWrapper
         from image_annotator_lib.model_class.annotator_webapi.anthropic_api import AnthropicApiAnnotator
 
         # テスト用設定をセットアップ
