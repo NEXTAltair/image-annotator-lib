@@ -340,7 +340,7 @@ class TestErrorHandlingAndFallbackIntegration:
         with patch(
             "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
-            with patch("image_annotator_lib.api._create_annotator_instance") as mock_load_model:
+            with patch("image_annotator_lib.core.annotation_runner._create_annotator_instance") as mock_load_model:
                 # Create a scenario where one failure type doesn't affect others
                 failure_cascade_test = False
 
@@ -476,7 +476,7 @@ class TestErrorHandlingAndFallbackIntegration:
         with patch(
             "image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory.get_cached_agent"
         ) as mock_get_agent:
-            with patch("image_annotator_lib.api._create_annotator_instance") as mock_load_model:
+            with patch("image_annotator_lib.core.annotation_runner._create_annotator_instance") as mock_load_model:
                 # Create a stress scenario with multiple error types
                 call_count = 0
 

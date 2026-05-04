@@ -2,12 +2,13 @@
 
 from typing import Any
 
-# PipelineBaseAnnotator をインポート
-from image_annotator_lib.core.base import PipelineBaseAnnotator
 from image_annotator_lib.core import utils
 
-from ..core.utils import logger
+# PipelineBaseAnnotator をインポート
+from image_annotator_lib.core.base import PipelineBaseAnnotator
+
 from ..core.types import UnifiedAnnotationResult
+from ..core.utils import logger
 
 
 class AestheticShadow(PipelineBaseAnnotator):

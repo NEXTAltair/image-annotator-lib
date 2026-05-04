@@ -2,9 +2,9 @@
 
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from collections.abc import Generator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Generator
 from unittest.mock import patch
 
 import pytest
@@ -21,7 +21,6 @@ from image_annotator_lib.core.config import (
     load_last_refresh,
     save_available_api_models,
 )
-
 
 # --- フィクスチャ ---
 
@@ -53,7 +52,7 @@ def reset_refresh_lock() -> Generator[None, None, None]:
 
 @pytest.fixture
 def now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # --- load_last_refresh テスト ---
@@ -89,7 +88,6 @@ def test_load_last_refresh_returns_timezone_aware_datetime(toml_path: Path, now_
 @pytest.mark.unit
 def test_load_last_refresh_normalizes_naive_datetime_to_utc(toml_path: Path) -> None:
     """タイムゾーンなし文字列（手編集等）は UTC として扱い、aware datetime を返す。"""
-    import toml
 
     toml_path.write_text(
         '[meta]\nlast_refresh = "2026-04-20T10:00:00"\n[available_vision_models]\n',
@@ -99,7 +97,7 @@ def test_load_last_refresh_normalizes_naive_datetime_to_utc(toml_path: Path) -> 
     result = load_last_refresh()
     assert result is not None
     assert result.tzinfo is not None
-    assert result.tzinfo == timezone.utc
+    assert result.tzinfo == UTC
 
 
 # --- save_available_api_models + [meta] テスト ---
@@ -166,14 +164,14 @@ def test_should_refresh_returns_true_when_last_refresh_missing(toml_path: Path) 
 
 @pytest.mark.unit
 def test_should_refresh_returns_true_when_ttl_exceeded(toml_path: Path) -> None:
-    old_refresh = datetime.now(timezone.utc) - timedelta(days=8)
+    old_refresh = datetime.now(UTC) - timedelta(days=8)
     save_available_api_models({}, last_refresh=old_refresh)
     assert should_refresh(ttl_days=7) is True
 
 
 @pytest.mark.unit
 def test_should_refresh_returns_false_when_within_ttl(toml_path: Path) -> None:
-    recent_refresh = datetime.now(timezone.utc) - timedelta(days=1)
+    recent_refresh = datetime.now(UTC) - timedelta(days=1)
     save_available_api_models({}, last_refresh=recent_refresh)
     assert should_refresh(ttl_days=7) is False
 
@@ -181,14 +179,14 @@ def test_should_refresh_returns_false_when_within_ttl(toml_path: Path) -> None:
 @pytest.mark.unit
 def test_should_refresh_returns_true_exactly_at_ttl_boundary(toml_path: Path) -> None:
     """TTL ちょうどは「期限切れ」と判定される（> 判定）。"""
-    boundary_refresh = datetime.now(timezone.utc) - timedelta(days=7, seconds=1)
+    boundary_refresh = datetime.now(UTC) - timedelta(days=7, seconds=1)
     save_available_api_models({}, last_refresh=boundary_refresh)
     assert should_refresh(ttl_days=7) is True
 
 
 @pytest.mark.unit
 def test_should_refresh_respects_env_var(toml_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    recent_refresh = datetime.now(timezone.utc) - timedelta(days=2)
+    recent_refresh = datetime.now(UTC) - timedelta(days=2)
     save_available_api_models({}, last_refresh=recent_refresh)
 
     monkeypatch.setenv("IMAGE_ANNOTATOR_API_MODELS_TTL_DAYS", "1")
@@ -202,7 +200,7 @@ def test_should_refresh_respects_env_var(toml_path: Path, monkeypatch: pytest.Mo
 def test_should_refresh_uses_default_ttl_on_invalid_env_var(
     toml_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    recent_refresh = datetime.now(timezone.utc) - timedelta(days=1)
+    recent_refresh = datetime.now(UTC) - timedelta(days=1)
     save_available_api_models({}, last_refresh=recent_refresh)
 
     monkeypatch.setenv("IMAGE_ANNOTATOR_API_MODELS_TTL_DAYS", "not_a_number")

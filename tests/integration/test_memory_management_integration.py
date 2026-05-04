@@ -277,7 +277,7 @@ class TestMemoryManagementIntegration:
         # Mock the entire annotation pipeline
         with (
             patch("image_annotator_lib.api.list_available_annotators") as mock_list,
-            patch("image_annotator_lib.api.calculate_phash") as mock_phash,
+            patch("image_annotator_lib.core.annotation_runner.calculate_phash") as mock_phash,
             patch("image_annotator_lib.core.model_factory.ModelLoad") as mock_model_load,
         ):
             # Setup mocks

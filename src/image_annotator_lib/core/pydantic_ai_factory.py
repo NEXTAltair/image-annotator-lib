@@ -3,21 +3,18 @@
 Plan 1: Simplified implementation relying on PydanticAI's built-in capabilities.
 """
 
-import asyncio
 import os
 from io import BytesIO
 from typing import Any, ClassVar
 
 from PIL import Image
-from pydantic import SecretStr
 from pydantic_ai import Agent
 from pydantic_ai.messages import BinaryContent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers import infer_provider_class
 
 from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
-from .config import config_registry
-from .types import AnnotationSchema, UnifiedAnnotationResult
+from .types import AnnotationSchema
 from .utils import logger
 
 

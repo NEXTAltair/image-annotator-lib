@@ -408,3 +408,18 @@ class AnnotatorInfo:
     is_local: bool
     is_api: bool
     device: str | None = None
+
+
+# --- pHash ベースの結果コンテナ (Issue #9) ---
+
+
+class PHashAnnotationResults(dict[str, dict[str, UnifiedAnnotationResult]]):
+    """統一バリデーションスキーマ用の画像pHashをキーとする評価結果辞書。
+
+    Attributes:
+        [phash]: 画像のpHashをキーとする辞書。
+                 各キーの値は、モデル名をキーとする辞書。
+                 各モデル名の値は、型安全なUnifiedAnnotationResult。
+    """
+
+    pass

@@ -18,10 +18,7 @@ from image_annotator_lib.core.simplified_agent_factory import (
     create_agent,
     get_agent_factory,
     get_available_models,
-    is_model_deprecated,
-    list_all_models,
 )
-
 
 _BASE_MODEL_IDS = [
     "google/gemini-2.5-pro-preview-03-25",
