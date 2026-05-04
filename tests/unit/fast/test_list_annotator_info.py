@@ -407,6 +407,16 @@ def test_parse_discontinued_at_normalizes_quoted_string():
     native = _dt.datetime(2025, 12, 31, tzinfo=_dt.UTC)
     assert _parse_discontinued_at(native, "m") is native
 
+    # TOML local-date (datetime.date) は datetime.datetime に変換される (Codex P2 #22 第 5 指摘)
+    local_date = _dt.date(2025, 12, 31)
+    converted = _parse_discontinued_at(local_date, "m")
+    assert isinstance(converted, _dt.datetime)
+    assert converted.year == 2025
+    assert converted.month == 12
+    assert converted.day == 31
+    assert converted.hour == 0
+    assert converted.tzinfo is not None  # UTC で aware
+
     # 普通の ISO 文字列
     parsed = _parse_discontinued_at("2025-12-31T00:00:00", "m")
     assert isinstance(parsed, _dt.datetime)
@@ -425,6 +435,38 @@ def test_parse_discontinued_at_normalizes_quoted_string():
 
     # 予期しない型 → None
     assert _parse_discontinued_at(123, "m") is None
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_list_annotator_info_accepts_toml_local_date_for_discontinued_at(patched_registry):
+    """TOML local-date (`discontinued_at = 2025-12-31`) は datetime.date で来るが、
+    AnnotatorInfo.discontinued_at の datetime.datetime に正規化される (Codex P2 #22 第 5 指摘)。
+
+    silently None になると廃止モデルが list_annotator_info() で active と誤報される。
+    """
+    import datetime as _dt
+
+    with patched_registry(
+        model_dict={"deprecated-tagger": _DummyTagger},
+        config_dict={
+            "deprecated-tagger": {
+                "type": "tagger",
+                "capabilities": ["tags"],
+                # tomllib は `discontinued_at = 2025-12-31` を datetime.date として返す
+                "discontinued_at": _dt.date(2024, 6, 30),
+            }
+        },
+    ):
+        result = list_annotator_info()
+
+    assert len(result) == 1
+    info = result[0]
+    assert info.discontinued_at is not None  # 廃止モデルが active と誤報されない
+    assert isinstance(info.discontinued_at, _dt.datetime)
+    assert info.discontinued_at.year == 2024
+    assert info.discontinued_at.month == 6
+    assert info.discontinued_at.day == 30
 
 
 @pytest.mark.unit

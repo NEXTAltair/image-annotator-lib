@@ -547,11 +547,22 @@ def _safe_int(value: Any, model_name: str, field: str) -> int | None:
 def _parse_discontinued_at(value: Any, model_name: str) -> datetime.datetime | None:
     """``discontinued_at`` を ``datetime.datetime | None`` に正規化する。
 
-    TOML の datetime ネイティブ型はそのまま、quoted string ("2025-12-31" 等) は
-    ISO 8601 として parse する。"Z" suffix も UTC として扱う。
+    受け付ける型:
+        - ``datetime.datetime``: そのまま返す
+        - ``datetime.date`` (TOML local-date ``2025-12-31`` 等): UTC 00:00:00 の datetime に変換
+        - ``str``: ISO 8601 として parse (``"Z"`` suffix は UTC として扱う)
+
+    Note:
+        `datetime.datetime` は `datetime.date` のサブクラスなので、isinstance チェックは
+        必ず datetime → date の順に行う必要がある。
     """
-    if value is None or isinstance(value, datetime.datetime):
+    if value is None:
+        return None
+    if isinstance(value, datetime.datetime):
         return value
+    if isinstance(value, datetime.date):
+        # TOML local-date (時刻なし) は datetime.date として渡される。UTC 00:00:00 で datetime 化。
+        return datetime.datetime.combine(value, datetime.time.min, tzinfo=datetime.UTC)
     if isinstance(value, str):
         try:
             return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
