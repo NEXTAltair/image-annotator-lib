@@ -199,8 +199,8 @@ def test_create_annotator_with_simplified_agent_wrapper(mock_get_factory, mock_w
 
     instance = annotation_runner._create_annotator_instance(model_id)
 
-    # Verify SimplifiedAgentWrapper was called
-    mock_wrapper.assert_called_once_with(model_id, api_keys=None)
+    # Verify SimplifiedAgentWrapper was called (api_keys 引数は #19 P1 で廃止)
+    mock_wrapper.assert_called_once_with(model_id)
     assert instance == mock_wrapper.return_value
 
 
