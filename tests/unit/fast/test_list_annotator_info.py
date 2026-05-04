@@ -351,3 +351,94 @@ def test_discontinued_at_none_for_active_model(patched_registry):
         result = list_annotator_info()
 
     assert result[0].discontinued_at is None
+
+
+# --- safe 型変換ヘルパー (Codex P2 review for #22) ---
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_safe_float_returns_none_for_invalid_value():
+    """malformed な estimated_size_gb は None フォールバック (モデル消失防止)。"""
+    from image_annotator_lib.core.registry import _safe_float
+
+    assert _safe_float(None, "m", "estimated_size_gb") is None
+    assert _safe_float("1.5", "m", "estimated_size_gb") == 1.5
+    assert _safe_float(2.0, "m", "estimated_size_gb") == 2.0
+    assert _safe_float("not-a-number", "m", "estimated_size_gb") is None
+    assert _safe_float([1, 2], "m", "estimated_size_gb") is None
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_safe_int_returns_none_for_invalid_value():
+    """quoted '1800.0' のような int で parse 不能な値は None フォールバック。"""
+    from image_annotator_lib.core.registry import _safe_int
+
+    assert _safe_int(None, "m", "max_output_tokens") is None
+    assert _safe_int("1800", "m", "max_output_tokens") == 1800
+    assert _safe_int(2048, "m", "max_output_tokens") == 2048
+    # int("1800.0") は ValueError → None フォールバック
+    assert _safe_int("1800.0", "m", "max_output_tokens") is None
+    assert _safe_int("abc", "m", "max_output_tokens") is None
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_parse_discontinued_at_normalizes_quoted_string():
+    """quoted TOML 文字列 (ISO 8601) は datetime に正規化。"""
+    import datetime as _dt
+
+    from image_annotator_lib.core.registry import _parse_discontinued_at
+
+    # ネイティブ datetime はそのまま
+    native = _dt.datetime(2025, 12, 31, tzinfo=_dt.UTC)
+    assert _parse_discontinued_at(native, "m") is native
+
+    # 普通の ISO 文字列
+    parsed = _parse_discontinued_at("2025-12-31T00:00:00", "m")
+    assert isinstance(parsed, _dt.datetime)
+    assert parsed.year == 2025
+
+    # "Z" suffix → UTC として扱う
+    parsed_utc = _parse_discontinued_at("2025-12-31T00:00:00Z", "m")
+    assert isinstance(parsed_utc, _dt.datetime)
+    assert parsed_utc.tzinfo is not None
+
+    # None はそのまま
+    assert _parse_discontinued_at(None, "m") is None
+
+    # malformed 文字列 → None
+    assert _parse_discontinued_at("not-a-date", "m") is None
+
+    # 予期しない型 → None
+    assert _parse_discontinued_at(123, "m") is None
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_list_annotator_info_keeps_model_with_invalid_metadata(patched_registry):
+    """estimated_size_gb / max_output_tokens / discontinued_at が malformed でも
+    モデル自体は listing に残り、該当フィールドのみ None になる (Codex P2 #22)。"""
+    with patched_registry(
+        model_dict={"local-tagger": _DummyTagger},
+        config_dict={
+            "local-tagger": {
+                "type": "tagger",
+                "capabilities": ["tags"],
+                "estimated_size_gb": "not-a-number",
+                "max_output_tokens": "1800.0",  # int() では ValueError
+                "discontinued_at": "not-a-date",
+            }
+        },
+    ):
+        result = list_annotator_info()
+
+    # モデルは listing から消えていない
+    assert len(result) == 1
+    info = result[0]
+    assert info.name == "local-tagger"
+    # 不正値はすべて None フォールバック
+    assert info.estimated_size_gb is None
+    assert info.max_output_tokens is None
+    assert info.discontinued_at is None

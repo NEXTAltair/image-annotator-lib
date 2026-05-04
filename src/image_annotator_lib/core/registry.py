@@ -1,3 +1,4 @@
+import datetime
 import importlib
 import inspect
 import os
@@ -517,6 +518,54 @@ def _infer_provider_from_model_id(model_id: str) -> str | None:
     return None
 
 
+def _safe_float(value: Any, model_name: str, field: str) -> float | None:
+    """optional な数値メタデータを float に安全に変換する。
+
+    変換できない値は **モデル登録を失敗させず**、warning ログ + None フォールバック
+    する (ADR 0005: optional metadata の不正値で listing 全体が壊れない設計)。
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        logger.warning(f"モデル '{model_name}' の {field} を float に変換できません: {value!r}")
+        return None
+
+
+def _safe_int(value: Any, model_name: str, field: str) -> int | None:
+    """optional な整数メタデータを int に安全に変換する (`_safe_float` と同じ方針)。"""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        logger.warning(f"モデル '{model_name}' の {field} を int に変換できません: {value!r}")
+        return None
+
+
+def _parse_discontinued_at(value: Any, model_name: str) -> datetime.datetime | None:
+    """``discontinued_at`` を ``datetime.datetime | None`` に正規化する。
+
+    TOML の datetime ネイティブ型はそのまま、quoted string ("2025-12-31" 等) は
+    ISO 8601 として parse する。"Z" suffix も UTC として扱う。
+    """
+    if value is None or isinstance(value, datetime.datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            logger.warning(
+                f"モデル '{model_name}' の discontinued_at を datetime にパース失敗: {value!r}"
+            )
+            return None
+    logger.warning(
+        f"モデル '{model_name}' の discontinued_at が予期しない型 ({type(value).__name__}): {value!r}"
+    )
+    return None
+
+
 def _build_annotator_info_for_registry_model(
     model_name: str, model_class: ModelClass, model_config: dict[str, Any]
 ) -> AnnotatorInfo:
@@ -540,9 +589,6 @@ def _build_annotator_info_for_registry_model(
         str(_raw_provider) if _raw_provider is not None else ("local" if is_local else None)
     )
 
-    _raw_size = model_config.get("estimated_size_gb")
-    _raw_tokens = model_config.get("max_output_tokens")
-
     return AnnotatorInfo(
         name=model_name,
         model_type=_determine_model_type(model_name, model_class, model_config),
@@ -554,9 +600,13 @@ def _build_annotator_info_for_registry_model(
         api_model_id=str(model_config["api_model_id"])
         if model_config.get("api_model_id") is not None
         else None,
-        estimated_size_gb=float(_raw_size) if _raw_size is not None else None,
-        discontinued_at=model_config.get("discontinued_at"),
-        max_output_tokens=int(_raw_tokens) if _raw_tokens is not None else None,
+        estimated_size_gb=_safe_float(
+            model_config.get("estimated_size_gb"), model_name, "estimated_size_gb"
+        ),
+        discontinued_at=_parse_discontinued_at(model_config.get("discontinued_at"), model_name),
+        max_output_tokens=_safe_int(
+            model_config.get("max_output_tokens"), model_name, "max_output_tokens"
+        ),
     )
 
 
