@@ -65,9 +65,9 @@ def list_annotator_info() -> list[AnnotatorInfo]:
     from .core.registry import (
         _MODEL_CLASS_OBJ_REGISTRY,
         _REGISTRY_INITIALIZED,
-        _WEBAPI_MODEL_METADATA,
         _build_annotator_info_for_direct_model,
         _build_annotator_info_for_registry_model,
+        get_webapi_metadata,
         initialize_registry,
     )
 
@@ -85,7 +85,11 @@ def list_annotator_info() -> list[AnnotatorInfo]:
         all_config = {}
 
     for model_name, model_class in _MODEL_CLASS_OBJ_REGISTRY.items():
-        model_config = all_config.get(model_name) or _WEBAPI_MODEL_METADATA.get(model_name, {})
+        # ローカル ML モデルは all_config (config_registry) から、
+        # WebAPI モデルは _WEBAPI_MODEL_METADATA (SSoT) から取得する。
+        # WebAPI モデルは Issue #23 以降 config_registry に登録されないため、
+        # `or get_webapi_metadata(...)` のフォールバックで WebAPI 経路に入る。
+        model_config = all_config.get(model_name) or get_webapi_metadata(model_name) or {}
         try:
             infos.append(_build_annotator_info_for_registry_model(model_name, model_class, model_config))
             seen_names.add(model_name)

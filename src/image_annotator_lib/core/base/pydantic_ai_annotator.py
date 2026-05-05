@@ -22,6 +22,7 @@ from pydantic_ai.settings import ModelSettings
 
 from ...exceptions.errors import ConfigurationError
 from ..config import config_registry
+from ..registry import get_webapi_metadata
 from ..types import AnnotationSchema, UnifiedAnnotationResult
 from ..utils import get_model_capabilities, logger
 from .annotator import BaseAnnotator
@@ -202,7 +203,17 @@ class PydanticAIWebAPIAnnotator(BaseAnnotator):
 
     def _build_agent_config(self) -> AnnotationAgentConfig:
         """設定からPydanticAI最適化設定を構築"""
-        api_model_id = config_registry.get(self.model_name, "api_model_id")
+        # api_model_id 優先順位 (Issue #23 PR #24 Codex P1 反映):
+        #   1. config_registry (ユーザー TOML 由来) — 後方互換性および override 用途
+        #   2. _WEBAPI_MODEL_METADATA (discovery SSoT)
+        # ADR 0021 の最終形では (1) は ADR 0021 移行完了時に廃止予定だが、
+        # 現時点では user TOML override (環境固有 endpoint redirect / テスト時動的差し替え)
+        # が正当な用途として機能しているため fallback 経路を維持する。
+        # discovery 経由の応急処置 (config_registry.set_system_value) は本 Issue で撤廃済み。
+        api_model_id = config_registry.get(self.model_name, "api_model_id", default=None)
+        if not api_model_id:
+            webapi_metadata = get_webapi_metadata(self.model_name) or {}
+            api_model_id = webapi_metadata.get("api_model_id")
         if not api_model_id:
             raise ConfigurationError(f"Model {self.model_name} missing required api_model_id")
 

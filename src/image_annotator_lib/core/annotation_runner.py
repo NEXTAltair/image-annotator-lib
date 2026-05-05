@@ -123,10 +123,19 @@ class PydanticAIWebAPIWrapper(BaseAnnotator):
         self._api_model_id = None
 
     def __enter__(self):
-        # Configuration読み込みでapi_model_idを取得
+        # api_model_id 優先順位 (Issue #23 PR #24 Codex P2 反映):
+        #   1. config_registry (ユーザー TOML 由来) — override 用途を尊重
+        #   2. _WEBAPI_MODEL_METADATA (discovery SSoT)
+        # discovery 値を先に採用すると user TOML の意図的な api_model_id 上書き
+        # (例: 同一モデル名で別 endpoint の差し替え) が無視される backward compat 破壊
+        # が起きるため、`_build_agent_config` と同じ優先順位で揃える。
         from .config import config_registry
+        from .registry import get_webapi_metadata
 
         self._api_model_id = config_registry.get(self.model_name, "api_model_id", default=None)
+        if not self._api_model_id:
+            webapi_metadata = get_webapi_metadata(self.model_name) or {}
+            self._api_model_id = webapi_metadata.get("api_model_id")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
