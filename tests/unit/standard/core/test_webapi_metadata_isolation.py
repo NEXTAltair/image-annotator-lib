@@ -183,3 +183,112 @@ def test_base_annotator_loads_webapi_config_via_metadata_fallback(
         config = dummy._load_config_from_registry("GPT-4o")
         assert config.api_model_id == "openai/gpt-4o"
         assert config.class_name == "PydanticAIWebAPIAnnotator"
+
+
+# ============================================================================
+# User TOML override の優先順位テスト (Codex P1/P2 backward compat 保証)
+#
+# 設計上の問題: SSoT 化を 100% 達成するには user TOML での WebAPI モデル定義を
+# 完全排除する必要があるが、ADR 0021 移行は未完了で、user TOML override は
+# 環境固有の endpoint redirect やテスト時の動的差し替えなど正当な用途を持つ。
+# 本セクションは「user TOML 優先 → discovery metadata fallback」の優先順位を
+# 保証する回帰防止テスト。
+# ============================================================================
+
+
+@pytest.mark.unit
+def test_pydantic_ai_annotator_prefers_config_registry_over_discovery_metadata():
+    """`PydanticAIWebAPIAnnotator._build_agent_config` が user TOML 値を優先する。
+
+    discovery metadata に `gpt-4o-2024-08-06` が登録されていても、
+    config_registry にユーザー設定値 `gpt-4o-mini-test` があればそちらを採用する
+    (Codex P2 backward compat 保証)。
+    """
+    from image_annotator_lib.core.base.pydantic_ai_annotator import PydanticAIWebAPIAnnotator
+
+    real_registry = get_config_registry()
+    user_overrides = {
+        "GPT-4o": {
+            "api_model_id": "gpt-4o-mini-test",
+            "class": "PydanticAIWebAPIAnnotator",
+            "model_name_on_provider": "gpt-4o-mini-test",
+        }
+    }
+    discovery_metadata = {
+        "GPT-4o": {
+            "api_model_id": "gpt-4o-2024-08-06",
+            "model_name_on_provider": "gpt-4o-2024-08-06",
+            "provider": "openai",
+            "max_output_tokens": 1800,
+            "type": "webapi",
+            "class": "PydanticAIWebAPIAnnotator",
+        }
+    }
+
+    with patch.object(real_registry, "_merged_config_data", user_overrides):
+        with patch.object(registry, "_WEBAPI_MODEL_METADATA", discovery_metadata):
+            annotator = PydanticAIWebAPIAnnotator("GPT-4o")
+            assert annotator.config.model_id == "gpt-4o-mini-test", (
+                "user TOML 由来の api_model_id が discovery より優先されるべき"
+            )
+
+
+@pytest.mark.unit
+def test_pydantic_ai_annotator_falls_back_to_discovery_metadata_when_no_user_config():
+    """user TOML に api_model_id が無い場合、discovery metadata から取得する。"""
+    from image_annotator_lib.core.base.pydantic_ai_annotator import PydanticAIWebAPIAnnotator
+
+    real_registry = get_config_registry()
+    discovery_metadata = {
+        "GPT-4o": {
+            "api_model_id": "gpt-4o-2024-08-06",
+            "model_name_on_provider": "gpt-4o-2024-08-06",
+            "provider": "openai",
+            "max_output_tokens": 1800,
+            "type": "webapi",
+            "class": "PydanticAIWebAPIAnnotator",
+        }
+    }
+
+    with patch.object(real_registry, "_merged_config_data", {}):
+        with patch.object(registry, "_WEBAPI_MODEL_METADATA", discovery_metadata):
+            annotator = PydanticAIWebAPIAnnotator("GPT-4o")
+            assert annotator.config.model_id == "gpt-4o-2024-08-06"
+
+
+@pytest.mark.unit
+def test_pydantic_ai_webapi_wrapper_honors_user_toml_override():
+    """`PydanticAIWebAPIWrapper.__enter__` も user TOML 値を優先する (Codex P2)。
+
+    `_build_agent_config` と同じ優先順位で揃え、override 用途を尊重する。
+    """
+    from image_annotator_lib.core.annotation_runner import PydanticAIWebAPIWrapper
+
+    real_registry = get_config_registry()
+    user_overrides = {
+        "Claude 3.5 Sonnet": {
+            "api_model_id": "claude-3-5-sonnet-test-override",
+            "class": "PydanticAIWebAPIAnnotator",
+            "model_name_on_provider": "claude-3-5-sonnet-test-override",
+        }
+    }
+    discovery_metadata = {
+        "Claude 3.5 Sonnet": {
+            "api_model_id": "anthropic/claude-3-5-sonnet-latest",
+            "model_name_on_provider": "anthropic/claude-3-5-sonnet-latest",
+            "provider": "anthropic",
+            "max_output_tokens": 1800,
+            "type": "webapi",
+            "class": "PydanticAIWebAPIAnnotator",
+        }
+    }
+
+    with patch.object(real_registry, "_merged_config_data", user_overrides):
+        with patch.object(registry, "_WEBAPI_MODEL_METADATA", discovery_metadata):
+            wrapper = PydanticAIWebAPIWrapper(
+                "Claude 3.5 Sonnet", _DummyPydanticAIWebAPIAnnotator
+            )
+            with wrapper:
+                assert wrapper._api_model_id == "claude-3-5-sonnet-test-override", (
+                    "user TOML 由来の api_model_id が discovery より優先されるべき"
+                )
