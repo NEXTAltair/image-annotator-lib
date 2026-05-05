@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, Union
@@ -408,6 +409,18 @@ class AnnotatorInfo:
     is_local: bool
     is_api: bool
     device: str | None = None
+    # --- Phase 2: 詳細メタデータ (Issue #19/#26, ADR 0005 責務境界: lib 側で統一提供) ---
+    provider: str | None = None
+    """プロバイダー名。ローカルモデルは "local"、API モデルは "openai"/"anthropic"/"google" 等。
+    config_registry に未登録の PydanticAI 直接モデルは model_id の slash 前から推論。"""
+    api_model_id: str | None = None
+    """上流 API のモデル識別子 (例: "gpt-4o-2024-11-20")。ローカルモデルは None。"""
+    estimated_size_gb: float | None = None
+    """ローカル ML モデルのダウンロードサイズ推定値 (GB)。API モデルは None。"""
+    discontinued_at: datetime.datetime | None = None
+    """廃止日時。現役モデルは None (ADR 0021: LiteLLM 統合後は LiteLLM 由来に切替予定)。"""
+    max_output_tokens: int | None = None
+    """WebAPI 呼び出し時のトークン上限。API モデルのみ設定。ローカルモデルは None。"""
 
 
 # --- pHash ベースの結果コンテナ (Issue #9) ---
