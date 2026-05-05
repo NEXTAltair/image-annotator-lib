@@ -22,6 +22,7 @@ from pydantic_ai.settings import ModelSettings
 
 from ...exceptions.errors import ConfigurationError
 from ..config import config_registry
+from ..registry import get_webapi_metadata
 from ..types import AnnotationSchema, UnifiedAnnotationResult
 from ..utils import get_model_capabilities, logger
 from .annotator import BaseAnnotator
@@ -202,7 +203,11 @@ class PydanticAIWebAPIAnnotator(BaseAnnotator):
 
     def _build_agent_config(self) -> AnnotationAgentConfig:
         """設定からPydanticAI最適化設定を構築"""
-        api_model_id = config_registry.get(self.model_name, "api_model_id")
+        # WebAPI モデルの api_model_id は _WEBAPI_MODEL_METADATA (SSoT) から取得する。
+        # config_registry はユーザー TOML 由来のローカル ML モデル設定および
+        # WebAPI モデルの任意設定 (temperature 等) のためだけに参照する。
+        webapi_metadata = get_webapi_metadata(self.model_name) or {}
+        api_model_id = webapi_metadata.get("api_model_id")
         if not api_model_id:
             raise ConfigurationError(f"Model {self.model_name} missing required api_model_id")
 
