@@ -1,3 +1,4 @@
+import datetime
 import importlib
 import inspect
 import os
@@ -374,6 +375,24 @@ def list_available_annotators() -> list[str]:
     return list(_MODEL_CLASS_OBJ_REGISTRY.keys())
 
 
+def get_webapi_metadata(model_name: str) -> dict[str, Any] | None:
+    """登録済み WebAPI モデルのメタデータを返す。未登録なら ``None``。
+
+    `_register_webapi_models_from_discovery` が `available_api_models.toml` から
+    構築する **WebAPI モデルメタデータの単一情報源 (SSoT)** を提供する getter。
+    呼び出し側はモジュール内の private 辞書 ``_WEBAPI_MODEL_METADATA`` を直接 import せず、
+    本関数を経由してアクセスすること。
+
+    Args:
+        model_name: ``model_name_short`` (例: ``"GPT-4o"``)。
+
+    Returns:
+        メタデータ辞書 (``api_model_id`` / ``provider`` / ``max_output_tokens`` /
+        ``type`` / ``class`` などを含む)。未登録なら ``None``。
+    """
+    return _WEBAPI_MODEL_METADATA.get(model_name)
+
+
 _VALID_MODEL_TYPES: frozenset[str] = frozenset(("tagger", "scorer", "captioner", "vision"))
 
 
@@ -555,6 +574,66 @@ def normalize_model_name(model_name: str) -> str | None:
     """
     result = find_model_class_case_insensitive(model_name)
     return result[0] if result else None
+
+
+def _safe_float(value: Any, model_name: str, field: str) -> float | None:
+    """optional な数値メタデータを float に安全に変換する。
+
+    変換できない値は **モデル登録を失敗させず**、warning ログ + None フォールバック
+    する (ADR 0005: optional metadata の不正値で listing 全体が壊れない設計)。
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        logger.warning(f"モデル '{model_name}' の {field} を float に変換できません: {value!r}")
+        return None
+
+
+def _safe_int(value: Any, model_name: str, field: str) -> int | None:
+    """optional な数値メタデータを int に安全に変換する。
+
+    `_safe_float` と同方針。変換失敗時は warning + None フォールバック。
+    """
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        logger.warning(f"モデル '{model_name}' の {field} を int に変換できません: {value!r}")
+        return None
+
+
+def _parse_discontinued_at(value: Any, model_name: str) -> datetime.datetime | None:
+    """``discontinued_at`` を ``datetime.datetime | None`` に正規化する。
+
+    受け付ける型:
+        - ``datetime.datetime``: そのまま返す
+        - ``datetime.date`` (TOML local-date ``2025-12-31`` 等): UTC 00:00:00 の datetime に変換
+        - ``str``: ISO 8601 として parse (``"Z"`` suffix は UTC として扱う)
+
+    Note:
+        `datetime.datetime` は `datetime.date` のサブクラスなので、isinstance チェックは
+        必ず datetime → date の順に行う必要がある。
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime.datetime):
+        return value
+    if isinstance(value, datetime.date):
+        # TOML local-date (時刻なし) は datetime.date として渡される。UTC 00:00:00 で datetime 化。
+        return datetime.datetime.combine(value, datetime.time.min, tzinfo=datetime.UTC)
+    if isinstance(value, str):
+        try:
+            return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            logger.warning(f"モデル '{model_name}' の discontinued_at を datetime にパース失敗: {value!r}")
+            return None
+    logger.warning(
+        f"モデル '{model_name}' の discontinued_at が予期しない型 ({type(value).__name__}): {value!r}"
+    )
+    return None
 
 
 def _register_webapi_models_from_discovery() -> None:
