@@ -683,8 +683,12 @@ def _register_webapi_models_from_discovery() -> None:
                 # `_WEBAPI_MODEL_METADATA` は WebAPI モデルメタデータの単一情報源 (SSoT)。
                 # `PydanticAIWebAPIAnnotator._build_agent_config` は `get_webapi_metadata()`
                 # 経由でこの辞書から `api_model_id` を取得する (config_registry に逆流注入しない)。
+                # `model_name_on_provider` は WebAPIModelConfig (Pydantic) の alias で、
+                # ``BaseAnnotator._load_config_from_registry`` が ``ModelConfigFactory.from_registry``
+                # で WebAPI 設定として認識するために必要 (本キー欠如時はローカル ML 扱いとなる)。
                 metadata = {
                     "api_model_id": model_id,
+                    "model_name_on_provider": model_id,
                     "provider": provider,
                     "max_output_tokens": 1800,
                     "type": "webapi",

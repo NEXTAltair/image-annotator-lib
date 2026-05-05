@@ -171,6 +171,11 @@ class ModelConfigFactory:
                         "rate_limit_requests_per_minute",
                         "referer",
                         "app_name",
+                        # Issue #23: `_WEBAPI_MODEL_METADATA` (SSoT) には list_annotator_info 用の
+                        # `provider` / `type` キーが含まれるが、WebAPIModelConfig (Pydantic, extra=forbid)
+                        # には対応フィールドがないためフィルタリングする
+                        "provider",
+                        "type",
                     )
                 }
                 return WebAPIModelConfig(**filtered_dict)

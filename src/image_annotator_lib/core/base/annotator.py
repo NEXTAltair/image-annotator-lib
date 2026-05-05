@@ -247,6 +247,12 @@ class BaseAnnotator(ABC):
         logger.debug(f"後方互換: config_registryから '{model_name}' の設定を読み込み")
         registry_dict = config_registry.get_all_config().get(model_name)
         if not registry_dict:
+            # WebAPI モデルは Issue #23 以降 _WEBAPI_MODEL_METADATA (SSoT) からのみ読まれる。
+            # config_registry に登録されないため、フォールバックで getter 経由に問い合わせる。
+            from ..registry import get_webapi_metadata
+
+            registry_dict = get_webapi_metadata(model_name)
+        if not registry_dict:
             # model_nameが存在しない場合のエラー処理
             logger.error(f"モデル '{model_name}' の設定がconfig_registryに存在しません")
             raise ValueError(f"Model '{model_name}' not found in config_registry")

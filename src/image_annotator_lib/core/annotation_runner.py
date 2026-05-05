@@ -123,10 +123,16 @@ class PydanticAIWebAPIWrapper(BaseAnnotator):
         self._api_model_id = None
 
     def __enter__(self):
-        # Configuration読み込みでapi_model_idを取得
+        # Issue #23: api_model_id は _WEBAPI_MODEL_METADATA (SSoT) から取得する。
+        # 後方互換のため、未登録モデルは config_registry にもフォールバック
+        # (ユーザー TOML で WebAPI モデルキーを上書きしているケース対応)。
         from .config import config_registry
+        from .registry import get_webapi_metadata
 
-        self._api_model_id = config_registry.get(self.model_name, "api_model_id", default=None)
+        webapi_metadata = get_webapi_metadata(self.model_name) or {}
+        self._api_model_id = webapi_metadata.get("api_model_id") or config_registry.get(
+            self.model_name, "api_model_id", default=None
+        )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
