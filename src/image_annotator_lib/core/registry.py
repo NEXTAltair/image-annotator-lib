@@ -509,6 +509,37 @@ def _resolve_registry_capabilities(model_name: str, is_api: bool) -> frozenset[T
     return frozenset()
 
 
+def _infer_provider_from_model_id(model_id: str) -> str | None:
+    """PydanticAI 直接モデルの ``provider`` を model_id から推論する。
+
+    "provider/model_name" 形式 (例: "google/gemini-2.5-pro") は slash 前を返す。
+    slash のない model_id は PydanticAI の infer_provider_class でフォールバック。
+
+    戻り値は **常に lowercase** で正規化する (PR #27 Codex P2 反映): registry-backed
+    WebAPI モデル / direct モデル / user TOML override の各経路で provider 名が
+    case-sensitive に一貫することを保証する。
+
+    Args:
+        model_id: PydanticAI 直接モデルの ID。
+
+    Returns:
+        推論された provider 名 (小文字)。判定できない場合は None。
+    """
+    if "/" in model_id:
+        return model_id.split("/", 1)[0].lower()
+    try:
+        from pydantic_ai.providers import infer_provider_class
+
+        cls = infer_provider_class(model_id)
+        cls_name = (type(cls).__name__ if not isinstance(cls, type) else cls.__name__).lower()
+        for known in ("openai", "anthropic", "google"):
+            if known in cls_name:
+                return known
+    except Exception:
+        pass
+    return None
+
+
 def _build_annotator_info_for_registry_model(
     model_name: str, model_class: ModelClass, model_config: dict[str, Any]
 ) -> AnnotatorInfo:
@@ -517,7 +548,9 @@ def _build_annotator_info_for_registry_model(
     Args:
         model_name: モデル名 (レジストリキー)
         model_class: モデルクラス
-        model_config: TOML 由来の設定辞書 (空辞書の場合もある)
+        model_config: model_config の出所 (排他分岐):
+            - WebAPI モデル: `_WEBAPI_MODEL_METADATA` (SSoT) + user TOML override
+            - ローカル ML モデル: `config_registry` (user TOML)
 
     Returns:
         AnnotatorInfo: 型安全なメタデータ
@@ -526,6 +559,22 @@ def _build_annotator_info_for_registry_model(
     is_local = not is_api
     device = model_config.get("device") if is_local else None
 
+    # Phase 2 (Issue #19/#26): 詳細メタデータを model_config から取得。
+    # `_safe_float` / `_safe_int` / `_parse_discontinued_at` は malformed 値で
+    # warning + None フォールバックする (Codex P2 #1, #2, #5 の根本対応)。
+    # `provider` はローカルモデルなら "local" にフォールバック (ADR 0005)。
+    # provider は lowercase 正規化 (PR #27 Codex P2 反映): user TOML/discovery/直接モデルで
+    # case が混在しても AnnotatorInfo.provider は常に小文字で一貫する。
+    raw_provider = model_config.get("provider")
+    # ローカルMLモデルは provider を "local" に固定 (Codex P2 r3193126501):
+    # user TOML に誤って provider キーが含まれても is_local=True との矛盾を防ぐ。
+    provider: str | None = (
+        "local" if is_local else (str(raw_provider).lower() if raw_provider is not None else None)
+    )
+
+    raw_api_model_id = model_config.get("api_model_id")
+    api_model_id: str | None = str(raw_api_model_id) if raw_api_model_id is not None else None
+
     return AnnotatorInfo(
         name=model_name,
         model_type=_determine_model_type(model_name, model_class, model_config),
@@ -533,6 +582,15 @@ def _build_annotator_info_for_registry_model(
         is_local=is_local,
         is_api=is_api,
         device=device if isinstance(device, str) else None,
+        provider=provider,
+        api_model_id=api_model_id,
+        estimated_size_gb=_safe_float(
+            model_config.get("estimated_size_gb"), model_name, "estimated_size_gb"
+        ),
+        discontinued_at=_parse_discontinued_at(model_config.get("discontinued_at"), model_name),
+        max_output_tokens=_safe_int(
+            model_config.get("max_output_tokens"), model_name, "max_output_tokens"
+        ),
     )
 
 
@@ -550,6 +608,7 @@ def _build_annotator_info_for_direct_model(model_id: str) -> AnnotatorInfo:
 
     Returns:
         AnnotatorInfo: 型安全なメタデータ。model_type は "vision" 固定 (汎用 VLM)。
+        Phase 2 拡張で `provider` は model_id から推論、`api_model_id` は model_id 自体。
     """
     from .simplified_agent_wrapper import SimplifiedAgentWrapper  # 循環 import 回避のため遅延
 
@@ -560,6 +619,8 @@ def _build_annotator_info_for_direct_model(model_id: str) -> AnnotatorInfo:
         is_local=False,
         is_api=True,
         device=None,
+        provider=_infer_provider_from_model_id(model_id),
+        api_model_id=model_id,  # 直接モデルは model_id 自体が上流 API の識別子
     )
 
 
@@ -686,11 +747,26 @@ def _register_webapi_models_from_discovery() -> None:
                 # `model_name_on_provider` は WebAPIModelConfig (Pydantic) の alias で、
                 # ``BaseAnnotator._load_config_from_registry`` が ``ModelConfigFactory.from_registry``
                 # で WebAPI 設定として認識するために必要 (本キー欠如時はローカル ML 扱いとなる)。
+                # Phase 2 (Issue #19/#26): AnnotatorInfo の詳細メタデータフィールドを SSoT に集約。
+                # max_output_tokens は TOML 由来値があれば採用、なければ 1800 default。
+                # estimated_size_gb は WebAPI モデルでは原則 None (ローカル ML 専用フィールド)。
+                # discontinued_at は active のみ登録するため None で明示 (deprecated は line 668 で skip)。
+                # provider は lowercase 正規化 (PR #27 Codex P2 反映):
+                #   `available_api_models.toml` は "OpenAI"/"Google" の display-case で記述されるが
+                #   `_infer_provider_from_model_id` の slash 経由出力は小文字 ("openai"/"google") のため
+                #   AnnotatorInfo.provider が混在する case-sensitive 不整合を解消する。
                 metadata = {
                     "api_model_id": model_id,
                     "model_name_on_provider": model_id,
-                    "provider": provider,
-                    "max_output_tokens": 1800,
+                    "provider": str(provider).lower(),
+                    "max_output_tokens": _safe_int(
+                        model_info.get("max_output_tokens"), model_id, "max_output_tokens"
+                    )
+                    or 1800,
+                    "estimated_size_gb": _safe_float(
+                        model_info.get("estimated_size_gb"), model_id, "estimated_size_gb"
+                    ),
+                    "discontinued_at": None,
                     "type": "webapi",
                     "class": "PydanticAIWebAPIAnnotator",
                 }

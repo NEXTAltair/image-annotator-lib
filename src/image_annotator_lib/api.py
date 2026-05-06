@@ -4,6 +4,8 @@
 本モジュールは公開 API のシグネチャ維持と委譲のみを担う薄い層として設計されている。
 """
 
+from typing import Any
+
 from PIL import Image
 
 from .core.annotation_runner import run_annotation
@@ -85,12 +87,39 @@ def list_annotator_info() -> list[AnnotatorInfo]:
         all_config = {}
 
     for model_name, model_class in _MODEL_CLASS_OBJ_REGISTRY.items():
-        # ローカル ML モデルは all_config (config_registry) から、
-        # WebAPI モデルは _WEBAPI_MODEL_METADATA (SSoT) から取得する。
-        # WebAPI モデルは Issue #23 以降 config_registry に登録されないため、
-        # `or get_webapi_metadata(...)` のフォールバックで WebAPI 経路に入る。
-        model_config = all_config.get(model_name) or get_webapi_metadata(model_name) or {}
+        # WebAPI モデル / ローカル ML モデルの排他分岐 (Issue #26 Codex P2 #6 根本対応):
+        #   - 判定基準: **model_class が PydanticAIWebAPIAnnotator か** (model_name 同名衝突に左右されない)
+        #   - WebAPI モデル: `_WEBAPI_MODEL_METADATA` (SSoT) を base、user TOML で上書き
+        #   - ローカル ML モデル: `config_registry` (user TOML) のみ参照
+        # 旧来の `or` フォールバック方式 (PR #22) では discovery 経由の `api_model_id`
+        # がローカル ML モデルに混入し `_requires_api_key` が誤分類する Codex P2 #6 が
+        # 発生していたが、model_class ベースの排他分岐により混入経路が消滅する。
+        # `_WEBAPI_MODEL_METADATA` 存在ベース判定にすると、ローカル ML と同名 entry が
+        # 偶然 SSoT に居た場合に誤分類するため、model_class ベースの判定が安全。
+        # 注意 (PR #27 Codex P1): merge 処理 (`{**a, **b}`) は b が dict でない場合
+        # `TypeError` を投げるため try ブロック **内** で実施する。malformed user TOML
+        # entry (truthy で dict でない値) で listing 全体が abort することを防ぐ。
         try:
+            is_webapi_class = model_class.__name__ == "PydanticAIWebAPIAnnotator"
+            raw_user_overrides = all_config.get(model_name)
+            user_overrides: dict[str, Any] = (
+                raw_user_overrides if isinstance(raw_user_overrides, dict) else {}
+            )
+            if raw_user_overrides is not None and not isinstance(raw_user_overrides, dict):
+                logger.warning(
+                    f"モデル '{model_name}' の config_registry エントリが dict ではありません "
+                    f"(取得型: {type(raw_user_overrides).__name__})。空 dict として扱います。"
+                )
+            if is_webapi_class:
+                # WebAPI モデル: SSoT base + user TOML override (PR #24 backward compat)
+                raw_webapi_metadata = get_webapi_metadata(model_name)
+                webapi_metadata: dict[str, Any] = (
+                    raw_webapi_metadata if isinstance(raw_webapi_metadata, dict) else {}
+                )
+                model_config = {**webapi_metadata, **user_overrides}
+            else:
+                # ローカル ML モデル: user TOML のみ (WebAPI metadata は混入させない)
+                model_config = user_overrides
             infos.append(_build_annotator_info_for_registry_model(model_name, model_class, model_config))
             seen_names.add(model_name)
         except Exception as e:
