@@ -8,6 +8,7 @@ from image_annotator_lib.core.api_model_discovery import (
     _fetch_from_litellm,
     _fetch_from_openrouter_fallback,
     _format_litellm_model_for_toml,
+    _is_allowed_provider,
     _update_toml_with_api_results,
     discover_available_vision_models,
 )
@@ -20,6 +21,8 @@ MOCK_LITELLM_MODEL_COST = {
     "anthropic/claude-3-5-sonnet-20241022": {"max_tokens": 8192},
     "google/gemini-1.5-pro": {"max_tokens": 2097152},
     "gpt-4o": {"max_tokens": 16384},  # prefix なしエイリアス → スキップされる
+    "groq/llama-3.1-70b": {"max_tokens": 8192},  # 許可外プロバイダー → スキップされる
+    "cohere/command-r": {"max_tokens": 4096},  # 許可外プロバイダー → スキップされる
 }
 
 MOCK_VISION_MODEL_IDS = {"openai/gpt-4o", "anthropic/claude-3-5-sonnet-20241022", "google/gemini-1.5-pro"}
@@ -48,8 +51,8 @@ def mock_litellm():
     with patch("image_annotator_lib.core.api_model_discovery.litellm") as mock_ll:
         mock_ll.model_cost = MOCK_LITELLM_MODEL_COST
         mock_ll.supports_vision.side_effect = lambda model: model in MOCK_VISION_MODEL_IDS
-        mock_ll.get_model_info.side_effect = (
-            lambda model: MOCK_MODEL_INFO.copy() if model in MOCK_VISION_MODEL_IDS else None
+        mock_ll.get_model_info.side_effect = lambda model: (
+            MOCK_MODEL_INFO.copy() if model in MOCK_VISION_MODEL_IDS else None
         )
         yield mock_ll
 
@@ -63,6 +66,46 @@ def mock_toml_paths(tmp_path):
         patch("image_annotator_lib.core.config.AVAILABLE_API_MODELS_CONFIG_PATH", toml_path),
     ):
         yield toml_path
+
+
+# ==============================================================================
+# _is_allowed_provider() のテスト
+# ==============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "openai/gpt-4o",
+        "anthropic/claude-3-5-sonnet",
+        "gemini/gemini-1.5-pro",
+        "vertex_ai/gemini-1.5-pro",
+        "google/gemini-1.5-pro",
+        "openrouter/anthropic/claude-3-opus",
+    ],
+)
+def test_is_allowed_provider_accepts_three_majors_and_openrouter(model_id):
+    """OpenAI / Anthropic / Google (gemini/vertex_ai/google) / OpenRouter は許可される。"""
+    assert _is_allowed_provider(model_id) is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "groq/llama-3.1-70b",
+        "cohere/command-r",
+        "mistral/mistral-large",
+        "azure/gpt-4o",  # Azure は許可外 (OpenAI 直接ではない)
+        "xai/grok-2",
+        "gpt-4o",  # prefix なし
+        "",
+    ],
+)
+def test_is_allowed_provider_rejects_others(model_id):
+    """三大プロバイダーと OpenRouter 以外は除外される。"""
+    assert _is_allowed_provider(model_id) is False
 
 
 # ==============================================================================
@@ -81,6 +124,19 @@ def test_fetch_from_litellm_returns_only_vision_models(mock_litellm):
     assert "google/gemini-1.5-pro" in ids
     assert "openai/gpt-3.5-turbo" not in ids  # Vision 非対応
     assert "gpt-4o" not in ids  # prefix なし → スキップ
+    assert "groq/llama-3.1-70b" not in ids  # 許可外プロバイダー → スキップ
+    assert "cohere/command-r" not in ids  # 許可外プロバイダー → スキップ
+
+
+@pytest.mark.unit
+def test_fetch_from_litellm_skips_disallowed_providers_before_litellm_calls(mock_litellm):
+    """許可外プロバイダーは supports_vision / get_model_info を呼ぶ前に除外される。"""
+    _ = _fetch_from_litellm()
+
+    called_models = {call.args[0] for call in mock_litellm.supports_vision.call_args_list}
+    assert "groq/llama-3.1-70b" not in called_models
+    assert "cohere/command-r" not in called_models
+    assert "openai/gpt-4o" in called_models
 
 
 @pytest.mark.unit
@@ -313,6 +369,24 @@ def test_discover_uses_cache_when_toml_exists(mock_litellm, mock_toml_paths):
     assert "openai/gpt-4o" in result["models"]
     assert "openai/gpt-4o" in result["toml_data"]
     mock_litellm.supports_vision.assert_not_called()
+
+
+@pytest.mark.unit
+def test_discover_filters_disallowed_providers_from_cache(mock_litellm, mock_toml_paths):
+    """既存 TOML に許可外プロバイダーのエントリが残っていても結果から除外される。"""
+    mock_toml_paths.write_text(
+        '[openai/gpt-4o]\nprovider="OpenAI"\n'
+        '[groq/llama-3.1-70b]\nprovider="Groq"\n'
+        '[cohere/command-r]\nprovider="Cohere"\n'
+    )
+
+    result = discover_available_vision_models(force_refresh=False)
+
+    assert "openai/gpt-4o" in result["models"]
+    assert "groq/llama-3.1-70b" not in result["models"]
+    assert "cohere/command-r" not in result["models"]
+    assert "groq/llama-3.1-70b" not in result["toml_data"]
+    assert "cohere/command-r" not in result["toml_data"]
 
 
 @pytest.mark.unit
