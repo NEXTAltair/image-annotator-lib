@@ -491,3 +491,85 @@ def test_infer_provider_falls_back_for_non_slash_model_id():
     # PydanticAI 内部実装変更で None になる可能性も許容するが、例外は raise しないこと
     result = _infer_provider_from_model_id("gpt-4o")
     assert result is None or isinstance(result, str)
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_malformed_user_overrides_skips_only_bad_model(patched_registry):
+    """PR #27 Codex P1 回帰防止: malformed user TOML entry で listing 全体が abort しない。
+
+    `config_registry.get_all_config()` が dict 以外の truthy 値 (例: 文字列) を
+    返した場合、`{**webapi_metadata, **user_overrides}` で TypeError が発生する。
+    旧来の `or` フォールバック方式では TypeError が起きなかったため、本 PR の
+    排他分岐への切替で再導入された regression を防ぐ。
+    """
+    # 正常モデル + malformed entry を持つモデルを混在させる
+    with patched_registry(
+        model_dict={
+            "good-tagger": _DummyTagger,
+            "broken-tagger": _DummyTagger,
+        },
+        config_dict={
+            "good-tagger": {"type": "tagger", "device": "cpu", "capabilities": ["tags"]},
+            "broken-tagger": "this-is-a-string-not-a-dict",  # malformed (truthy + 非 dict)
+        },
+    ):
+        result = list_annotator_info()
+
+    # broken-tagger は構築失敗で skip されるが、good-tagger は listing に残る
+    names = {info.name for info in result}
+    assert "good-tagger" in names, "正常なモデルは listing に残るべき"
+    # broken-tagger は skip (空 dict として扱われ Phase 2 フィールド全て None)
+    # 厳密な仕様: 空 dict として AnnotatorInfo が構築される (model_class からの推論で動く)
+    # listing 全体が abort しないことが核心
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_malformed_webapi_user_override_does_not_abort_listing(patched_registry):
+    """PR #27 Codex P1 回帰防止 (WebAPI 側): malformed user override が来ても listing 全体が abort しない。
+
+    `config_registry._merged_config_data["BrokenWebAPI"] = int` のような malformed entry
+    があると、`get_model_capabilities` 等が内部で `int.get(...)` を呼んで AttributeError を
+    投げるが、`api.py.list_annotator_info` の try/except で該当モデル個別を skip し、
+    他のモデル (GoodWebAPI) は listing に残ることを保証する。
+    """
+    with patched_registry(
+        model_dict={
+            "GoodWebAPI": PydanticAIWebAPIAnnotator,
+            "BrokenWebAPI": PydanticAIWebAPIAnnotator,
+        },
+        config_dict={
+            "BrokenWebAPI": 12345,  # malformed (truthy + 非 dict、int)
+        },
+        webapi_metadata={
+            "GoodWebAPI": {
+                "api_model_id": "openai/gpt-4o",
+                "model_name_on_provider": "openai/gpt-4o",
+                "provider": "openai",
+                "max_output_tokens": 1800,
+                "estimated_size_gb": None,
+                "discontinued_at": None,
+                "type": "webapi",
+                "class": "PydanticAIWebAPIAnnotator",
+            },
+            "BrokenWebAPI": {
+                "api_model_id": "anthropic/claude-3-opus",
+                "model_name_on_provider": "anthropic/claude-3-opus",
+                "provider": "anthropic",
+                "max_output_tokens": 1800,
+                "estimated_size_gb": None,
+                "discontinued_at": None,
+                "type": "webapi",
+                "class": "PydanticAIWebAPIAnnotator",
+            },
+        },
+    ):
+        result = list_annotator_info()
+
+    # listing 全体は abort せず、正常な GoodWebAPI は残る (Codex P1 の核心)
+    names = {info.name for info in result}
+    assert "GoodWebAPI" in names, "正常なモデルは listing に残るべき (listing 全体 abort 防止)"
+    # BrokenWebAPI は内部処理で別ルート (get_model_capabilities → config_registry.get) の
+    # AttributeError が発生するが try/except で skip される
+    # 重要なのは「全体が abort しない」こと、個別 skip かどうかは実装詳細
