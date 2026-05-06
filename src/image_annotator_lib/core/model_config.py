@@ -176,6 +176,9 @@ class ModelConfigFactory:
                         # には対応フィールドがないためフィルタリングする
                         "provider",
                         "type",
+                        # Issue #26: Phase 2 詳細メタデータ。AnnotatorInfo 構築専用で
+                        # WebAPIModelConfig 自体のフィールドではない
+                        "discontinued_at",
                     )
                 }
                 return WebAPIModelConfig(**filtered_dict)

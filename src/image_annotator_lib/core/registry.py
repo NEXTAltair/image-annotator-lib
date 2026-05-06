@@ -686,11 +686,22 @@ def _register_webapi_models_from_discovery() -> None:
                 # `model_name_on_provider` は WebAPIModelConfig (Pydantic) の alias で、
                 # ``BaseAnnotator._load_config_from_registry`` が ``ModelConfigFactory.from_registry``
                 # で WebAPI 設定として認識するために必要 (本キー欠如時はローカル ML 扱いとなる)。
+                # Phase 2 (Issue #19/#26): AnnotatorInfo の詳細メタデータフィールドを SSoT に集約。
+                # max_output_tokens は TOML 由来値があれば採用、なければ 1800 default。
+                # estimated_size_gb は WebAPI モデルでは原則 None (ローカル ML 専用フィールド)。
+                # discontinued_at は active のみ登録するため None で明示 (deprecated は line 668 で skip)。
                 metadata = {
                     "api_model_id": model_id,
                     "model_name_on_provider": model_id,
                     "provider": provider,
-                    "max_output_tokens": 1800,
+                    "max_output_tokens": _safe_int(
+                        model_info.get("max_output_tokens"), model_id, "max_output_tokens"
+                    )
+                    or 1800,
+                    "estimated_size_gb": _safe_float(
+                        model_info.get("estimated_size_gb"), model_id, "estimated_size_gb"
+                    ),
+                    "discontinued_at": None,
                     "type": "webapi",
                     "class": "PydanticAIWebAPIAnnotator",
                 }
