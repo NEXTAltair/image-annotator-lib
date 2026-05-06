@@ -8,7 +8,7 @@ from image_annotator_lib.core.api_model_discovery import (
     _fetch_from_litellm,
     _fetch_from_openrouter_fallback,
     _format_litellm_model_for_toml,
-    _is_allowed_provider,
+    is_allowed_provider,
     _update_toml_with_api_results,
     discover_available_vision_models,
 )
@@ -69,7 +69,7 @@ def mock_toml_paths(tmp_path):
 
 
 # ==============================================================================
-# _is_allowed_provider() のテスト
+# is_allowed_provider() のテスト
 # ==============================================================================
 
 
@@ -87,7 +87,7 @@ def mock_toml_paths(tmp_path):
 )
 def test_is_allowed_provider_accepts_three_majors_and_openrouter(model_id):
     """OpenAI / Anthropic / Google (gemini/vertex_ai/google) / OpenRouter は許可される。"""
-    assert _is_allowed_provider(model_id) is True
+    assert is_allowed_provider(model_id) is True
 
 
 @pytest.mark.unit
@@ -105,7 +105,7 @@ def test_is_allowed_provider_accepts_three_majors_and_openrouter(model_id):
 )
 def test_is_allowed_provider_rejects_others(model_id):
     """三大プロバイダーと OpenRouter 以外は除外される。"""
-    assert _is_allowed_provider(model_id) is False
+    assert is_allowed_provider(model_id) is False
 
 
 # ==============================================================================
@@ -487,3 +487,61 @@ def test_update_toml_does_not_overwrite_existing_deprecated_on():
     result = _update_toml_with_api_results(existing, api_models, "2026-04-27T00:00:00Z")
 
     assert result["openai/very-old-model"]["deprecated_on"] == existing_date
+
+
+@pytest.mark.unit
+def test_update_toml_drops_disallowed_providers_from_existing():
+    """既存 TOML に許可外プロバイダーが残っていたら結果から物理削除される。"""
+    existing = {
+        "openai/gpt-4o": {"provider": "OpenAI", "deprecated_on": None},
+        "xai/grok-2": {"provider": "Xai", "deprecated_on": None},
+        "vercel/v0-1.5-md": {"provider": "Vercel", "deprecated_on": None},
+        "zai-org/glm-4.5v": {"provider": "Zai-org", "deprecated_on": None},
+    }
+    api_models: list = []
+
+    result = _update_toml_with_api_results(existing, api_models, "2026-04-27T00:00:00Z")
+
+    assert "openai/gpt-4o" in result
+    assert "xai/grok-2" not in result
+    assert "vercel/v0-1.5-md" not in result
+    assert "zai-org/glm-4.5v" not in result
+
+
+@pytest.mark.unit
+def test_update_toml_drops_disallowed_providers_from_api_results():
+    """API 結果に許可外プロバイダーが紛れていても TOML には書き込まれない。"""
+    existing: dict = {}
+    api_models = [
+        {"id": "openai/gpt-4o", "provider": "OpenAI", "mode": "chat"},
+        {"id": "xai/grok-2", "provider": "Xai", "mode": "chat"},
+    ]
+
+    result = _update_toml_with_api_results(existing, api_models, "2026-04-27T00:00:00Z")
+
+    assert "openai/gpt-4o" in result
+    assert "xai/grok-2" not in result
+
+
+@pytest.mark.unit
+def test_discover_force_refresh_filters_disallowed_from_fetch_result(mock_litellm, mock_toml_paths):
+    """force_refresh パスでも戻り値から許可外プロバイダーが除外される。
+
+    _fetch_and_update_vision_models が許可外を返してきても、最終的な return 時点でフィルタする
+    防御的二段フィルタを検証する。
+    """
+    mock_toml_paths.write_text("")
+
+    fake_updated = {
+        "openai/gpt-4o": {"provider": "OpenAI"},
+        "xai/grok-2": {"provider": "Xai"},
+    }
+    with patch(
+        "image_annotator_lib.core.api_model_discovery._fetch_and_update_vision_models",
+        return_value=fake_updated,
+    ):
+        result = discover_available_vision_models(force_refresh=True)
+
+    assert "openai/gpt-4o" in result["models"]
+    assert "xai/grok-2" not in result["models"]
+    assert "xai/grok-2" not in result["toml_data"]

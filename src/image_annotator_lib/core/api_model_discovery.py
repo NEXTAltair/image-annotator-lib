@@ -57,7 +57,7 @@ _ALLOWED_LITELLM_PROVIDERS: frozenset[str] = frozenset(
 _refresh_lock = threading.Lock()
 
 
-def _is_allowed_provider(model_id: str) -> bool:
+def is_allowed_provider(model_id: str) -> bool:
     """model_id の provider prefix が許可リストに含まれるか判定する。"""
     if "/" not in model_id:
         return False
@@ -75,7 +75,7 @@ def _fetch_from_litellm() -> list[dict[str, Any]]:
     """
     results = []
     for model_id in litellm.model_cost.keys():
-        if not _is_allowed_provider(model_id):
+        if not is_allowed_provider(model_id):
             continue
         try:
             if not litellm.supports_vision(model_id):
@@ -305,7 +305,7 @@ def discover_available_vision_models(force_refresh: bool = False) -> dict[str, A
             filtered_toml_data = {
                 model_id: entry
                 for model_id, entry in existing_toml_data.items()
-                if _is_allowed_provider(model_id)
+                if is_allowed_provider(model_id)
             }
             model_ids = list(filtered_toml_data.keys())
             dropped = len(existing_toml_data) - len(filtered_toml_data)
@@ -323,7 +323,12 @@ def discover_available_vision_models(force_refresh: bool = False) -> dict[str, A
         logger.info("LiteLLM DB から最新のモデル情報を取得・更新します。")
         with _refresh_lock:
             updated_data = _fetch_and_update_vision_models()
-        return {"models": list(updated_data.keys()), "toml_data": updated_data}
+        # _update_toml_with_api_results が許可外プロバイダーを TOML から物理削除するため
+        # この時点で updated_data は許可内プロバイダーのみだが、防御的に再フィルタする。
+        filtered_data = {
+            model_id: entry for model_id, entry in updated_data.items() if is_allowed_provider(model_id)
+        }
+        return {"models": list(filtered_data.keys()), "toml_data": filtered_data}
 
     except (ApiTimeoutError, ApiRequestError, ApiServerError, WebApiError) as e:
         logger.error(f"モデル取得中にエラーが発生: {e}")
@@ -440,13 +445,18 @@ def _update_toml_with_api_results(
     Returns:
         更新された TOML データ。
     """
-    updated_data = existing_toml_data.copy()
+    # 既存 TOML から許可外プロバイダーのエントリを物理削除する (cleanup)。
+    # 過去のフルリスト時代に書き込まれた xai/vercel/zai-org 等を残すと
+    # registry / discover 双方の戻り値に混じり続けるため、TOML 自体から落とす。
+    updated_data = {
+        model_id: entry for model_id, entry in existing_toml_data.items() if is_allowed_provider(model_id)
+    }
     api_model_ids = {model["id"] for model in api_models_formatted}
 
-    # 取得できたモデルを更新（last_seen 更新、deprecated_on をクリア）
+    # 取得できたモデルを更新 (last_seen 更新、deprecated_on をクリア)
     for model_data_with_id in api_models_formatted:
         model_id = model_data_with_id.get("id")
-        if not model_id:
+        if not model_id or not is_allowed_provider(model_id):
             continue
 
         final_model_entry = model_data_with_id.copy()
@@ -457,8 +467,10 @@ def _update_toml_with_api_results(
 
         updated_data[model_id] = final_model_entry
 
-    # 既存 TOML にしか存在しないモデルに deprecated_on を設定
+    # 既存 TOML にしか存在しないモデルに deprecated_on を設定 (許可内のみ)
     for model_id, existing_entry in existing_toml_data.items():
+        if not is_allowed_provider(model_id):
+            continue
         if model_id not in api_model_ids:
             if isinstance(existing_entry, dict) and existing_entry.get("deprecated_on") is None:
                 existing_entry["deprecated_on"] = current_time_iso
