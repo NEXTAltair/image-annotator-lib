@@ -388,7 +388,8 @@ def get_webapi_metadata(model_name: str) -> dict[str, Any] | None:
 
     Returns:
         メタデータ辞書 (``api_model_id`` / ``provider`` / ``max_output_tokens`` /
-        ``type`` / ``class`` などを含む)。未登録なら ``None``。
+        ``supports_vision`` / ``supports_response_schema`` / ``type`` / ``class`` などを含む)。
+        未登録なら ``None``。
     """
     return _WEBAPI_MODEL_METADATA.get(model_name)
 
@@ -588,9 +589,7 @@ def _build_annotator_info_for_registry_model(
             model_config.get("estimated_size_gb"), model_name, "estimated_size_gb"
         ),
         discontinued_at=_parse_discontinued_at(model_config.get("discontinued_at"), model_name),
-        max_output_tokens=_safe_int(
-            model_config.get("max_output_tokens"), model_name, "max_output_tokens"
-        ),
+        max_output_tokens=_safe_int(model_config.get("max_output_tokens"), model_name, "max_output_tokens"),
     )
 
 
@@ -697,6 +696,22 @@ def _parse_discontinued_at(value: Any, model_name: str) -> datetime.datetime | N
     return None
 
 
+def _is_annotation_compatible_webapi_model(model_id: str, model_info: dict[str, Any]) -> bool:
+    if model_info.get("deprecated_on") is not None:
+        return False
+    if model_info.get("supports_vision") is not True:
+        logger.debug(f"モデルID '{model_id}' は Vision 非対応のためスキップします。")
+        return False
+    if model_info.get("supports_response_schema") is not True:
+        logger.debug(f"モデルID '{model_id}' は structured output 非対応のためスキップします。")
+        return False
+    mode = model_info.get("mode", "chat")
+    if mode not in {"chat", "responses"}:
+        logger.debug(f"モデルID '{model_id}' は mode={mode!r} のためスキップします。")
+        return False
+    return True
+
+
 def _register_webapi_models_from_discovery() -> None:
     """available_api_models.toml を読み込み、WebAPI モデルをレジストリに直接登録する。
 
@@ -725,8 +740,9 @@ def _register_webapi_models_from_discovery() -> None:
                 logger.warning(f"モデルID '{model_id}' の情報形式が不正です。スキップします。")
                 continue
 
-            if model_info.get("deprecated_on") is not None:
+            if not _is_annotation_compatible_webapi_model(model_id, model_info):
                 continue
+            mode = model_info.get("mode", "chat")
 
             model_name_short = model_info.get("model_name_short")
             provider = model_info.get("provider")
@@ -759,10 +775,28 @@ def _register_webapi_models_from_discovery() -> None:
                     "api_model_id": model_id,
                     "model_name_on_provider": model_id,
                     "provider": str(provider).lower(),
+                    "mode": mode,
+                    "max_input_tokens": _safe_int(
+                        model_info.get("max_input_tokens"), model_id, "max_input_tokens"
+                    ),
                     "max_output_tokens": _safe_int(
                         model_info.get("max_output_tokens"), model_id, "max_output_tokens"
                     )
                     or 1800,
+                    "max_tokens": _safe_int(model_info.get("max_tokens"), model_id, "max_tokens"),
+                    "supports_vision": True,
+                    "supports_response_schema": True,
+                    "supports_function_calling": bool(model_info.get("supports_function_calling")),
+                    "supports_tool_choice": bool(model_info.get("supports_tool_choice")),
+                    "supports_parallel_function_calling": bool(
+                        model_info.get("supports_parallel_function_calling")
+                    ),
+                    "input_cost_per_token": _safe_float(
+                        model_info.get("input_cost_per_token"), model_id, "input_cost_per_token"
+                    ),
+                    "output_cost_per_token": _safe_float(
+                        model_info.get("output_cost_per_token"), model_id, "output_cost_per_token"
+                    ),
                     "estimated_size_gb": _safe_float(
                         model_info.get("estimated_size_gb"), model_id, "estimated_size_gb"
                     ),

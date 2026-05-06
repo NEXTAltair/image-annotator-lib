@@ -37,13 +37,15 @@ class SimplifiedAgentFactory:
                 toml_data: dict[str, Any] = result.get("toml_data", {})
                 self._all_models_data = toml_data
                 self._available_models = [
-                    mid for mid, data in toml_data.items()
-                    if isinstance(data, dict) and data.get("deprecated_on") is None
+                    mid
+                    for mid, data in toml_data.items()
+                    if isinstance(data, dict)
+                    and data.get("deprecated_on") is None
+                    and data.get("supports_vision") is True
+                    and data.get("supports_response_schema") is True
+                    and data.get("mode", "chat") in {"chat", "responses"}
                 ]
-                logger.info(
-                    f"利用可能モデル: {len(self._available_models)} 件"
-                    f" (全 {len(toml_data)} 件中)"
-                )
+                logger.info(f"利用可能モデル: {len(self._available_models)} 件 (全 {len(toml_data)} 件中)")
             else:
                 logger.error(f"Failed to discover models: {result.get('error', 'Unknown error')}")
                 if not self._available_models:

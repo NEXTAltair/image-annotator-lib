@@ -203,17 +203,12 @@ class PydanticAIWebAPIAnnotator(BaseAnnotator):
 
     def _build_agent_config(self) -> AnnotationAgentConfig:
         """設定からPydanticAI最適化設定を構築"""
-        # api_model_id 優先順位 (Issue #23 PR #24 Codex P1 反映):
-        #   1. config_registry (ユーザー TOML 由来) — 後方互換性および override 用途
-        #   2. _WEBAPI_MODEL_METADATA (discovery SSoT)
-        # ADR 0021 の最終形では (1) は ADR 0021 移行完了時に廃止予定だが、
-        # 現時点では user TOML override (環境固有 endpoint redirect / テスト時動的差し替え)
-        # が正当な用途として機能しているため fallback 経路を維持する。
-        # discovery 経由の応急処置 (config_registry.set_system_value) は本 Issue で撤廃済み。
-        api_model_id = config_registry.get(self.model_name, "api_model_id", default=None)
-        if not api_model_id:
-            webapi_metadata = get_webapi_metadata(self.model_name) or {}
-            api_model_id = webapi_metadata.get("api_model_id")
+        # WebAPI モデル定義は ADR 0021 / Issue #25 の最終形として
+        # `_WEBAPI_MODEL_METADATA` (available_api_models.toml 由来) のみを正本にする。
+        # user TOML は temperature/timeout/custom_instructions 等の実行時 override 用であり、
+        # api_model_id の差し替えには使わない。
+        webapi_metadata = get_webapi_metadata(self.model_name) or {}
+        api_model_id = webapi_metadata.get("api_model_id")
         if not api_model_id:
             raise ConfigurationError(f"Model {self.model_name} missing required api_model_id")
 
@@ -340,11 +335,19 @@ class PydanticAIWebAPIAnnotator(BaseAnnotator):
                         UnifiedAnnotationResult(
                             model_name=self.model_name,
                             capabilities=capabilities,
-                            tags=accumulated_response.tags if hasattr(accumulated_response, "tags") else None,
-                            captions=accumulated_response.captions if hasattr(accumulated_response, "captions") else None,
-                            scores={"score": accumulated_response.score} if hasattr(accumulated_response, "score") and accumulated_response.score else None,
+                            tags=accumulated_response.tags
+                            if hasattr(accumulated_response, "tags")
+                            else None,
+                            captions=accumulated_response.captions
+                            if hasattr(accumulated_response, "captions")
+                            else None,
+                            scores={"score": accumulated_response.score}
+                            if hasattr(accumulated_response, "score") and accumulated_response.score
+                            else None,
                             provider_name=getattr(self, "provider_name", None) or "pydantic_ai",
-                            raw_output=accumulated_response.model_dump() if hasattr(accumulated_response, "model_dump") else None,
+                            raw_output=accumulated_response.model_dump()
+                            if hasattr(accumulated_response, "model_dump")
+                            else None,
                         )
                     )
                 else:
@@ -412,9 +415,13 @@ class PydanticAIWebAPIAnnotator(BaseAnnotator):
                             capabilities=capabilities,
                             tags=result.data.tags if hasattr(result.data, "tags") else None,
                             captions=result.data.captions if hasattr(result.data, "captions") else None,
-                            scores={"score": result.data.score} if hasattr(result.data, "score") and result.data.score else None,
+                            scores={"score": result.data.score}
+                            if hasattr(result.data, "score") and result.data.score
+                            else None,
                             provider_name=getattr(self, "provider_name", None) or "pydantic_ai",
-                            raw_output=result.data.model_dump() if hasattr(result.data, "model_dump") else None,
+                            raw_output=result.data.model_dump()
+                            if hasattr(result.data, "model_dump")
+                            else None,
                         )
                     )
 

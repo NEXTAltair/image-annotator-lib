@@ -37,7 +37,7 @@ WebAPI モデル（`class` が `*ApiAnnotator` 系のエントリ）を削除し
 
 ### 2. 自動検出の動作確認
 
-ライブラリ（またはそれを組み込んだアプリケーション）を起動すると、初回起動時に LiteLLM DB から Vision 対応モデルが自動的に検出され、`config/available_api_models.toml` に保存されます。
+ライブラリ（またはそれを組み込んだアプリケーション）を起動すると、初回起動時に LiteLLM DB から Vision 対応かつ structured output 対応のモデルが自動的に検出され、`config/available_api_models.toml` に保存されます。
 
 ```bash
 # 手動で動作確認（プロジェクトルートから）
@@ -70,6 +70,7 @@ print("全モデル:", all_models)
 | WebAPI モデルを手動定義 | WebAPI モデルは LiteLLM が自動管理 |
 | OpenAI / Anthropic / Google のモデルを個別に列挙 | 不要（`config/available_api_models.toml` に自動生成） |
 | 廃止モデルは手動削除が必要 | `deprecated_on` フィールドで自動的にフィルタ |
+| user TOML の `api_model_id` でモデル差し替え | 廃止。`available_api_models.toml` 由来の metadata を使用 |
 
 ### `available_api_models.toml`
 
@@ -85,8 +86,14 @@ schema_version = 1
 [available_vision_models."openai/gpt-4o"]
 provider = "OpenAI"
 display_name = "OpenAI: gpt-4o"
+supports_vision = true
+supports_response_schema = true
+max_input_tokens = 128000
+max_output_tokens = 16384
 ...
 ```
+
+`supports_response_schema = false` のモデルは、画像入力に対応していてもアノテーション用の structured output が安定しないため通常の利用可能モデルには登録されません。
 
 ## オフライン環境での動作
 

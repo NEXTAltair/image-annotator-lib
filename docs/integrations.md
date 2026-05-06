@@ -4,7 +4,7 @@
 
 ## 概要
 
-LiteLLM は OpenAI / Anthropic / Google など 100 以上のプロバイダーの 2600 以上のモデルを pip パッケージに同梱しています。`litellm.supports_vision(model_id)` を呼ぶだけでローカル DB を参照して Vision 対応を即時判定できるため、起動時のネットワーク I/O が不要です。
+LiteLLM は OpenAI / Anthropic / Google など 100 以上のプロバイダーの 2600 以上のモデルを pip パッケージに同梱しています。`litellm.supports_vision(model_id)` と `litellm.get_model_info(model_id)` を使い、Vision 対応かつ structured output 対応のモデルだけをアノテーション対象として登録します。
 
 ## インストール
 
@@ -99,6 +99,13 @@ schema_version = 1
 provider = "Google"
 model_name_short = "Gemini 2.5 Pro"
 display_name = "Google: Gemini 2.5 Pro"
+mode = "chat"
+max_input_tokens = 1048576
+max_output_tokens = 8192
+supports_vision = true
+supports_response_schema = true
+supports_function_calling = true
+supports_tool_choice = true
 created = "2025-01-01T00:00:00Z"
 modality = "text+image->text"
 input_modalities = ["text", "image"]
@@ -112,6 +119,9 @@ deprecated_on = None  # 廃止された場合は ISO 8601 タイムスタンプ
 |---|---|
 | `provider` | プロバイダー名（OpenAI / Anthropic / Google など） |
 | `display_name` | UI 表示用の名前 |
+| `supports_vision` | 画像入力対応。`true` のモデルだけ登録対象 |
+| `supports_response_schema` | structured output 対応。`true` のモデルだけ登録対象 |
+| `max_input_tokens` / `max_output_tokens` | LiteLLM DB 由来のトークン上限 |
 | `last_seen` | 最後に API レスポンスに現れた時刻 |
 | `deprecated_on` | 廃止が確認された時刻（`None` = アクティブ） |
 
@@ -123,6 +133,7 @@ deprecated_on = None  # 廃止された場合は ISO 8601 タイムスタンプ
 |---|---|---|
 | `IMAGE_ANNOTATOR_API_MODELS_TTL_DAYS` | `7` | モデルリストの有効期間（日数）。この期間を超えると起動時にバックグラウンド refresh が実行される |
 | `IMAGE_ANNOTATOR_SKIP_API_DISCOVERY` | `false` | `true` に設定すると起動時の API discovery を完全スキップ。CI / オフライン環境で有用 |
+| `IMAGE_ANNOTATOR_ENABLE_OPENROUTER_FALLBACK` | `false` | `true` に設定すると LiteLLM 未収録モデル補完用の OpenRouter API fallback を有効化 |
 
 ```bash
 # TTL を 14 日に変更
@@ -156,4 +167,4 @@ uv run python tools/check_api_model_discovery.py
 
 ## OpenRouter フォールバック
 
-LiteLLM のローカル DB に未収録のモデル（OpenRouter 限定の free tier モデルなど）は、OpenRouter API から補完取得します。OpenRouter API が利用できない場合でも、LiteLLM のみでモデルリストが生成されます（degraded mode）。
+LiteLLM のローカル DB に未収録のモデル（OpenRouter 限定の free tier モデルなど）は、必要な場合のみ OpenRouter API から補完取得できます。既定では無効です。有効化した場合も、Vision・structured output・tool use 対応モデルだけを追加します。

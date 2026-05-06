@@ -27,6 +27,13 @@ MOCK_VISION_MODEL_IDS = {"openai/gpt-4o", "anthropic/claude-3-5-sonnet-20241022"
 MOCK_MODEL_INFO = {
     "mode": "chat",
     "max_tokens": 16384,
+    "max_input_tokens": 128000,
+    "max_output_tokens": 16384,
+    "supports_vision": True,
+    "supports_response_schema": True,
+    "supports_function_calling": True,
+    "supports_tool_choice": True,
+    "supports_parallel_function_calling": True,
     "input_cost_per_token": 2.5e-06,
     "output_cost_per_token": 1.0e-05,
 }
@@ -65,7 +72,7 @@ def mock_toml_paths(tmp_path):
 
 @pytest.mark.unit
 def test_fetch_from_litellm_returns_only_vision_models(mock_litellm):
-    """Vision 対応モデルのみ返し、非対応・prefix なし ID は除外される。"""
+    """Vision + structured output 対応モデルのみ返し、非対応・prefix なし ID は除外される。"""
     results = _fetch_from_litellm()
     ids = {m["id"] for m in results}
 
@@ -74,6 +81,44 @@ def test_fetch_from_litellm_returns_only_vision_models(mock_litellm):
     assert "google/gemini-1.5-pro" in ids
     assert "openai/gpt-3.5-turbo" not in ids  # Vision 非対応
     assert "gpt-4o" not in ids  # prefix なし → スキップ
+
+
+@pytest.mark.unit
+def test_fetch_from_litellm_excludes_vision_model_without_response_schema(mock_litellm):
+    """Vision 対応でも structured output 非対応なら除外される。"""
+
+    def get_model_info(model: str):
+        info = MOCK_MODEL_INFO.copy()
+        if model == "google/gemini-1.5-pro":
+            info["supports_response_schema"] = False
+        return info if model in MOCK_VISION_MODEL_IDS else None
+
+    mock_litellm.get_model_info.side_effect = get_model_info
+
+    results = _fetch_from_litellm()
+    ids = {m["id"] for m in results}
+
+    assert "openai/gpt-4o" in ids
+    assert "google/gemini-1.5-pro" not in ids
+
+
+@pytest.mark.unit
+def test_fetch_from_litellm_excludes_non_chat_modes(mock_litellm):
+    """画像生成など AnnotationSchema 実行対象外 mode は除外される。"""
+
+    def get_model_info(model: str):
+        info = MOCK_MODEL_INFO.copy()
+        if model == "google/gemini-1.5-pro":
+            info["mode"] = "image_generation"
+        return info if model in MOCK_VISION_MODEL_IDS else None
+
+    mock_litellm.get_model_info.side_effect = get_model_info
+
+    results = _fetch_from_litellm()
+    ids = {m["id"] for m in results}
+
+    assert "openai/gpt-4o" in ids
+    assert "google/gemini-1.5-pro" not in ids
 
 
 @pytest.mark.unit
@@ -87,6 +132,7 @@ def test_fetch_from_litellm_result_contains_id(mock_litellm):
 @pytest.mark.unit
 def test_fetch_from_litellm_skips_on_exception(mock_litellm):
     """supports_vision が例外を投げても他のモデルの処理は継続する。"""
+
     def supports_vision_with_error(model: str) -> bool:
         if model == "anthropic/claude-3-5-sonnet-20241022":
             raise RuntimeError("API error")
@@ -114,7 +160,20 @@ def test_format_litellm_model_required_keys():
     result = _format_litellm_model_for_toml("openai/gpt-4o", info)
 
     assert result is not None
-    for key in ("id", "provider", "model_name_short", "display_name", "mode", "max_tokens"):
+    for key in (
+        "id",
+        "provider",
+        "model_name_short",
+        "display_name",
+        "mode",
+        "max_tokens",
+        "max_input_tokens",
+        "max_output_tokens",
+        "supports_vision",
+        "supports_response_schema",
+        "supports_function_calling",
+        "supports_tool_choice",
+    ):
         assert key in result, f"Key '{key}' missing from result"
 
 
@@ -149,13 +208,33 @@ def test_format_litellm_model_rejects_no_prefix():
 @pytest.mark.unit
 def test_format_litellm_model_cost_fields():
     """コスト情報が正しくマッピングされる。"""
-    info = {"mode": "chat", "max_tokens": 8192, "input_cost_per_token": 3e-06, "output_cost_per_token": 1.5e-05}
+    info = {
+        "mode": "chat",
+        "max_tokens": 8192,
+        "input_cost_per_token": 3e-06,
+        "output_cost_per_token": 1.5e-05,
+    }
     result = _format_litellm_model_for_toml("google/gemini-1.5-pro", info)
 
     assert result is not None
     assert result["max_tokens"] == 8192
     assert result["input_cost_per_token"] == 3e-06
     assert result["output_cost_per_token"] == 1.5e-05
+
+
+@pytest.mark.unit
+def test_format_litellm_model_capability_fields():
+    """LiteLLM capability 情報が TOML 保存形式に引き継がれる。"""
+    result = _format_litellm_model_for_toml("openai/gpt-4o", MOCK_MODEL_INFO.copy())
+
+    assert result is not None
+    assert result["supports_vision"] is True
+    assert result["supports_response_schema"] is True
+    assert result["supports_function_calling"] is True
+    assert result["supports_tool_choice"] is True
+    assert result["supports_parallel_function_calling"] is True
+    assert result["max_input_tokens"] == 128000
+    assert result["max_output_tokens"] == 16384
 
 
 # ==============================================================================
@@ -245,7 +324,9 @@ def test_discover_calls_litellm_when_toml_empty(mock_litellm, mock_toml_paths):
     with (
         patch("image_annotator_lib.core.api_model_discovery.load_available_api_models", return_value={}),
         patch("image_annotator_lib.core.api_model_discovery.save_available_api_models"),
-        patch("image_annotator_lib.core.api_model_discovery._fetch_from_openrouter_fallback", return_value=[]),
+        patch(
+            "image_annotator_lib.core.api_model_discovery._fetch_from_openrouter_fallback", return_value=[]
+        ),
     ):
         result = discover_available_vision_models(force_refresh=False)
 
@@ -259,7 +340,9 @@ def test_discover_force_refresh_calls_litellm(mock_litellm, mock_toml_paths):
     """force_refresh=True で LiteLLM から取得し、TOML を更新する。"""
     mock_toml_paths.write_text('[openai/gpt-4o]\nprovider="OpenAI"\n')
 
-    with patch("image_annotator_lib.core.api_model_discovery._fetch_from_openrouter_fallback", return_value=[]):
+    with patch(
+        "image_annotator_lib.core.api_model_discovery._fetch_from_openrouter_fallback", return_value=[]
+    ):
         result = discover_available_vision_models(force_refresh=True)
 
     assert "models" in result
@@ -307,7 +390,11 @@ def test_update_toml_sets_last_seen_on_new_model():
 def test_update_toml_sets_deprecated_on_for_missing_model():
     """API 結果に存在しない既存モデルに deprecated_on が設定される。"""
     existing = {
-        "openai/old-model": {"provider": "OpenAI", "deprecated_on": None, "last_seen": "2025-01-01T00:00:00Z"}
+        "openai/old-model": {
+            "provider": "OpenAI",
+            "deprecated_on": None,
+            "last_seen": "2025-01-01T00:00:00Z",
+        }
     }
     api_models: list = []  # API からは何も返らない
 
@@ -320,9 +407,7 @@ def test_update_toml_sets_deprecated_on_for_missing_model():
 def test_update_toml_does_not_overwrite_existing_deprecated_on():
     """既に deprecated_on が設定されているモデルは上書きしない。"""
     existing_date = "2025-06-01T00:00:00Z"
-    existing = {
-        "openai/very-old-model": {"provider": "OpenAI", "deprecated_on": existing_date}
-    }
+    existing = {"openai/very-old-model": {"provider": "OpenAI", "deprecated_on": existing_date}}
     api_models: list = []
 
     result = _update_toml_with_api_results(existing, api_models, "2026-04-27T00:00:00Z")

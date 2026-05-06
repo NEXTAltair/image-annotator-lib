@@ -5,8 +5,8 @@ from typing import Any
 from PIL import Image
 
 from ...core.base import WebApiBaseAnnotator
-from ...core.config import config_registry
 from ...core.provider_manager import ProviderManager
+from ...core.registry import get_webapi_metadata
 from ...core.types import UnifiedAnnotationResult
 from ...core.utils import logger
 
@@ -38,7 +38,7 @@ class GoogleApiAnnotator(WebApiBaseAnnotator):
 
     def _run_inference(self, processed: list[Image.Image]) -> list[UnifiedAnnotationResult]:
         """Run inference via ProviderManager."""
-        api_model_id = config_registry.get(self.model_name, "api_model_id")
+        api_model_id = (get_webapi_metadata(self.model_name) or {}).get("api_model_id")
         if not api_model_id:
             from ...core.utils import get_model_capabilities
 
