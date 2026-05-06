@@ -337,8 +337,8 @@ def test_webapi_model_phase2_fields_from_ssot(patched_registry):
 
 @pytest.mark.unit
 @pytest.mark.fast
-def test_webapi_model_user_toml_overrides_ssot(patched_registry):
-    """WebAPI モデルで user TOML が SSoT より優先される (PR #24 backward compat 維持)。"""
+def test_webapi_model_user_toml_api_model_id_does_not_override_ssot(patched_registry):
+    """WebAPI モデル定義は SSoT のみを採用し、user TOML api_model_id は無視される。"""
     with patched_registry(
         model_dict={"GPT-4o": PydanticAIWebAPIAnnotator},
         config_dict={
@@ -363,10 +363,8 @@ def test_webapi_model_user_toml_overrides_ssot(patched_registry):
         result = list_annotator_info()
 
     info = result[0]
-    # user TOML 値が優先される
-    assert info.api_model_id == "openai/gpt-4o-test-override"
-    assert info.max_output_tokens == 9999
-    # user TOML に provider が無いので SSoT 値が採用される (merge 動作確認)
+    assert info.api_model_id == "openai/gpt-4o"
+    assert info.max_output_tokens == 1800
     assert info.provider == "openai"
 
 
@@ -462,7 +460,9 @@ def test_pydanticai_direct_model_has_inferred_provider_and_api_model_id(patched_
     assert by_name["google/gemini-2.5-pro"].provider == "google"
     assert by_name["google/gemini-2.5-pro"].api_model_id == "google/gemini-2.5-pro"
     assert by_name["anthropic/claude-3-5-sonnet-latest"].provider == "anthropic"
-    assert by_name["anthropic/claude-3-5-sonnet-latest"].api_model_id == "anthropic/claude-3-5-sonnet-latest"
+    assert (
+        by_name["anthropic/claude-3-5-sonnet-latest"].api_model_id == "anthropic/claude-3-5-sonnet-latest"
+    )
 
 
 # ============================================================================
@@ -573,8 +573,8 @@ def test_provider_normalized_to_lowercase_across_sources(patched_registry):
 
 @pytest.mark.unit
 @pytest.mark.fast
-def test_user_toml_provider_also_normalized(patched_registry):
-    """user TOML 由来の `provider` も lowercase 正規化される (PR #27 Codex P2)。"""
+def test_webapi_user_toml_provider_does_not_override_ssot(patched_registry):
+    """WebAPI provider は SSoT の値を採用し、user TOML provider はモデル定義に使わない。"""
     with patched_registry(
         model_dict={"CustomAPI": PydanticAIWebAPIAnnotator},
         config_dict={
@@ -599,9 +599,8 @@ def test_user_toml_provider_also_normalized(patched_registry):
         result = list_annotator_info()
 
     info = result[0]
-    # user TOML が SSoT を override するため "Anthropic" 由来だが、
-    # `_build_annotator_info_for_registry_model` で lowercase 正規化される
     assert info.provider == "anthropic"
+    assert info.api_model_id == "anthropic/claude-3-5-sonnet"
 
 
 @pytest.mark.unit

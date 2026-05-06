@@ -110,7 +110,7 @@ class WebAPIModelConfig(BaseModelConfig):
 
     # 生成パラメータ(PydanticAI用、Optional)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0, description="サンプリング温度")
-    max_output_tokens: int | None = Field(default=None, gt=0, le=8192, description="最大トークン数")
+    max_output_tokens: int | None = Field(default=None, gt=0, le=200000, description="最大トークン数")
     top_p: float | None = Field(default=None, ge=0.0, le=1.0, description="Top-Pサンプリング")
     top_k: int | None = Field(default=None, gt=0, description="Top-Kサンプリング")
 
@@ -176,6 +176,16 @@ class ModelConfigFactory:
                         # には対応フィールドがないためフィルタリングする
                         "provider",
                         "type",
+                        "mode",
+                        "max_input_tokens",
+                        "max_tokens",
+                        "supports_vision",
+                        "supports_response_schema",
+                        "supports_function_calling",
+                        "supports_tool_choice",
+                        "supports_parallel_function_calling",
+                        "input_cost_per_token",
+                        "output_cost_per_token",
                         # Issue #26: Phase 2 詳細メタデータ。AnnotatorInfo 構築専用で
                         # WebAPIModelConfig 自体のフィールドではない
                         "discontinued_at",
@@ -186,11 +196,7 @@ class ModelConfigFactory:
                 logger.debug(f"ローカルMLモデルとして '{model_name}' をパース")
                 # Filter out fields not in LocalMLModelConfig
                 # capabilities are retrieved via config_registry.get() for dynamic capability support
-                filtered_dict = {
-                    k: v
-                    for k, v in config_dict.items()
-                    if k not in ("capabilities",)
-                }
+                filtered_dict = {k: v for k, v in config_dict.items() if k not in ("capabilities",)}
                 return LocalMLModelConfig(**filtered_dict)
             else:
                 error_msg = f"モデル '{model_name}' の設定に 'model_path' または 'model_name_on_provider' がありません"

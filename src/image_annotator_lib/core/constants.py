@@ -36,6 +36,8 @@ DEFAULT_PATHS = {
 DEFAULT_API_MODELS_TTL_DAYS = 7
 # TTL を環境変数で上書きするためのキー名
 ENV_API_MODELS_TTL_DAYS = "IMAGE_ANNOTATOR_API_MODELS_TTL_DAYS"
+# OpenRouter fallback は LiteLLM 未収録モデルを補完する実験的経路。既定では無効。
+ENV_ENABLE_OPENROUTER_FALLBACK = "IMAGE_ANNOTATOR_ENABLE_OPENROUTER_FALLBACK"
 
 # テンプレートパスも必要に応じてエクスポート (config.py で使う)
 # (直接定数を使うのでエクスポート不要かも)

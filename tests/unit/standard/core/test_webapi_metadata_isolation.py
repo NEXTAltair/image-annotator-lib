@@ -55,11 +55,25 @@ _DISCOVERY_PAYLOAD = {
     "google/gemini-2.5-pro": {
         "provider": "google",
         "model_name_short": "Gemini 2.5 Pro",
+        "mode": "chat",
+        "max_input_tokens": 1048576,
+        "max_output_tokens": 8192,
+        "supports_vision": True,
+        "supports_response_schema": True,
+        "supports_function_calling": True,
+        "supports_tool_choice": True,
         "deprecated_on": None,
     },
     "openai/gpt-4o": {
         "provider": "openai",
         "model_name_short": "GPT-4o",
+        "mode": "chat",
+        "max_input_tokens": 128000,
+        "max_output_tokens": 16384,
+        "supports_vision": True,
+        "supports_response_schema": True,
+        "supports_function_calling": True,
+        "supports_tool_choice": True,
         "deprecated_on": None,
     },
 }
@@ -142,6 +156,10 @@ def test_get_webapi_metadata_returns_full_metadata(
     assert metadata["api_model_id"] == "google/gemini-2.5-pro"
     assert metadata["model_name_on_provider"] == "google/gemini-2.5-pro"
     assert metadata["provider"] == "google"
+    assert metadata["supports_vision"] is True
+    assert metadata["supports_response_schema"] is True
+    assert metadata["max_input_tokens"] == 1048576
+    assert metadata["max_output_tokens"] == 8192
     assert metadata["class"] == "PydanticAIWebAPIAnnotator"
     assert metadata["type"] == "webapi"
 
@@ -151,6 +169,41 @@ def test_get_webapi_metadata_returns_none_for_unregistered():
     """未登録モデル名に対して `get_webapi_metadata()` は None を返す。"""
     with patch.object(registry, "_WEBAPI_MODEL_METADATA", {}):
         assert get_webapi_metadata("nonexistent-model") is None
+
+
+@pytest.mark.unit
+@patch("image_annotator_lib.core.registry._gather_available_classes")
+@patch("image_annotator_lib.core.registry.load_available_api_models")
+def test_register_webapi_models_requires_response_schema(
+    mock_load_api_models,
+    mock_gather_classes,
+    isolated_registry,
+):
+    """Vision 対応でも structured output 非対応モデルは登録されない。"""
+    mock_load_api_models.return_value = {
+        "openai/gpt-4o": {
+            "provider": "openai",
+            "model_name_short": "GPT-4o",
+            "mode": "chat",
+            "supports_vision": True,
+            "supports_response_schema": True,
+            "deprecated_on": None,
+        },
+        "openai/gpt-4-turbo-vision-preview": {
+            "provider": "openai",
+            "model_name_short": "GPT-4 Turbo Vision",
+            "mode": "chat",
+            "supports_vision": True,
+            "supports_response_schema": False,
+            "deprecated_on": None,
+        },
+    }
+    mock_gather_classes.return_value = {"PydanticAIWebAPIAnnotator": _DummyPydanticAIWebAPIAnnotator}
+
+    _register_webapi_models_from_discovery()
+
+    assert get_webapi_metadata("GPT-4o") is not None
+    assert get_webapi_metadata("GPT-4 Turbo Vision") is None
 
 
 @pytest.mark.unit
@@ -186,24 +239,13 @@ def test_base_annotator_loads_webapi_config_via_metadata_fallback(
 
 
 # ============================================================================
-# User TOML override の優先順位テスト (Codex P1/P2 backward compat 保証)
-#
-# 設計上の問題: SSoT 化を 100% 達成するには user TOML での WebAPI モデル定義を
-# 完全排除する必要があるが、ADR 0021 移行は未完了で、user TOML override は
-# 環境固有の endpoint redirect やテスト時の動的差し替えなど正当な用途を持つ。
-# 本セクションは「user TOML 優先 → discovery metadata fallback」の優先順位を
-# 保証する回帰防止テスト。
+# User TOML WebAPI 定義廃止テスト (Issue #25 完全 SSoT 化)
 # ============================================================================
 
 
 @pytest.mark.unit
-def test_pydantic_ai_annotator_prefers_config_registry_over_discovery_metadata():
-    """`PydanticAIWebAPIAnnotator._build_agent_config` が user TOML 値を優先する。
-
-    discovery metadata に `gpt-4o-2024-08-06` が登録されていても、
-    config_registry にユーザー設定値 `gpt-4o-mini-test` があればそちらを採用する
-    (Codex P2 backward compat 保証)。
-    """
+def test_pydantic_ai_annotator_ignores_user_toml_api_model_id():
+    """`PydanticAIWebAPIAnnotator` は user TOML の api_model_id を採用しない。"""
     from image_annotator_lib.core.base.pydantic_ai_annotator import PydanticAIWebAPIAnnotator
 
     real_registry = get_config_registry()
@@ -220,6 +262,8 @@ def test_pydantic_ai_annotator_prefers_config_registry_over_discovery_metadata()
             "model_name_on_provider": "gpt-4o-2024-08-06",
             "provider": "openai",
             "max_output_tokens": 1800,
+            "supports_vision": True,
+            "supports_response_schema": True,
             "type": "webapi",
             "class": "PydanticAIWebAPIAnnotator",
         }
@@ -228,9 +272,7 @@ def test_pydantic_ai_annotator_prefers_config_registry_over_discovery_metadata()
     with patch.object(real_registry, "_merged_config_data", user_overrides):
         with patch.object(registry, "_WEBAPI_MODEL_METADATA", discovery_metadata):
             annotator = PydanticAIWebAPIAnnotator("GPT-4o")
-            assert annotator.config.model_id == "gpt-4o-mini-test", (
-                "user TOML 由来の api_model_id が discovery より優先されるべき"
-            )
+            assert annotator.config.model_id == "gpt-4o-2024-08-06"
 
 
 @pytest.mark.unit
@@ -245,6 +287,8 @@ def test_pydantic_ai_annotator_falls_back_to_discovery_metadata_when_no_user_con
             "model_name_on_provider": "gpt-4o-2024-08-06",
             "provider": "openai",
             "max_output_tokens": 1800,
+            "supports_vision": True,
+            "supports_response_schema": True,
             "type": "webapi",
             "class": "PydanticAIWebAPIAnnotator",
         }
@@ -257,11 +301,8 @@ def test_pydantic_ai_annotator_falls_back_to_discovery_metadata_when_no_user_con
 
 
 @pytest.mark.unit
-def test_pydantic_ai_webapi_wrapper_honors_user_toml_override():
-    """`PydanticAIWebAPIWrapper.__enter__` も user TOML 値を優先する (Codex P2)。
-
-    `_build_agent_config` と同じ優先順位で揃え、override 用途を尊重する。
-    """
+def test_pydantic_ai_webapi_wrapper_ignores_user_toml_api_model_id():
+    """`PydanticAIWebAPIWrapper.__enter__` も SSoT の api_model_id だけを採用する。"""
     from image_annotator_lib.core.annotation_runner import PydanticAIWebAPIWrapper
 
     real_registry = get_config_registry()
@@ -278,6 +319,8 @@ def test_pydantic_ai_webapi_wrapper_honors_user_toml_override():
             "model_name_on_provider": "anthropic/claude-3-5-sonnet-latest",
             "provider": "anthropic",
             "max_output_tokens": 1800,
+            "supports_vision": True,
+            "supports_response_schema": True,
             "type": "webapi",
             "class": "PydanticAIWebAPIAnnotator",
         }
@@ -285,10 +328,6 @@ def test_pydantic_ai_webapi_wrapper_honors_user_toml_override():
 
     with patch.object(real_registry, "_merged_config_data", user_overrides):
         with patch.object(registry, "_WEBAPI_MODEL_METADATA", discovery_metadata):
-            wrapper = PydanticAIWebAPIWrapper(
-                "Claude 3.5 Sonnet", _DummyPydanticAIWebAPIAnnotator
-            )
+            wrapper = PydanticAIWebAPIWrapper("Claude 3.5 Sonnet", _DummyPydanticAIWebAPIAnnotator)
             with wrapper:
-                assert wrapper._api_model_id == "claude-3-5-sonnet-test-override", (
-                    "user TOML 由来の api_model_id が discovery より優先されるべき"
-                )
+                assert wrapper._api_model_id == "anthropic/claude-3-5-sonnet-latest"

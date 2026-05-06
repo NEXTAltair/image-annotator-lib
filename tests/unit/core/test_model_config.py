@@ -332,12 +332,12 @@ class TestWebAPIModelConfig:
 
     def test_max_output_tokens_validation_exceeds_limit(self):
         """max_output_tokensの検証（上限超過）"""
-        with pytest.raises(ValidationError, match="Input should be less than or equal to 8192"):
+        with pytest.raises(ValidationError, match="Input should be less than or equal to 200000"):
             WebAPIModelConfig(
                 model_name="test_model",
                 class_name="TestClass",
                 api_model_id="model-id",
-                max_output_tokens=8193,
+                max_output_tokens=200001,
             )
 
 

@@ -162,21 +162,33 @@ MOCK_API_MODELS_WITH_DEPRECATED = {
     "google/gemini-pro-1.5": {
         "provider": "google",
         "model_name_short": "Gemini 1.5 Pro",
+        "mode": "chat",
+        "supports_vision": True,
+        "supports_response_schema": True,
         "deprecated_on": None,
     },
     "openai/gpt-4o": {
         "provider": "openai",
         "model_name_short": "GPT-4o",
+        "mode": "chat",
+        "supports_vision": True,
+        "supports_response_schema": True,
         "deprecated_on": None,
     },
     "openai/old-model": {
         "provider": "openai",
         "model_name_short": "Old Model",
+        "mode": "chat",
+        "supports_vision": True,
+        "supports_response_schema": True,
         "deprecated_on": "2024-01-01T00:00:00Z",  # 廃止済み → スキップ
     },
     "anthropic/claude-3-sonnet": {
         # model_name_short missing → スキップ
         "provider": "anthropic",
+        "mode": "chat",
+        "supports_vision": True,
+        "supports_response_schema": True,
         "deprecated_on": None,
     },
     "invalid_format_model": "this_is_not_a_dict",  # 不正形式 → スキップ
@@ -360,9 +372,7 @@ def test_resolve_model_class_obsolete_returns_none():
     """古いプロバイダー固有クラスが指定された場合、Noneが返される。"""
     available = {"OpenAIApiAnnotator": type("OpenAIApiAnnotator", (), {})}
 
-    result = registry._resolve_model_class(
-        "OpenAIApiAnnotator", "test-model", available, None, "annotator"
-    )
+    result = registry._resolve_model_class("OpenAIApiAnnotator", "test-model", available, None, "annotator")
     assert result is None
 
 
@@ -373,9 +383,7 @@ def test_resolve_model_class_local_model():
     local_cls = type("LocalMLAnnotator", (), {})
     available = {"LocalMLAnnotator": local_cls}
 
-    result = registry._resolve_model_class(
-        "LocalMLAnnotator", "test-model", available, None, "annotator"
-    )
+    result = registry._resolve_model_class("LocalMLAnnotator", "test-model", available, None, "annotator")
     assert result is local_cls
 
 
@@ -383,9 +391,7 @@ def test_resolve_model_class_local_model():
 @pytest.mark.fast
 def test_resolve_model_class_not_found():
     """存在しないクラスが指定された場合、Noneが返される。"""
-    result = registry._resolve_model_class(
-        "NonExistentClass", "test-model", {}, None, "annotator"
-    )
+    result = registry._resolve_model_class("NonExistentClass", "test-model", {}, None, "annotator")
     assert result is None
 
 

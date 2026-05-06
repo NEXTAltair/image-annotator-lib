@@ -28,6 +28,16 @@ _BASE_MODEL_IDS = [
 ]
 
 
+def _active_model_data(provider: str) -> dict:
+    return {
+        "provider": provider,
+        "deprecated_on": None,
+        "mode": "chat",
+        "supports_vision": True,
+        "supports_response_schema": True,
+    }
+
+
 @pytest.fixture
 def mock_model_discovery():
     """Mock discover_available_vision_models。
@@ -42,10 +52,7 @@ def mock_model_discovery():
     Returns:
         Mock function returning model discovery result
     """
-    mock_toml_data = {
-        mid: {"provider": mid.split("/")[0].capitalize(), "deprecated_on": None}
-        for mid in _BASE_MODEL_IDS
-    }
+    mock_toml_data = {mid: _active_model_data(mid.split("/")[0].capitalize()) for mid in _BASE_MODEL_IDS}
     with patch(
         "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
     ) as mock_discover:
@@ -60,9 +67,12 @@ def mock_model_discovery_with_deprecated():
     discover_available_vision_models が toml_data（deprecated 含む）を返す。
     """
     mock_toml_data = {
-        "openai/gpt-4o": {"provider": "OpenAI", "deprecated_on": None},
-        "openai/gpt-3.5-turbo": {"provider": "OpenAI", "deprecated_on": "2025-01-01T00:00:00Z"},
-        "anthropic/claude-3-5-sonnet-20241022": {"provider": "Anthropic", "deprecated_on": None},
+        "openai/gpt-4o": _active_model_data("OpenAI"),
+        "openai/gpt-3.5-turbo": {
+            **_active_model_data("OpenAI"),
+            "deprecated_on": "2025-01-01T00:00:00Z",
+        },
+        "anthropic/claude-3-5-sonnet-20241022": _active_model_data("Anthropic"),
     }
     with patch(
         "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
@@ -410,6 +420,33 @@ def test_get_available_models_excludes_deprecated(mock_model_discovery_with_depr
 
 
 @pytest.mark.unit
+def test_get_available_models_excludes_schema_incompatible_models():
+    """get_available_models() は structured output 非対応モデルを除外する。"""
+    toml_data = {
+        "openai/gpt-4o": _active_model_data("OpenAI"),
+        "openai/gpt-4-turbo-vision-preview": {
+            **_active_model_data("OpenAI"),
+            "supports_response_schema": False,
+        },
+        "azure/gpt-image-2": {
+            **_active_model_data("Azure"),
+            "mode": "image_generation",
+        },
+    }
+    with patch(
+        "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
+    ) as mock_discover:
+        mock_discover.return_value = {"models": list(toml_data.keys()), "toml_data": toml_data}
+
+        factory = SimplifiedAgentFactory()
+        models = factory.get_available_models()
+
+    assert "openai/gpt-4o" in models
+    assert "openai/gpt-4-turbo-vision-preview" not in models
+    assert "azure/gpt-image-2" not in models
+
+
+@pytest.mark.unit
 def test_list_all_models_includes_deprecated(mock_model_discovery_with_deprecated):
     """list_all_models() は廃止済みモデルも含む全モデルを返す。"""
     factory = SimplifiedAgentFactory()
@@ -445,9 +482,12 @@ def test_is_model_deprecated_false_for_unknown(mock_model_discovery_with_depreca
 def test_list_all_models_uses_toml_data_from_discovery():
     """list_all_models() は discovery の toml_data（deprecated 含む全モデル）を返す。"""
     toml_data = {
-        "openai/gpt-4o": {"provider": "OpenAI", "deprecated_on": None},
-        "openai/gpt-3.5-turbo": {"provider": "OpenAI", "deprecated_on": "2025-01-01T00:00:00Z"},
-        "anthropic/claude-3-5-sonnet-20241022": {"provider": "Anthropic", "deprecated_on": None},
+        "openai/gpt-4o": _active_model_data("OpenAI"),
+        "openai/gpt-3.5-turbo": {
+            **_active_model_data("OpenAI"),
+            "deprecated_on": "2025-01-01T00:00:00Z",
+        },
+        "anthropic/claude-3-5-sonnet-20241022": _active_model_data("Anthropic"),
     }
     with patch(
         "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"
@@ -472,8 +512,8 @@ def test_get_available_models_uses_discovery_toml_data_not_stale_cache():
     """
     # discovery の toml_data では再アクティブ化済みで deprecated_on = None
     toml_data_from_discovery = {
-        "openai/gpt-4o": {"provider": "OpenAI", "deprecated_on": None},
-        "openai/reactivated-model": {"provider": "OpenAI", "deprecated_on": None},
+        "openai/gpt-4o": _active_model_data("OpenAI"),
+        "openai/reactivated-model": _active_model_data("OpenAI"),
     }
     with patch(
         "image_annotator_lib.core.simplified_agent_factory.discover_available_vision_models"

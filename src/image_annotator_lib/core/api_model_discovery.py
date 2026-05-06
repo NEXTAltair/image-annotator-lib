@@ -10,6 +10,11 @@ import threading
 from datetime import datetime as dt
 from typing import Any
 
+# image-annotator-lib は LiteLLM の pip 同梱 DB を SSoT にする。
+# LiteLLM は既定で import 時に remote cost map を取りに行くため、
+# ネットワークがない実行環境でも起動を待たないよう local backup を使う。
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 import litellm
 import requests
 
@@ -28,21 +33,23 @@ from .constants import (
     AVAILABLE_API_MODELS_CONFIG_PATH,
     DEFAULT_API_MODELS_TTL_DAYS,
     ENV_API_MODELS_TTL_DAYS,
+    ENV_ENABLE_OPENROUTER_FALLBACK,
 )
 from .utils import convert_unix_to_iso8601, logger
 
 _OPENROUTER_API_URL = "https://openrouter.ai/api/v1/models"
 _REQUEST_TIMEOUT = 10
+_SUPPORTED_LITELLM_MODES = {"chat", "responses"}
 
 # 同時 background refresh を防ぐプロセス内ロック
 _refresh_lock = threading.Lock()
 
 
 def _fetch_from_litellm() -> list[dict[str, Any]]:
-    """LiteLLM のローカル DB から Vision 対応モデル一覧を取得する。
+    """LiteLLM のローカル DB からアノテーション互換モデル一覧を取得する。
 
     provider/model 形式の ID のみ処理し（エイリアス重複を除外）、
-    litellm.supports_vision() で Vision 対応を確認する。
+    Vision + structured output 対応モデルだけを採用する。
 
     Returns:
         整形済みモデルデータのリスト（'id' キーを含む）
@@ -57,12 +64,28 @@ def _fetch_from_litellm() -> list[dict[str, Any]]:
             info = litellm.get_model_info(model_id)
             if info is None:
                 continue
+            if not _is_litellm_model_annotation_compatible(info):
+                continue
             formatted = _format_litellm_model_for_toml(model_id, info)
             if formatted:
                 results.append(formatted)
         except Exception:
             continue
     return results
+
+
+def _is_litellm_model_annotation_compatible(info: dict[str, Any]) -> bool:
+    """LoRAIro/image-annotator-lib の画像アノテーションに適したモデルか判定する。
+
+    PydanticAI に ``AnnotationSchema`` を渡して構造化出力を要求するため、
+    Vision 対応に加えて response schema 対応を必須にする。
+    """
+    mode = info.get("mode", "chat")
+    return (
+        info.get("supports_vision") is True
+        and info.get("supports_response_schema") is True
+        and mode in _SUPPORTED_LITELLM_MODES
+    )
 
 
 def _format_litellm_model_for_toml(model_id: str, info: dict[str, Any]) -> dict[str, Any] | None:
@@ -87,6 +110,13 @@ def _format_litellm_model_for_toml(model_id: str, info: dict[str, Any]) -> dict[
         "display_name": model_id,
         "mode": info.get("mode", "chat"),
         "max_tokens": info.get("max_tokens"),
+        "max_input_tokens": info.get("max_input_tokens"),
+        "max_output_tokens": info.get("max_output_tokens"),
+        "supports_vision": info.get("supports_vision"),
+        "supports_response_schema": info.get("supports_response_schema"),
+        "supports_function_calling": info.get("supports_function_calling"),
+        "supports_tool_choice": info.get("supports_tool_choice"),
+        "supports_parallel_function_calling": info.get("supports_parallel_function_calling"),
         "input_cost_per_token": info.get("input_cost_per_token"),
         "output_cost_per_token": info.get("output_cost_per_token"),
         # last_seen, deprecated_on は _update_toml_with_api_results で付与
@@ -136,7 +166,9 @@ def _fetch_and_update_vision_models() -> dict[str, Any]:
     logger.info(f"LiteLLM DB から {len(litellm_models)} 件の Vision モデルを取得")
 
     # === OpenRouter フォールバック（LiteLLM 未収録モデルを補完）===
-    openrouter_models = _fetch_from_openrouter_fallback()
+    openrouter_models = []
+    if _openrouter_fallback_enabled():
+        openrouter_models = _fetch_from_openrouter_fallback()
     litellm_ids = {m["id"] for m in litellm_models}
     additional_models = [m for m in openrouter_models if m["id"] not in litellm_ids]
     if additional_models:
@@ -151,6 +183,16 @@ def _fetch_and_update_vision_models() -> dict[str, Any]:
 
     # TOML 書き込み失敗（save が例外を握りつぶす）でも in-memory の正確なデータを返す
     return updated_toml_data
+
+
+def _openrouter_fallback_enabled() -> bool:
+    """OpenRouter fallback を実行するか判定する。既定は無効。"""
+    return os.environ.get(ENV_ENABLE_OPENROUTER_FALLBACK, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def should_refresh(ttl_days: int | None = None) -> bool:
@@ -169,7 +211,9 @@ def should_refresh(ttl_days: int | None = None) -> bool:
             try:
                 ttl_days = int(env_val)
             except ValueError:
-                logger.warning(f"{ENV_API_MODELS_TTL_DAYS}={env_val!r} が整数でないため既定値を使用します。")
+                logger.warning(
+                    f"{ENV_API_MODELS_TTL_DAYS}={env_val!r} が整数でないため既定値を使用します。"
+                )
                 ttl_days = DEFAULT_API_MODELS_TTL_DAYS
         else:
             ttl_days = DEFAULT_API_MODELS_TTL_DAYS
@@ -196,7 +240,9 @@ def _refresh_worker() -> None:
         _fetch_and_update_vision_models()
         logger.info("バックグラウンド API モデル refresh が完了しました。")
     except Exception as e:
-        logger.warning(f"バックグラウンド API モデル refresh に失敗しました（次回 TTL 超過時に再試行）: {e}")
+        logger.warning(
+            f"バックグラウンド API モデル refresh に失敗しました（次回 TTL 超過時に再試行）: {e}"
+        )
     finally:
         _refresh_lock.release()
 
@@ -342,6 +388,11 @@ def _format_openrouter_model_for_toml(api_model_data: dict[str, Any]) -> dict[st
         "created": created_iso,
         "modality": architecture.get("modality"),
         "input_modalities": architecture.get("input_modalities"),
+        "mode": "chat",
+        "supports_vision": True,
+        "supports_response_schema": True,
+        "supports_function_calling": True,
+        "supports_tool_choice": True,
         # last_seen, deprecated_on は呼び出し元 (_update_toml_with_api_results) で追加
     }
 
