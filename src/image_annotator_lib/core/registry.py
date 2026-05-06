@@ -7,6 +7,7 @@ from types import ModuleType
 from typing import Any, TypeVar, cast
 
 from . import api_model_discovery
+from .api_model_discovery import is_allowed_provider
 from .base import BaseAnnotator
 from .config import AVAILABLE_API_MODELS_CONFIG_PATH, config_registry, load_available_api_models
 from .types import AnnotatorInfo, ModelType, TaskCapability
@@ -697,6 +698,9 @@ def _parse_discontinued_at(value: Any, model_name: str) -> datetime.datetime | N
 
 
 def _is_annotation_compatible_webapi_model(model_id: str, model_info: dict[str, Any]) -> bool:
+    if not is_allowed_provider(model_id):
+        logger.debug(f"モデルID '{model_id}' は許可外プロバイダーのためスキップします。")
+        return False
     if model_info.get("deprecated_on") is not None:
         return False
     if model_info.get("supports_vision") is not True:
