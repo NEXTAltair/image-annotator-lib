@@ -41,8 +41,27 @@ _OPENROUTER_API_URL = "https://openrouter.ai/api/v1/models"
 _REQUEST_TIMEOUT = 10
 _SUPPORTED_LITELLM_MODES = {"chat", "responses"}
 
+# LiteLLM が公開する 100+ プロバイダーのうち、実運用で使うものに限定する。
+# キーは LiteLLM model_cost のキーが取りうる provider prefix (model_id.split("/", 1)[0])。
+# - openai: OpenAI 直接
+# - anthropic: Anthropic 直接
+# - gemini: Google AI Studio (Generative Language API)
+# - vertex_ai: Google Cloud Vertex AI (Gemini を含む)
+# - google: 一部のエイリアス・テスト用 prefix の互換
+# - openrouter: 集約プロバイダー
+_ALLOWED_LITELLM_PROVIDERS: frozenset[str] = frozenset(
+    {"openai", "anthropic", "gemini", "vertex_ai", "google", "openrouter"}
+)
+
 # 同時 background refresh を防ぐプロセス内ロック
 _refresh_lock = threading.Lock()
+
+
+def _is_allowed_provider(model_id: str) -> bool:
+    """model_id の provider prefix が許可リストに含まれるか判定する。"""
+    if "/" not in model_id:
+        return False
+    return model_id.split("/", 1)[0] in _ALLOWED_LITELLM_PROVIDERS
 
 
 def _fetch_from_litellm() -> list[dict[str, Any]]:
@@ -56,7 +75,7 @@ def _fetch_from_litellm() -> list[dict[str, Any]]:
     """
     results = []
     for model_id in litellm.model_cost.keys():
-        if "/" not in model_id:
+        if not _is_allowed_provider(model_id):
             continue
         try:
             if not litellm.supports_vision(model_id):
@@ -281,11 +300,20 @@ def discover_available_vision_models(force_refresh: bool = False) -> dict[str, A
     if not force_refresh:
         existing_toml_data = load_available_api_models()
         if existing_toml_data:
-            model_ids = list(existing_toml_data.keys())
+            # 過去に許可外プロバイダーが書き込まれた古いキャッシュも、ここで結果から除外する。
+            # TOML 自体は触らず、戻り値から落とすだけにして手動編集を尊重する。
+            filtered_toml_data = {
+                model_id: entry
+                for model_id, entry in existing_toml_data.items()
+                if _is_allowed_provider(model_id)
+            }
+            model_ids = list(filtered_toml_data.keys())
+            dropped = len(existing_toml_data) - len(filtered_toml_data)
             logger.info(
                 f"ローカルファイル ({AVAILABLE_API_MODELS_CONFIG_PATH}) から {len(model_ids)} 件のモデル情報を読み込みました。"
+                + (f" (許可外プロバイダー {dropped} 件を除外)" if dropped else "")
             )
-            return {"models": model_ids, "toml_data": existing_toml_data}
+            return {"models": model_ids, "toml_data": filtered_toml_data}
         else:
             logger.info(
                 f"ローカルファイル ({AVAILABLE_API_MODELS_CONFIG_PATH}) が存在しないか空です。LiteLLM DB から取得します。"
