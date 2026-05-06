@@ -566,8 +566,10 @@ def _build_annotator_info_for_registry_model(
     # provider は lowercase 正規化 (PR #27 Codex P2 反映): user TOML/discovery/直接モデルで
     # case が混在しても AnnotatorInfo.provider は常に小文字で一貫する。
     raw_provider = model_config.get("provider")
+    # ローカルMLモデルは provider を "local" に固定 (Codex P2 r3193126501):
+    # user TOML に誤って provider キーが含まれても is_local=True との矛盾を防ぐ。
     provider: str | None = (
-        str(raw_provider).lower() if raw_provider is not None else ("local" if is_local else None)
+        "local" if is_local else (str(raw_provider).lower() if raw_provider is not None else None)
     )
 
     raw_api_model_id = model_config.get("api_model_id")
