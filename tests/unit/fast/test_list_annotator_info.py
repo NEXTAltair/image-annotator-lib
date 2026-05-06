@@ -526,6 +526,86 @@ def test_malformed_user_overrides_skips_only_bad_model(patched_registry):
 
 @pytest.mark.unit
 @pytest.mark.fast
+def test_provider_normalized_to_lowercase_across_sources(patched_registry):
+    """PR #27 Codex P2 回帰防止: provider 名は出所に関係なく lowercase に正規化される。
+
+    `available_api_models.toml` は "OpenAI"/"Google" の display-case で記述されるが、
+    `_infer_provider_from_model_id` の slash 経由出力は "openai"/"google" の小文字。
+    AnnotatorInfo.provider が混在すると case-sensitive consumer が誤分類する。
+    本テストは 3 経路 (registry/SSoT/直接モデル) すべてで lowercase で一貫することを保証する。
+    """
+    with patched_registry(
+        # Registry-backed WebAPI モデル: SSoT の display-case provider を持つ
+        model_dict={"GPT-4o": PydanticAIWebAPIAnnotator},
+        webapi_metadata={
+            "GPT-4o": {
+                "api_model_id": "openai/gpt-4o",
+                "model_name_on_provider": "openai/gpt-4o",
+                "provider": "OpenAI",  # ← display-case (TOML 記述)
+                "max_output_tokens": 1800,
+                "estimated_size_gb": None,
+                "discontinued_at": None,
+                "type": "webapi",
+                "class": "PydanticAIWebAPIAnnotator",
+            }
+        },
+        # 直接モデル: model_id slash 前から推論 (既に小文字)
+        direct_models=["google/gemini-2.5-pro", "anthropic/claude-3-5-sonnet-latest"],
+    ):
+        result = list_annotator_info()
+
+    by_name = {info.name: info for info in result}
+    # registry-backed: SSoT の "OpenAI" が "openai" に正規化されている
+    assert by_name["GPT-4o"].provider == "openai", (
+        f"registry-backed WebAPI provider が小文字でない: {by_name['GPT-4o'].provider!r}"
+    )
+    # direct モデル: 既に小文字 (一貫性確認)
+    assert by_name["google/gemini-2.5-pro"].provider == "google"
+    assert by_name["anthropic/claude-3-5-sonnet-latest"].provider == "anthropic"
+
+    # 全 provider が小文字 (case-sensitive consumer 向けの不変条件)
+    for info in result:
+        if info.provider is not None:
+            assert info.provider == info.provider.lower(), (
+                f"{info.name}: provider が小文字でない: {info.provider!r}"
+            )
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_user_toml_provider_also_normalized(patched_registry):
+    """user TOML 由来の `provider` も lowercase 正規化される (PR #27 Codex P2)。"""
+    with patched_registry(
+        model_dict={"CustomAPI": PydanticAIWebAPIAnnotator},
+        config_dict={
+            "CustomAPI": {
+                "api_model_id": "custom/model",
+                "provider": "Anthropic",  # ← user TOML での display-case
+            }
+        },
+        webapi_metadata={
+            "CustomAPI": {
+                "api_model_id": "anthropic/claude-3-5-sonnet",
+                "model_name_on_provider": "anthropic/claude-3-5-sonnet",
+                "provider": "anthropic",
+                "max_output_tokens": 1800,
+                "estimated_size_gb": None,
+                "discontinued_at": None,
+                "type": "webapi",
+                "class": "PydanticAIWebAPIAnnotator",
+            }
+        },
+    ):
+        result = list_annotator_info()
+
+    info = result[0]
+    # user TOML が SSoT を override するため "Anthropic" 由来だが、
+    # `_build_annotator_info_for_registry_model` で lowercase 正規化される
+    assert info.provider == "anthropic"
+
+
+@pytest.mark.unit
+@pytest.mark.fast
 def test_malformed_webapi_user_override_does_not_abort_listing(patched_registry):
     """PR #27 Codex P1 回帰防止 (WebAPI 側): malformed user override が来ても listing 全体が abort しない。
 

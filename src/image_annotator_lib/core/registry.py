@@ -515,14 +515,18 @@ def _infer_provider_from_model_id(model_id: str) -> str | None:
     "provider/model_name" 形式 (例: "google/gemini-2.5-pro") は slash 前を返す。
     slash のない model_id は PydanticAI の infer_provider_class でフォールバック。
 
+    戻り値は **常に lowercase** で正規化する (PR #27 Codex P2 反映): registry-backed
+    WebAPI モデル / direct モデル / user TOML override の各経路で provider 名が
+    case-sensitive に一貫することを保証する。
+
     Args:
         model_id: PydanticAI 直接モデルの ID。
 
     Returns:
-        推論された provider 名。判定できない場合は None。
+        推論された provider 名 (小文字)。判定できない場合は None。
     """
     if "/" in model_id:
-        return model_id.split("/", 1)[0]
+        return model_id.split("/", 1)[0].lower()
     try:
         from pydantic_ai.providers import infer_provider_class
 
@@ -559,9 +563,11 @@ def _build_annotator_info_for_registry_model(
     # `_safe_float` / `_safe_int` / `_parse_discontinued_at` は malformed 値で
     # warning + None フォールバックする (Codex P2 #1, #2, #5 の根本対応)。
     # `provider` はローカルモデルなら "local" にフォールバック (ADR 0005)。
+    # provider は lowercase 正規化 (PR #27 Codex P2 反映): user TOML/discovery/直接モデルで
+    # case が混在しても AnnotatorInfo.provider は常に小文字で一貫する。
     raw_provider = model_config.get("provider")
     provider: str | None = (
-        str(raw_provider) if raw_provider is not None else ("local" if is_local else None)
+        str(raw_provider).lower() if raw_provider is not None else ("local" if is_local else None)
     )
 
     raw_api_model_id = model_config.get("api_model_id")
@@ -743,10 +749,14 @@ def _register_webapi_models_from_discovery() -> None:
                 # max_output_tokens は TOML 由来値があれば採用、なければ 1800 default。
                 # estimated_size_gb は WebAPI モデルでは原則 None (ローカル ML 専用フィールド)。
                 # discontinued_at は active のみ登録するため None で明示 (deprecated は line 668 で skip)。
+                # provider は lowercase 正規化 (PR #27 Codex P2 反映):
+                #   `available_api_models.toml` は "OpenAI"/"Google" の display-case で記述されるが
+                #   `_infer_provider_from_model_id` の slash 経由出力は小文字 ("openai"/"google") のため
+                #   AnnotatorInfo.provider が混在する case-sensitive 不整合を解消する。
                 metadata = {
                     "api_model_id": model_id,
                     "model_name_on_provider": model_id,
-                    "provider": provider,
+                    "provider": str(provider).lower(),
                     "max_output_tokens": _safe_int(
                         model_info.get("max_output_tokens"), model_id, "max_output_tokens"
                     )
