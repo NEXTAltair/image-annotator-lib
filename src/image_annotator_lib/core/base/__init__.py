@@ -1,4 +1,9 @@
-"""基底クラスモジュール - 各フレームワーク用の基底クラスをエクスポート"""
+"""基底クラスモジュール - 各フレームワーク用の基底クラスをエクスポート
+
+Note:
+    ADR 0023 Phase 1 (Issue #35) で WebAPI 系は `WebApiAnnotator`
+    (`core/webapi_annotator.py`) に統合された。旧 `WebApiBaseAnnotator` は廃止。
+"""
 
 from .annotator import BaseAnnotator
 from .clip import ClipBaseAnnotator
@@ -6,7 +11,6 @@ from .onnx import ONNXBaseAnnotator
 from .pipeline import PipelineBaseAnnotator
 from .tensorflow import TensorflowBaseAnnotator
 from .transformers import TransformersBaseAnnotator
-from .webapi import WebApiBaseAnnotator
 
 __all__ = [
     "BaseAnnotator",
@@ -15,5 +19,4 @@ __all__ = [
     "PipelineBaseAnnotator",
     "TensorflowBaseAnnotator",
     "TransformersBaseAnnotator",
-    "WebApiBaseAnnotator",
 ]
