@@ -51,15 +51,6 @@ def list_available_annotators() -> list[str]:
     return _registry_list_annotators()
 
 
-def _warn_deprecated_webapi_user_model_definition(model_name: str, user_overrides: dict[str, Any]) -> None:
-    if "api_model_id" not in user_overrides and "model_name_on_provider" not in user_overrides:
-        return
-    logger.warning(
-        f"モデル '{model_name}' の user TOML WebAPI モデル定義は廃止済みです。"
-        "metadata は available_api_models.toml 由来を使用します。"
-    )
-
-
 def list_annotator_info() -> list[AnnotatorInfo]:
     """登録済み全アノテーターのメタデータを返す。
 
@@ -122,7 +113,6 @@ def list_annotator_info() -> list[AnnotatorInfo]:
             if is_webapi_class:
                 # WebAPI モデル: metadata は SSoT のみ。user TOML は実行時 override 用で、
                 # api_model_id/provider/capability 等のモデル定義には使わない。
-                _warn_deprecated_webapi_user_model_definition(model_name, user_overrides)
                 raw_webapi_metadata = get_webapi_metadata(model_name)
                 webapi_metadata: dict[str, Any] = (
                     raw_webapi_metadata if isinstance(raw_webapi_metadata, dict) else {}
