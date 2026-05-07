@@ -24,13 +24,16 @@ class TransformersBaseAnnotator(BaseAnnotator):
             model_name (str): モデルの名前。
         """
         super().__init__(model_name)
+        # device 判定はローカル ML 系 base class の責務 (Issue #35 で BaseAnnotator から移譲)
+        from ..utils import determine_effective_device
+
+        self.device = determine_effective_device(self._config.device, self.model_name)
         # 設定ファイルから追加パラメータを取得
         self.max_length = config_registry.get(self.model_name, "max_length", 75)
         self.processor_path = config_registry.get(self.model_name, "processor_path")
         # components の型ヒントを具体的に指定
         self.components: TransformersComponents | None = None
-        # device, model_pathの型を保証
-        self.device = str(self.device) if isinstance(self.device, str) else "cpu"
+        # model_path の型を保証 (LocalMLModelConfig では str を期待)
         self.model_path = str(self.model_path) if isinstance(self.model_path, str) else ""
 
     def __enter__(self) -> "TransformersBaseAnnotator":
@@ -206,9 +209,7 @@ class TransformersBaseAnnotator(BaseAnnotator):
                     raise TypeError(f"Unsupported processor type: {type(processor_obj)}")
 
                 payload = [decoded_text] if decoded_text else None
-                captions_value = (
-                    payload if (TaskCapability.CAPTIONS in capabilities and payload) else None
-                )
+                captions_value = payload if (TaskCapability.CAPTIONS in capabilities and payload) else None
                 tags_value = payload if (TaskCapability.TAGS in capabilities and payload) else None
                 result = UnifiedAnnotationResult(
                     model_name=self.model_name,

@@ -18,6 +18,10 @@ class PipelineBaseAnnotator(BaseAnnotator):
 
     def __init__(self, model_name: str):
         super().__init__(model_name=model_name)
+        # device 判定はローカル ML 系 base class の責務 (Issue #35 で BaseAnnotator から移譲)
+        from ..utils import determine_effective_device
+
+        self.device = determine_effective_device(self._config.device, self.model_name)
         self.batch_size = config_registry.get(self.model_name, "batch_size", 8)
         self.task = config_registry.get(self.model_name, "task", "image-classification")
         # components の型ヒントを具体的に指定
