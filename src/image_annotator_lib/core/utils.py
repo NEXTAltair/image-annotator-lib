@@ -303,7 +303,12 @@ def determine_effective_device(requested_device: str, model_name: str | None = N
 def get_model_capabilities(model_name: str) -> set[Any]:
     """モデル名からcapabilitiesを取得する。
 
-    設定ファイルに明示的なcapabilitiesがない場合、typeフィールドから推論する。
+    解決順序:
+        1. WebAPI モデル (`_WEBAPI_MODEL_METADATA` SSoT に登録済み) なら
+           Vision LLM は tags/captions/scores 全タスクをサポートするため全 capability を返す。
+        2. 設定ファイル (config_registry) の `capabilities` フィールドが明示されていればそれを使う。
+        3. 設定ファイルの `type` フィールドから推論する (tagger/scorer/captioner)。
+        4. 解決できなければ WARNING を出して空 set を返す。
 
     Args:
         model_name: モデル名
@@ -312,9 +317,14 @@ def get_model_capabilities(model_name: str) -> set[Any]:
         set: TaskCapabilityのセット
     """
     from .config import config_registry
+    from .registry import get_webapi_metadata
     from .types import TaskCapability
 
-    # 設定ファイルからcapabilitiesを取得
+    # 1. WebAPI モデルは Vision LLM として tags/captions/scores 全対応
+    if get_webapi_metadata(model_name) is not None:
+        return {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
+
+    # 2. 設定ファイルからcapabilitiesを取得
     capabilities_config = config_registry.get(model_name, "capabilities", [])
 
     if not capabilities_config:
