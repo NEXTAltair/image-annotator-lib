@@ -125,48 +125,48 @@ model_path = "Salesforce/blip2-opt-2.7b"
 class = "BLIP2Tagger"
 device = "cpu"
 estimated_size_gb = 16.74
-type = "tagger"
+type = "captioner"
 
 ["blip2-opt-2.7b-coco"]
 model_path = "Salesforce/blip2-opt-2.7b-coco"
 class = "BLIP2Tagger"
 device = "cpu"
 estimated_size_gb = 16.743
-type = "tagger"
+type = "captioner"
 
 ["blip2-opt-6.7b"]
 model_path = "Salesforce/blip2-opt-6.7b"
 class = "BLIP2Tagger"
 device = "cpu"
 estimated_size_gb = 34.658
-type = "tagger"
+type = "captioner"
 
 ["blip2-opt-6.7b-coco"]
 model_path = "Salesforce/blip2-opt-6.7b-coco"
 class = "BLIP2Tagger"
 device = "cpu"
 estimated_size_gb = 34.661
-type = "tagger"
+type = "captioner"
 
 [blip2-flan-t5-xl]
 model_path = "Salesforce/blip2-flan-t5-xl"
 class = "BLIP2Tagger"
 device = "cpu"
 estimated_size_gb = 17.624
-type = "tagger"
+type = "captioner"
 
 [blip2-flan-t5-xl-coco]
 model_path = "Salesforce/blip2-flan-t5-xl-coco"
 class = "BLIP2Tagger"
 device = "cpu"
 estimated_size_gb = 17.627
-type = "tagger"
+type = "captioner"
 
 [blip2-flan-t5-xxl]
 model_path = "Salesforce/blip2-flan-t5-xxl"
 class = "BLIP2Tagger"
 device = "cpu"
-type = "tagger"
+type = "captioner"
 
 [GITLargeCaptioning]
 model_path = "microsoft/git-large-coco"
