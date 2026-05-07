@@ -22,7 +22,6 @@ from ..exceptions.errors import (
     VisionUnsupportedError,
 )
 from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
-from .config import config_registry
 from .image_preprocess import preprocess_images_to_binary
 from .model_id import build_pydantic_model, resolve_model_ref
 from .result_adapter import to_annotation_result
@@ -142,20 +141,20 @@ class ProviderManager:
         provider: str,
         api_keys: dict[str, str] | None,
     ) -> str:
-        """API key を `api_keys` dict + `config_registry` から解決する。
+        """API key を `api_keys` dict から解決する (ADR 0023 Phase 1)。
 
-        ADR 0023: env mutate / env fallback は行わない。両経路で見つからなければ
+        ADR 0023: API key は provider object への明示注入のみを許容する。env mutate /
+        env fallback / `config_registry.get(model_name, "api_key")` legacy fallback は
+        いずれも行わない。`api_keys` dict に該当 provider のキーが無ければ即
         `MissingApiKeyError` を raise する。
+
+        Args:
+            model_name: 呼び出し元モデル名 (logging 用、解決には使わない)。
+            provider: `core/model_id.SUPPORTED_PROVIDERS` の provider 名。
+            api_keys: provider -> API key の dict。
         """
         if api_keys and provider in api_keys and api_keys[provider]:
             return api_keys[provider]
-
-        # config_registry に model 単位で登録された API key を許容する。
-        # WebAPI metadata は SSoT として LiteLLM だが、user TOML の per-model api_key 設定は
-        # ローカル ML モデル設定の一貫性のため受け入れる。
-        registry_key = config_registry.get(model_name, "api_key", default="")
-        if registry_key:
-            return str(registry_key)
 
         raise MissingApiKeyError(provider=provider)
 

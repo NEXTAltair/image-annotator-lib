@@ -1,7 +1,6 @@
 import datetime
 import importlib
 import inspect
-import os
 from pathlib import Path
 from types import ModuleType
 from typing import Any, TypeVar, cast
@@ -806,21 +805,15 @@ def _register_webapi_models_from_discovery() -> None:
         logger.error(f"WebAPI モデルの直接登録中に予期せぬエラーが発生しました: {e}", exc_info=True)
 
 
-def _discover_and_update_api_models(skip_api_discovery: bool) -> None:
+def _discover_and_update_api_models() -> None:
     """LiteLLM 同梱 DB から WebAPI モデル情報を取得し、registry に登録する (ADR 0023 Phase 1)。
 
     旧 TOML cache / TTL refresh / OpenRouter fallback / background refresh はすべて廃止。
-
-    Args:
-        skip_api_discovery: Trueの場合、API検出をスキップする。
+    LiteLLM 同梱 DB は network 通信を必要としないため、Phase 0 にあった
+    `IMAGE_ANNOTATOR_SKIP_API_DISCOVERY` フラグも廃止された。テストで WebAPI モデル登録を
+    抑制したい場合は `_register_webapi_models_from_discovery` を pytest fixture で
+    monkeypatch すること。
     """
-    if skip_api_discovery:
-        logger.info(
-            "環境変数 IMAGE_ANNOTATOR_SKIP_API_DISCOVERY=true のため、"
-            "API モデル情報の取得をスキップします。"
-        )
-        return
-
     _register_webapi_models_from_discovery()
 
 
@@ -842,10 +835,8 @@ def initialize_registry() -> None:
 
     logger.debug("レジストリ初期化プロセスを開始します...")
 
-    skip_api_discovery = os.getenv("IMAGE_ANNOTATOR_SKIP_API_DISCOVERY", "false").lower() == "true"
-
     try:
-        _discover_and_update_api_models(skip_api_discovery)
+        _discover_and_update_api_models()
     except Exception as e:
         logger.error(f"Web API モデル情報の処理中にエラーが発生しました: {e}", exc_info=True)
 
