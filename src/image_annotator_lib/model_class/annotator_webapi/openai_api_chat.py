@@ -51,10 +51,13 @@ class OpenRouterApiAnnotator(WebApiBaseAnnotator):
                 )
             ] * len(processed)
 
+        # ADR 0023: api_model_id はすでに `openrouter/...` の LiteLLM 形式で保存されている。
+        # 旧コードでは `openrouter:` prefix を別途付与していたが、新 ProviderManager は
+        # LiteLLM ID をそのまま受ける (model_id.py:_build_openrouter_ref が処理する)。
         results_dict = ProviderManager.run_inference_with_model(
             model_name=self.model_name,
             images_list=processed,
-            api_model_id=f"openrouter:{api_model_id}",
+            litellm_model_id=api_model_id,
         )
 
         # Convert dict results to list format

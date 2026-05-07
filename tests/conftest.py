@@ -4,7 +4,6 @@
 """
 
 # Import shared fixtures from fixtures module
-import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -12,8 +11,12 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-# テスト環境ではAPI検出を無効化
-os.environ["IMAGE_ANNOTATOR_SKIP_API_DISCOVERY"] = "true"
+# ADR 0023 Phase 1: `IMAGE_ANNOTATOR_SKIP_API_DISCOVERY` フラグは廃止された
+# (LiteLLM 同梱 DB は network 通信を必要としないため意味が消失)。
+# 過去の `os.environ["IMAGE_ANNOTATOR_SKIP_API_DISCOVERY"] = "true"` 設定は削除済。
+# テストで WebAPI モデル登録を抑制したい場合は、当該テストの fixture で
+# `image_annotator_lib.core.registry._register_webapi_models_from_discovery` を
+# monkeypatch すること。
 
 # Add the tests directory to sys.path
 tests_dir = Path(__file__).parent
@@ -43,11 +46,11 @@ def reset_global_state(request):
     # BDDテスト以外は全てクリーンアップを実行
     if not is_bdd_test:
         # テスト後のクリーンアップ
+        # ADR 0023 Phase 1: PydanticAIAgentFactory / ProviderManager の Agent キャッシュは廃止された
+        # ため、conftest 側でのキャッシュクリアは不要。registry / ModelLoad / config のみ reset する。
         try:
             from image_annotator_lib.core.config import config_registry
             from image_annotator_lib.core.model_factory import ModelLoad
-            from image_annotator_lib.core.provider_manager import ProviderManager
-            from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
             from image_annotator_lib.core.registry import _MODEL_CLASS_OBJ_REGISTRY
 
             # レジストリクリア
@@ -67,10 +70,6 @@ def reset_global_state(request):
                 test_models = [k for k in config_registry._config.keys() if "test" in k.lower()]
                 for model in test_models:
                     config_registry._config.pop(model, None)
-
-            # ProviderManager/PydanticAIAgentFactory キャッシュクリア
-            ProviderManager.clear_cache()
-            PydanticAIAgentFactory.clear_cache()
 
         except ImportError:
             # モジュールがまだロードされていない場合はスキップ

@@ -11,7 +11,6 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from image_annotator_lib.core.config import config_registry
-from image_annotator_lib.core.pydantic_ai_factory import PydanticAIAgentFactory
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -24,15 +23,9 @@ def disable_real_api_requests():
     yield
 
 
-@pytest.fixture(scope="function", autouse=True)
-def clear_pydantic_ai_cache():
-    """
-    Automatically clear PydanticAI cache before and after each test
-    to ensure test isolation.
-    """
-    PydanticAIAgentFactory.clear_cache()
-    yield
-    PydanticAIAgentFactory.clear_cache()
+# ADR 0023 Phase 1: PydanticAIAgentFactory cache は廃止された。
+# Agent / Provider / Model は推論呼び出しごとに新規作成されるため、テスト間の
+# cache クリアは不要 (旧 clear_pydantic_ai_cache fixture は削除)。
 
 
 @pytest.fixture(scope="function")

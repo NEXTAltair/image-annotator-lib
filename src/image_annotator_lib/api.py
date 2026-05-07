@@ -9,8 +9,8 @@ from typing import Any
 from PIL import Image
 
 from .core.annotation_runner import run_annotation
+from .core.api_model_discovery import get_available_models as _discover_available_models
 from .core.registry import list_available_annotators as _registry_list_annotators
-from .core.simplified_agent_factory import get_agent_factory
 from .core.types import AnnotatorInfo, PHashAnnotationResults
 from .core.utils import logger
 
@@ -126,16 +126,16 @@ def list_annotator_info() -> list[AnnotatorInfo]:
         except Exception as e:
             logger.error(f"モデル '{model_name}' の AnnotatorInfo 構築失敗: {e}", exc_info=True)
 
-    # 2) PydanticAI 直接モデル (レジストリと重複するものは除外)
+    # 2) LiteLLM 直接モデル (レジストリと重複するものは除外)
+    # ADR 0023 Phase 1: SimplifiedAgentFactory は廃止され、LiteLLM 同梱 DB を runtime SSoT とする。
     try:
-        agent_factory = get_agent_factory()
-        for model_id in agent_factory.get_available_models():
+        for model_id in _discover_available_models():
             if model_id in seen_names:
                 continue
             infos.append(_build_annotator_info_for_direct_model(model_id))
             seen_names.add(model_id)
     except Exception as e:
-        logger.error(f"PydanticAI 直接モデルの取得失敗: {e}", exc_info=True)
+        logger.error(f"LiteLLM 直接モデルの取得失敗: {e}", exc_info=True)
 
     infos.sort(key=lambda info: info.name)
     logger.info(f"AnnotatorInfo リスト生成完了: {len(infos)} 件")

@@ -54,7 +54,7 @@ class OpenAIApiAnnotator(WebApiBaseAnnotator):
         results_dict = ProviderManager.run_inference_with_model(
             model_name=self.model_name,
             images_list=processed,
-            api_model_id=api_model_id,
+            litellm_model_id=api_model_id,
         )
 
         # Convert dict results to list format

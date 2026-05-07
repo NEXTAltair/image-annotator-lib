@@ -214,55 +214,71 @@ estimated_size_gb = 1.5
 - Use `PydanticAIAnnotatorMixin._preprocess_images_to_binary()` for PIL→BinaryContent conversion
 - Provider instances are shared across models using the same provider and configuration
 
-### Provider-Level Architecture (PydanticAI)
+### WebAPI Inference Architecture (ADR 0023 Phase 1)
 
-**Design Philosophy:**
-The Provider-level architecture optimizes resource usage for PydanticAI WebAPI models by sharing Provider instances across multiple model requests, rather than creating separate instances for each model name.
+> **Design Authority:**
+> WebAPI 推論経路の責務分離 (PydanticAI / LiteLLM / image-annotator-lib) は LoRAIro 側 ADR が SSoT。
+> 詳細仕様は [LoRAIro ADR 0023 — PydanticAI / LiteLLM WebAPI Inference Boundary](https://github.com/NEXTAltair/LoRAIro/blob/main/docs/decisions/0023-pydanticai-litellm-webapi-inference-boundary.md) を参照。
+> 関連 ISSUE: [#37 (ADR)](https://github.com/NEXTAltair/image-annotator-lib/issues/37) /
+> [#36 (Phase 1 実装)](https://github.com/NEXTAltair/image-annotator-lib/issues/36) /
+> [#35 (device 判定分離)](https://github.com/NEXTAltair/image-annotator-lib/issues/35)
 
-**Key Components:**
+**責務分離:**
 
-1. **PydanticAIProviderFactory** (`core/pydantic_ai_factory.py`):
-   - Manages Provider instances with object ID-based caching
-   - Creates and caches PydanticAI Agents with LRU strategy
-   - Handles provider-specific configurations (OpenRouter custom headers, etc.)
-   - Uses PydanticAI's built-in `infer_model()` and `infer_provider()` functions
+| 機能 | 担当 |
+|---|---|
+| WebAPI モデル discovery / capability metadata | LiteLLM 同梱 DB (runtime call、TOML キャッシュなし) |
+| 推論実行 / multimodal input / structured output / output retry | PydanticAI native provider/model |
+| LiteLLM ID と PydanticAI 実行 descriptor の mapping | `core/model_id.py` |
+| Schema → Result 変換 / 軽微正規化 | `core/result_adapter.py` |
+| PIL Image → BinaryContent 変換 | `core/image_preprocess.py` |
+| BaseAnnotator wrapping (direct LiteLLM ID + registry 登録 WebAPI) | `core/webapi_annotator.py` |
+| Agent 構築・実行 (キャッシュなし) | `core/provider_manager.py` |
 
-2. **ProviderManager** (`core/provider_manager.py`):
-   - Coordinates provider-level inference execution
-   - Determines appropriate provider from model IDs
-   - Routes inference requests to correct provider instances
-   - Manages model ID prefix handling (e.g., "openrouter:" prefix)
+**主要コンポーネント:**
 
-3. **PydanticAIAnnotatorMixin** (`core/pydantic_ai_factory.py`):
-   - Provides shared functionality for PydanticAI-based annotators
-   - Handles PIL Image → BinaryContent conversion
-   - Implements async inference with sync wrapper support
-   - Manages configuration loading and Agent setup
+1. **`core/model_id.py`** — LiteLLM ID から `PydanticAIModelRef` への変換 + provider object 構築
+   - `_BUILDER_DISPATCH` テーブルが `SUPPORTED_PROVIDERS` の真の source
+   - Phase 1 対応: OpenAI / Anthropic / Google (Gemini alias) / OpenRouter
+   - 未知 provider は `UnknownProviderError` で fail-fast
+   - API key は provider object に明示注入 (`os.environ` mutate なし)
 
-4. **PydanticAIWebAPIWrapper** (`api.py`):
-   - Provides backward compatibility with existing `annotate()` API
-   - Automatically detects PydanticAI annotators and routes to Provider Manager
-   - Converts Provider Manager results to standard AnnotationResult format
+2. **`core/provider_manager.py`** — 推論実行の中核
+   - `run_inference_with_model_async()`: async core 実装
+   - `run_inference_with_model()`: sync wrapper (running event loop 内では明示エラー)
+   - 推論呼び出しごとに Agent / Provider / Model を新規作成 (キャッシュなし)
+   - `litellm.supports_vision()` で実行直前 fail-fast
+   - PydanticAI: `await agent.run([prompt_text, binary_content])` の sequence 形式
+   - `output_retries=1` で structured output validation failure を 1 回再生成
 
-**Benefits:**
-- **Memory Efficiency**: Single Provider instance shared across multiple models
-- **Performance**: Agent caching with LRU strategy reduces initialization overhead
-- **Scalability**: Provider-level sharing supports large numbers of API models
-- **Flexibility**: Model ID override support for dynamic model selection
-- **Maintainability**: Centralized provider management and configuration
+3. **`core/webapi_annotator.py`** — `BaseAnnotator` 継承の汎用 wrapper
+   - direct LiteLLM ID (`google/gemini-...`) と registry 登録 WebAPI モデルの双方を扱う
+   - `BaseAnnotator.__init__` の `config_registry` 依存を回避するため最小限の field 設定
+   - `__enter__` / `__exit__` は no-op
 
-**Usage Pattern:**
+4. **`core/api_model_discovery.py`** — LiteLLM 同梱 DB の runtime query
+   - `discover_available_vision_models()` → `{"models": [...], "metadata": {...}}`
+   - `get_available_models()` / `list_all_models()` / `is_model_deprecated()` を helper として公開
+   - 旧 `available_api_models.toml` キャッシュ / TTL refresh / OpenRouter fallback は廃止
+
+**Exception 階層 (`exceptions/errors.py`):**
+- `WebApiError` (root)
+  - `IdMappingError` — litellm_model_id 解析失敗
+  - `UnknownProviderError` — `SUPPORTED_PROVIDERS` 外
+  - `MissingApiKeyError` — api_keys に該当 provider キーなし
+  - `VisionUnsupportedError` — `litellm.supports_vision()` False
+  - `InferenceError` — PydanticAI 実行時エラーの wrap
+
+**Usage Pattern (ADR 0023 Phase 1):**
 ```python
-# Traditional (inefficient for PydanticAI)
-model1 = AnthropicApiAnnotator("model1")  # Creates provider instance
-model2 = AnthropicApiAnnotator("model2")  # Creates another provider instance
+from image_annotator_lib import annotate
 
-# Provider-level (efficient)
-results = ProviderManager.run_inference_with_model(
-    model_name="model1",
-    images=images,
-    api_model_id="claude-3-5-sonnet"
-)  # Reuses shared Anthropic provider
+# direct LiteLLM ID 経由 (registry 登録不要)
+results = annotate(
+    images_list=[...],
+    model_name_list=["openai/gpt-4o", "anthropic/claude-3-5-sonnet-20241022"],
+    api_keys={"openai": "sk-...", "anthropic": "sk-ant-..."},
+)
 ```
 
 ### Tools and Utilities
