@@ -87,3 +87,21 @@ class TestGetModelCapabilities:
 
         # Should handle None as empty list and return empty set
         assert capabilities == set()
+
+    @patch("image_annotator_lib.core.registry.get_webapi_metadata")
+    def test_get_model_capabilities_webapi_returns_all_three(self, mock_get_webapi_metadata):
+        """WebAPI モデルは Vision LLM として tags/captions/scores 全 capability を返す。
+
+        WARNING ('capabilitiesが設定されていません') が ~80 件の WebAPI モデル
+        全件で出ていた問題の修正。SSoT (`_WEBAPI_MODEL_METADATA`) に登録済みなら
+        config_registry を見ずに即時全 capability を返す。
+        """
+        mock_get_webapi_metadata.return_value = {
+            "api_model_id": "openai/gpt-4o",
+            "provider": "openai",
+            "type": "webapi",
+        }
+
+        capabilities = get_model_capabilities("gpt-4o")
+
+        assert capabilities == {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
