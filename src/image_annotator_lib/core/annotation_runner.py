@@ -72,6 +72,12 @@ def _resolve_litellm_model_id(model_name: str) -> str | None:
 def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None = None) -> BaseAnnotator:
     """モデル名から annotator インスタンスを生成する。
 
+    探索順は **registry 優先 → direct LiteLLM ID** とする。これは LiteLLM の
+    OpenRouter 経由モデルが registry 上で `model_name_short = "openai/gpt-4o"` のような
+    slash 形式キーで登録される (実 `litellm_model_id` は `openrouter/openai/gpt-4o`)
+    ため、direct check を先回りさせると registry のメタデータを取りこぼし、誤った
+    プロバイダー / API key で実行される問題を回避するため (Codex review P1)。
+
     Args:
         model_name: モデル名。registry 登録名または `provider/model` 形式の LiteLLM ID。
         api_keys: WebAPI モデル用の provider -> API key dict (オプション)。
@@ -84,59 +90,59 @@ def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None 
     """
     logger.debug(f"Creating annotator instance for model: '{model_name}'")
 
-    # 1. Direct LiteLLM model id (例: "openai/gpt-4o", "google/gemini-2.5-pro")
+    # 1. registry を先にチェック (OpenRouter の slash 形式 model_name_short も吸収)
+    model_result = find_model_class_case_insensitive(model_name)
+    if model_result is not None:
+        actual_model_name, Annotator_class = model_result
+
+        # 1a. registry 登録 WebAPI モデル: metadata の litellm_model_id で WebApiAnnotator を構築
+        if _is_webapi_annotator_class(Annotator_class):
+            litellm_model_id = _resolve_litellm_model_id(actual_model_name)
+            if not litellm_model_id:
+                raise KeyError(
+                    f"Model '{actual_model_name}' is registered as WebAPI but has no "
+                    f"litellm_model_id / api_model_id in metadata"
+                )
+            logger.debug(
+                f"WebApiAnnotator (registry WebAPI): model={actual_model_name}, "
+                f"litellm_model_id={litellm_model_id}"
+            )
+            return WebApiAnnotator(
+                litellm_model_id=litellm_model_id,
+                api_keys=api_keys,
+                model_name=actual_model_name,
+            )
+
+        # 1b. registry 登録 ローカル ML モデル: 直接インスタンス化
+        instance = Annotator_class(model_name=actual_model_name)
+        logger.debug(
+            f"モデル '{model_name}' -> '{actual_model_name}' を直接インスタンス化 "
+            f"(クラス: {Annotator_class.__name__})"
+        )
+        return instance
+
+    # 2. registry に無く direct LiteLLM ID 形式なら direct dispatch
     if _is_litellm_direct_model_id(model_name):
         logger.debug(f"WebApiAnnotator (direct LiteLLM): {model_name}")
         return WebApiAnnotator(litellm_model_id=model_name, api_keys=api_keys)
 
-    # 2. registry に登録されたモデル名
-    model_result = find_model_class_case_insensitive(model_name)
-    if model_result is None:
-        registry = get_cls_obj_registry()
-        available_models = list(registry.keys())
-        try:
-            available_direct_models = get_available_models()
-        except Exception as exc:
-            logger.warning(f"LiteLLM 直接モデル一覧の取得に失敗: {exc}")
-            available_direct_models = []
-        error_details = {
-            "requested_model": model_name,
-            "registry_models_count": len(available_models),
-            "direct_models_count": len(available_direct_models),
-            "registry_sample": available_models[:5],
-            "direct_models_sample": available_direct_models[:5],
-        }
-        logger.error(f"Model resolution failed: {error_details}")
-        raise KeyError(f"Model '{model_name}' not found in registry or available LiteLLM models.")
-
-    actual_model_name, Annotator_class = model_result
-    effective_model_name = actual_model_name
-
-    # 3. registry 登録 WebAPI モデル: WebApiAnnotator にラップして実行する
-    if _is_webapi_annotator_class(Annotator_class):
-        litellm_model_id = _resolve_litellm_model_id(effective_model_name)
-        if not litellm_model_id:
-            raise KeyError(
-                f"Model '{effective_model_name}' is registered as WebAPI but has no "
-                f"litellm_model_id / api_model_id in metadata"
-            )
-        logger.debug(
-            f"WebApiAnnotator (registry WebAPI): model={effective_model_name}, "
-            f"litellm_model_id={litellm_model_id}"
-        )
-        return WebApiAnnotator(
-            litellm_model_id=litellm_model_id,
-            api_keys=api_keys,
-            model_name=effective_model_name,
-        )
-
-    # 4. registry 登録 ローカル ML モデル: 既存通り直接インスタンス化
-    instance = Annotator_class(model_name=effective_model_name)
-    logger.debug(
-        f"モデル '{model_name}' -> '{effective_model_name}' を直接インスタンス化 "
-        f"(クラス: {Annotator_class.__name__})"
-    )
-    return instance
+    # 3. どちらでもない → KeyError
+    registry = get_cls_obj_registry()
+    available_models = list(registry.keys())
+    try:
+        available_direct_models = get_available_models()
+    except Exception as exc:
+        logger.warning(f"LiteLLM 直接モデル一覧の取得に失敗: {exc}")
+        available_direct_models = []
+    error_details = {
+        "requested_model": model_name,
+        "registry_models_count": len(available_models),
+        "direct_models_count": len(available_direct_models),
+        "registry_sample": available_models[:5],
+        "direct_models_sample": available_direct_models[:5],
+    }
+    logger.error(f"Model resolution failed: {error_details}")
+    raise KeyError(f"Model '{model_name}' not found in registry or available LiteLLM models.")
 
 
 def get_annotator_instance(model_name: str, api_keys: dict[str, str] | None = None) -> Any:
