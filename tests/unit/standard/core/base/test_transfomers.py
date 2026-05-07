@@ -122,18 +122,9 @@ def test_format_predictions_no_batch_decode():
 
 
 # --- _generate_tags ---
-@pytest.mark.standard
-def test_generate_tags_str():
-    annotator = DummyTransformersAnnotator("dummy-model")
-    out = annotator._generate_tags("caption")
-    assert out == ["caption"]
-
-
-@pytest.mark.standard
-def test_generate_tags_not_str():
-    annotator = DummyTransformersAnnotator("dummy-model")
-    out = annotator._generate_tags(["a", "b"])
-    assert out == []
+# Phase 1 (ADR 0023) で TransformersBaseAnnotator._generate_tags メソッドは廃止された。
+# (UnifiedAnnotationResult を _format_predictions で直接構築するため)。
+# test_generate_tags_str / test_generate_tags_not_str は dead test として削除。
 
 
 # --- 例外系 ---

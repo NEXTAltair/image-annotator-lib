@@ -2,7 +2,9 @@
 
 Codex review P1 (https://github.com/NEXTAltair/image-annotator-lib/pull/38#discussion_r3203496580)
 で指摘された「registry の OpenRouter エントリが direct LiteLLM dispatch に奪われる」問題の
-regression test。
+regression test。Issue #35 で `_is_webapi_annotator_class` が
+`issubclass(cls, WebApiAnnotator)` 判定に変わったため、stub class も
+`WebApiAnnotator` 由来であることを直接 registry 値として使う。
 """
 
 from __future__ import annotations
@@ -11,17 +13,6 @@ import pytest
 
 from image_annotator_lib.core import annotation_runner
 from image_annotator_lib.core.webapi_annotator import WebApiAnnotator
-
-
-class _StubPydanticAIWebAPIAnnotator:
-    """`_is_webapi_annotator_class` がクラス名で判定するための stub。
-
-    Python ではクラス body 内の ``__name__ = ...`` はインスタンス属性扱いになるため、
-    クラス自体の ``__name__`` をクラス定義後に明示的に上書きする。
-    """
-
-
-_StubPydanticAIWebAPIAnnotator.__name__ = "PydanticAIWebAPIAnnotator"
 
 
 class _StubLocalAnnotator:
@@ -44,7 +35,7 @@ class TestCreateAnnotatorInstanceLookupOrder:
             annotation_runner,
             "find_model_class_case_insensitive",
             lambda name: (
-                ("openai/gpt-4o", _StubPydanticAIWebAPIAnnotator) if name == "openai/gpt-4o" else None
+                ("openai/gpt-4o", WebApiAnnotator) if name == "openai/gpt-4o" else None
             ),
         )
         monkeypatch.setattr(
@@ -69,7 +60,7 @@ class TestCreateAnnotatorInstanceLookupOrder:
         monkeypatch.setattr(
             annotation_runner,
             "find_model_class_case_insensitive",
-            lambda name: ("legacy-name", _StubPydanticAIWebAPIAnnotator) if name == "legacy-name" else None,
+            lambda name: ("legacy-name", WebApiAnnotator) if name == "legacy-name" else None,
         )
         monkeypatch.setattr(
             annotation_runner,

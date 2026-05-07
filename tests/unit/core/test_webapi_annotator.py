@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from image_annotator_lib.core import utils
 from image_annotator_lib.core.types import TaskCapability
 from image_annotator_lib.core.webapi_annotator import WebApiAnnotator
 
@@ -49,3 +52,91 @@ class TestWebApiAnnotatorBasics:
         with annotator as ctx:
             assert ctx is annotator
         # __exit__ で例外なく抜ける
+
+
+class TestWebApiAnnotatorIssue35Regression:
+    """Issue #35 regression: WebAPI 経路で `determine_effective_device` が呼ばれない。"""
+
+    def test_init_does_not_invoke_determine_effective_device(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`WebApiAnnotator.__init__` 経由で CUDA 判定が走らないこと。
+
+        ADR 0023 Phase 1 (Issue #35) で WebAPI 経路は `BaseAnnotator.__init__` を
+        スキップする設計になった。さらに `BaseAnnotator.__init__` 自体からも
+        `_validate_device` 呼び出しが除去されたため、ローカル ML 系 base class を
+        経由しない `WebApiAnnotator` 構築では `determine_effective_device` 呼び出しは
+        構造的に発生しない。
+        """
+        call_count = {"n": 0}
+        original = utils.determine_effective_device
+
+        def spy(*args: object, **kwargs: object) -> str:
+            call_count["n"] += 1
+            return original(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(utils, "determine_effective_device", spy)
+
+        annotator = WebApiAnnotator(
+            litellm_model_id="google/gemini-2.5-pro",
+            api_keys={"google": "fake-key"},
+        )
+
+        assert annotator.device == "api"
+        assert call_count["n"] == 0, (
+            "WebApi 経路で determine_effective_device が呼ばれてはならない (Issue #35)"
+        )
+
+    def test_base_annotator_init_does_not_invoke_determine_effective_device(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`BaseAnnotator.__init__` 単独でも `determine_effective_device` を呼ばない。
+
+        device 判定はローカル ML 系 base class (`TransformersBaseAnnotator` 等) の
+        責務として分離された (Issue #35)。`BaseAnnotator` 直系の test stub では
+        device は None のまま残る。
+        """
+        from image_annotator_lib.core.base.annotator import BaseAnnotator
+        from image_annotator_lib.core.config import config_registry
+
+        # 最小限の config を登録 (LocalMLModelConfig は model_path を必須とするため指定する)
+        config_registry._merged_config_data["test-base-annotator-issue35"] = {
+            "device": "cuda",  # CUDA を要求しても判定が走らないことを確認
+            "model_path": "test/path",
+            "class": "TestStub",
+        }
+
+        call_count = {"n": 0}
+        original = utils.determine_effective_device
+
+        def spy(*args: object, **kwargs: object) -> str:
+            call_count["n"] += 1
+            return original(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(utils, "determine_effective_device", spy)
+
+        class _Stub(BaseAnnotator):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def _preprocess_images(self, images):
+                return images
+
+            def _run_inference(self, processed):
+                return []
+
+            def _format_predictions(self, raw_outputs):
+                return []
+
+        try:
+            annotator = _Stub("test-base-annotator-issue35")
+            # BaseAnnotator は device sentinel として空文字を保持する (subclass 未上書き状態)
+            assert annotator.device == ""
+            assert call_count["n"] == 0, (
+                "BaseAnnotator.__init__ で determine_effective_device が呼ばれてはならない (Issue #35)"
+            )
+        finally:
+            config_registry._merged_config_data.pop("test-base-annotator-issue35", None)

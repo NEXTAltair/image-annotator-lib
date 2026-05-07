@@ -11,7 +11,23 @@ import tensorflow as tf
 from PIL import Image
 
 from image_annotator_lib.core.base.tensorflow import TensorflowBaseAnnotator
+from image_annotator_lib.core.config import config_registry
 from image_annotator_lib.exceptions.errors import OutOfMemoryError
+
+
+@pytest.fixture(autouse=True)
+def _register_test_model_config():
+    """`ConcreteTensorflowAnnotator("test-model")` の構築に必要な最小 config を登録する。"""
+    # `model_format` は LocalMLModelConfig の extra 禁止フィールドのため registry 直登録には含めない。
+    # `TensorflowBaseAnnotator.__init__` が config_registry.get(...) で別途取得する。
+    config_registry._merged_config_data["test-model"] = {
+        "class": "ConcreteTensorflowAnnotator",
+        "model_path": "/dummy/test/model.h5",
+        "device": "cpu",
+    }
+    yield
+    config_registry._merged_config_data.pop("test-model", None)
+
 
 # ==============================================================================
 # Test Helper

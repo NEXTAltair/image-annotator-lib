@@ -1,8 +1,12 @@
 """
 src/image_annotator_lib/core/base.py のユニットテスト。
+
+ADR 0023 Phase 1 (Issue #35): WebApiBaseAnnotator は廃止された。WebAPI の test は
+`tests/unit/core/test_webapi_annotator.py` を参照。本ファイルでは `BaseAnnotator` と
+ローカル ML 系 base class (`TransformersBaseAnnotator` 等) のみを扱う。
 """
 
-from typing import Any, Self
+from typing import Self
 from unittest.mock import Mock, patch
 
 import pytest
@@ -11,7 +15,6 @@ from PIL import Image
 # テスト対象のインポート
 from image_annotator_lib.core.base.annotator import BaseAnnotator
 from image_annotator_lib.core.base.transformers import TransformersBaseAnnotator
-from image_annotator_lib.core.base.webapi import WebApiBaseAnnotator
 from image_annotator_lib.core.config import ModelConfigRegistry
 from image_annotator_lib.exceptions.errors import (
     OutOfMemoryError,
@@ -100,43 +103,6 @@ def setup_test_transformers_config():
         pass
 
 
-@pytest.fixture(autouse=True, scope="class")
-def setup_test_webapi_config():
-    """Setup test model configuration for WebApiBaseAnnotator tests in this file."""
-    from image_annotator_lib.core.config import config_registry
-
-    # Use unique model name for webapi tests in test_base.py
-    test_model_name = "test_webapi_base_model"
-
-    # Cleanup first to ensure no leftover settings
-    try:
-        merged_data = getattr(config_registry, "_merged_config_data", {})
-        merged_data.pop(test_model_name, None)
-    except (AttributeError, KeyError):
-        pass
-
-    # Set up WebAPIModelConfig-compatible configuration (no model_path)
-    config = {
-        "device": "cpu",
-        "class": "ConcreteWebApiAnnotator",
-        "api_model_id": "test-api-model-id",
-        "model_name_on_provider": "test-provider-model",
-        "prompt_template": "Test prompt",
-        "timeout": 30,
-    }
-    for key, value in config.items():
-        config_registry.add_default_setting(test_model_name, key, value)
-
-    yield
-
-    # Cleanup after test
-    try:
-        merged_data = getattr(config_registry, "_merged_config_data", {})
-        merged_data.pop(test_model_name, None)
-    except (AttributeError, KeyError):
-        pass
-
-
 @pytest.fixture
 def mock_config_registry_fixture():
     """Provides a mock for the config_registry with a default test_model config."""
@@ -182,13 +148,8 @@ class ConcreteAnnotator(BaseAnnotator):
         return ["test_tag"]
 
 
-class ConcreteWebApiAnnotator(WebApiBaseAnnotator):
-    def __init__(self, model_name: str = "test_webapi_base_model"):
-        super().__init__(model_name)
-
-    def _run_inference(self, processed_images: list[str]) -> list[dict[str, Any]]:
-        # Dummy implementation for testing
-        return [{"tags": ["web_tag"]}] * len(processed_images)
+# ADR 0023 Phase 1 (Issue #35): ConcreteWebApiAnnotator は WebApiBaseAnnotator 継承で
+# あったため削除された。WebAPI の test は tests/unit/core/test_webapi_annotator.py 参照。
 
 
 # --- Tests ---
@@ -200,8 +161,10 @@ class TestBaseAnnotator:
         """正常な初期化のテスト。"""
         annotator = ConcreteAnnotator()
         assert annotator.model_name == "test_base_annotator_model"
-        assert annotator.device == "cpu"
-        # chunk_size is not a property of BaseAnnotator anymore
+        # ADR 0023 Phase 1 (Issue #35): BaseAnnotator.__init__ から device 判定が分離された
+        # ため、サブクラスが device を設定しない限り sentinel ("") が残る。本
+        # ConcreteAnnotator は ML 系 base class を経由しないため device は "" のまま。
+        assert annotator.device == ""
 
     @pytest.mark.unit
     def test_init_no_config_error(self):
@@ -247,51 +210,10 @@ class TestTransformersBaseAnnotator:
         assert annotator.max_length == 75  # default from config_registry.get(..., 75)
         assert annotator.processor_path is None  # default from config_registry.get(..., None)
 
-    @pytest.mark.unit
-    def test_generate_tags_logic(self):
-        """_generate_tags handles string and non-string inputs."""
-        annotator = TransformersBaseAnnotator("test_transformers_base_model")
-        assert annotator._generate_tags("tag1, tag2") == ["tag1, tag2"]
-        assert annotator._generate_tags(["tag1", "tag2"]) == []
-        assert annotator._generate_tags(123) == []
+    # ADR 0023 Phase 1: TransformersBaseAnnotator._generate_tags メソッドは廃止された
+    # (BaseAnnotator の `_format_predictions` で UnifiedAnnotationResult を直接構築するため)。
+    # test_generate_tags_logic はスコープ外として削除。
 
 
-class TestWebApiBaseAnnotator:
-    @pytest.mark.unit
-    def test_init(self):
-        """初期化のテスト。"""
-        annotator = ConcreteWebApiAnnotator()
-        assert annotator.prompt_template == "Test prompt"
-        assert annotator.timeout == 30
-
-    @pytest.mark.unit
-    @patch("base64.b64encode", return_value=b"encoded_data")
-    def test_preprocess_images(self, mock_b64):
-        """_preprocess_images correctly encodes images."""
-        annotator = ConcreteWebApiAnnotator()
-        mock_image = Mock(spec=Image.Image)
-        results = annotator._preprocess_images([mock_image])
-        assert results == ["encoded_data"]
-        mock_image.save.assert_called_once()
-
-    @pytest.mark.unit
-    def test_parse_common_json_response(self):
-        """Test parsing of common JSON responses."""
-        annotator = ConcreteWebApiAnnotator()
-        # Test with dict
-        result = annotator._parse_common_json_response({"tags": ["a"], "captions": ["b"], "score": 0.5})
-        assert result["annotation"]["tags"] == ["a"]
-        # Test with JSON string
-        result = annotator._parse_common_json_response('{"tags": ["b"], "captions": ["c"], "score": 0.6}')
-        assert result["annotation"]["tags"] == ["b"]
-        # Test with invalid JSON
-        result = annotator._parse_common_json_response("not json")
-        assert "JSON解析エラー" in result["error"]
-
-    @pytest.mark.unit
-    def test_extract_tags_from_text(self):
-        """Test tag extraction from various text formats."""
-        annotator = ConcreteWebApiAnnotator()
-        assert annotator._extract_tags_from_text('{"tags": ["a"]}') == ["a"]
-        assert annotator._extract_tags_from_text("tags: a, b, c") == ["a", "b", "c"]
-        assert annotator._extract_tags_from_text("a, b, c") == ["a", "b", "c"]
+# TestWebApiBaseAnnotator は ADR 0023 Phase 1 (Issue #35) で削除された。
+# WebAPI annotator の test は tests/unit/core/test_webapi_annotator.py 参照。

@@ -100,14 +100,6 @@ def mock_provider_manager():
         yield mock
 
 
-@pytest.fixture
-def mock_pydantic_ai_factory():
-    """PydanticAI Factory のモック"""
-    with patch("image_annotator_lib.core.pydantic_ai_factory.PydanticAIAgentFactory") as mock:
-        agent_mock = MagicMock()
-        agent_mock.run_sync.return_value = MagicMock(data={"tags": ["test"], "caption": "test"})
-
-        mock.get_provider.return_value = MagicMock()
-        mock.create_agent.return_value = agent_mock
-        mock.get_cached_agent.return_value = agent_mock
-        yield mock
+# ADR 0023 Phase 1 (Issue #35): mock_pydantic_ai_factory は対象クラス
+# (PydanticAIAgentFactory) ごと削除された。新仕様 (provider_manager.run_inference_with_model)
+# の mock fixture は必要な test ファイル側で個別に定義する。

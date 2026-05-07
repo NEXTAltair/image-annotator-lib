@@ -22,7 +22,10 @@ from PIL import Image
 
 from image_annotator_lib.core.base.pipeline import PipelineBaseAnnotator
 from image_annotator_lib.core.base.transformers import TransformersBaseAnnotator
-from image_annotator_lib.core.base.webapi import WebApiBaseAnnotator
+
+# ADR 0023 Phase 1 (Issue #35): WebApiBaseAnnotator は廃止された。WebAPI の lifecycle test は
+# `tests/unit/core/test_webapi_annotator.py` を参照。本ファイルではローカル ML 系 base
+# class (Pipeline / Transformers) のライフサイクルテストのみを扱う。
 
 
 # Test-specific concrete implementations
@@ -40,21 +43,6 @@ class ConcreteTestTransformersAnnotator(TransformersBaseAnnotator):
     def _generate_tags(self, formatted_output: Any) -> list[str]:
         """Generate tags from formatted output."""
         return ["test_tag_transformers"]
-
-
-class ConcreteTestWebApiAnnotator(WebApiBaseAnnotator):
-    """Concrete WebAPI annotator for lifecycle testing."""
-
-    def _run_inference(self, processed: Any) -> Any:
-        """Run inference (required abstract method)."""
-        # WebAPI annotators don't use this method in typical flow
-        return processed
-
-    def _generate_tags(self, formatted_output: Any) -> list[str]:
-        """Generate tags from formatted output."""
-        if formatted_output and hasattr(formatted_output, "tags"):
-            return formatted_output.tags
-        return ["test_tag_webapi"]
 
 
 # ==============================================================================
@@ -210,58 +198,9 @@ class TestFullLifecycle:
 
             # Note: ModelLoad._MODEL_STATES tracking depends on real ModelLoad operations.
 
-    @pytest.mark.integration
-    @pytest.mark.fast_integration
-    def test_webapi_initialization_success(self, managed_config_registry):
-        """Test WebAPI annotator initialization (simplified).
-
-        NOTE: WebAPI annotators have complex __enter__/__exit__ logic
-        that requires external configuration files (available_api_models.toml).
-        This simplified test verifies basic initialization only.
-
-        REAL components:
-        - Real configuration loading
-        - Real config object creation
-
-        Scenario:
-        1. Create WebAPI annotator (__init__)
-        2. Verify configuration loaded correctly
-
-        Assertions:
-        - Annotator initialized successfully
-        - Configuration attributes accessible
-        - Runtime attributes initialized to None (set during __enter__)
-        """
-        # Setup: Configure WebAPI model
-        config = {
-            "class": "AnthropicApiAnnotator",
-            "model_name_on_provider": "claude-3-5-sonnet-latest",
-            "api_model_id": "anthropic:claude-3-5-sonnet-latest",
-            "api_key": "test_api_key_lifecycle",
-            "timeout": 30,
-            "retry_count": 1,
-        }
-        managed_config_registry.set("lifecycle_webapi_model", config)
-
-        # Act: Create WebAPI annotator (initialization only)
-        annotator = ConcreteTestWebApiAnnotator(model_name="lifecycle_webapi_model")
-
-        # Assert: Annotator initialized correctly
-        assert annotator.model_name == "lifecycle_webapi_model"
-        assert annotator.timeout == 30
-        assert annotator._config.timeout == 30
-        assert annotator._config.retry_count == 1
-
-        # Assert: Runtime attributes not yet set (set during __enter__)
-        assert annotator.api_model_id is None, "__init__時点ではapi_model_idは未設定"
-        assert annotator.model_id_on_provider is None, "__init__時点ではmodel_id_on_providerは未設定"
-        assert annotator.provider_name is None, "__init__時点ではprovider_nameは未設定"
-        assert annotator.components is None, "__init__時点ではcomponentsは未設定"
-
-        # Note: Full context manager lifecycle (__enter__/__exit__) requires
-        # additional external configuration (available_api_models.toml).
-        # This test focuses on initialization, which is sufficient for
-        # verifying the configuration loading and basic setup.
+# NOTE: WebAPI annotator lifecycle test was removed in ADR 0023 Phase 1 (Issue #35).
+# `WebApiBaseAnnotator` was deprecated and replaced by `WebApiAnnotator` which has a
+# trivial no-op `__enter__`/`__exit__`. See `tests/unit/core/test_webapi_annotator.py`.
 
 
 # ==============================================================================
