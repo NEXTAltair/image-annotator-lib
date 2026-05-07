@@ -63,14 +63,14 @@ python example/example_lib.py
 
 The library follows a clean 3-layer architecture for annotators:
 
-1. **BaseAnnotator** (`core/base/annotator.py`) - Common interface and shared functionality
+1. **BaseAnnotator** (`core/base/annotator.py`) - Common interface and shared functionality. ADR 0023 Phase 1 (Issue #35) で device 判定はサブクラス責務に移譲済み。
 2. **Framework-specific base classes** - Located in `core/base/` directory:
-   - `core/base/webapi.py` - WebApiBaseAnnotator
    - `core/base/onnx.py` - ONNXBaseAnnotator
    - `core/base/transformers.py` - TransformersBaseAnnotator
    - `core/base/tensorflow.py` - TensorflowBaseAnnotator
    - `core/base/clip.py` - ClipBaseAnnotator
    - `core/base/pipeline.py` - PipelineBaseAnnotator
+   - WebAPI base class (`WebApiBaseAnnotator`) は ADR 0023 Phase 1 で廃止された。WebAPI 系は `core/webapi_annotator.py:WebApiAnnotator` 単独に統合されている。
 3. **Concrete model classes** - Specific implementations (WDTagger, AestheticScorer, etc.)
 
 ### Key Components
@@ -81,19 +81,16 @@ The library follows a clean 3-layer architecture for annotators:
 
 **Core Services:**
 - `ModelLoad` (`core/model_factory.py`) - Model loading, caching, and memory management with LRU strategy
-- `ModelRegistry` (`core/registry.py`) - Maps model names to implementation classes
+- `ModelRegistry` (`core/registry.py`) - Maps model names to implementation classes (WebAPI モデルは `WebApiAnnotator` 直接登録)
 - `ModelConfigRegistry` (`core/config.py`) - Configuration management with system/user config separation
-- `PydanticAIProviderFactory` (`core/pydantic_ai_factory.py`) - Provider-level Agent factory for PydanticAI WebAPI models
-- `ProviderManager` (`core/provider_manager.py`) - Manages provider-level instances for efficient PydanticAI usage
+- `WebApiAnnotator` (`core/webapi_annotator.py`) - 全 WebAPI プロバイダー (OpenAI / Anthropic / Google / OpenRouter) を統一処理する `BaseAnnotator` サブクラス。Agent / Provider / Model はキャッシュなし
+- `ProviderManager` (`core/provider_manager.py`) - LiteLLM ID から PydanticAI native provider/model を構築し推論実行 (ADR 0023 Phase 1 / async-first)
 
 **Model Categories:**
 - **Local ML Models**: ONNX, Transformers, TensorFlow, CLIP-based models
-- **Web API Models (PydanticAI-based)**: Located in `model_class/annotator_webapi/` directory:
-  - `anthropic_api.py` - AnthropicApiAnnotator (Provider-level with Agent caching)
-  - `google_api.py` - GoogleApiAnnotator (Provider-level with Agent caching)
-  - `openai_api_chat.py` - OpenAI & OpenRouter implementations (Provider-level)
-  - `openai_api_response.py` - Legacy OpenAI implementations
-  - `webapi_shared.py` - Shared WebAPI utilities and prompts
+- **Web API Models**: ADR 0023 Phase 1 で `WebApiAnnotator` (`core/webapi_annotator.py`) 1 種に統合。LiteLLM 同梱 DB から discovery され、provider 別ロジックは `provider_manager.py` 内に閉じる。
+  - 旧 `model_class/annotator_webapi/{anthropic_api,google_api,openai_api_chat,openai_api_response,pydantic_ai_unified}.py` および `model_class/pydantic_ai_webapi_annotator.py` は Phase 1.x (Issue #35) で削除済み。
+  - WebAPI 推論で使う prompt は `model_class/annotator_webapi/webapi_shared.py:BASE_PROMPT` (`provider_manager.py` から参照)。
 - **Specialized Models**: DeepDanbooru taggers, aesthetic scorers, captioning models
 
 **Key Design Principles:**
@@ -101,7 +98,7 @@ The library follows a clean 3-layer architecture for annotators:
 - pHash-based result mapping (image -> results) for robust batch processing
 - Memory-aware model loading with automatic cache management
 - Framework-agnostic base classes with shared functionality
-- **Provider-level resource sharing for PydanticAI WebAPI models** - Efficient Agent reuse across multiple inferences
+- **WebAPI 系は `WebApiAnnotator` 1 種に統一** - Agent / Provider / Model はキャッシュせず推論呼び出しごとに新規作成 (ADR 0023 Phase 1)
 
 ### Configuration System
 
@@ -124,21 +121,21 @@ The `ModelLoad` class implements sophisticated memory management:
 - **CUDA/CPU management** - Moves models between devices as needed
 - **Memory monitoring** - Uses psutil to check available system memory
 
-### Web API Integration
+### Web API Integration (ADR 0023 Phase 1 / Phase 1.x)
 
-**Provider-Level PydanticAI Architecture:**
-- `PydanticAIProviderFactory` manages Provider instances and Agent caching for efficiency
-- `ProviderManager` coordinates provider-level inference execution with model ID routing
-- Automatic provider detection (OpenAI, Anthropic, Google, OpenRouter) from model IDs
-- Shared Provider instances across multiple model requests for optimal resource usage
-- Agent caching with LRU strategy and configuration change detection
+**統一 WebAPI Architecture:**
+- `WebApiAnnotator` (`core/webapi_annotator.py`) — direct LiteLLM ID (`google/gemini-...`) と registry 登録 WebAPI モデル双方を扱う唯一の `BaseAnnotator` サブクラス
+- `ProviderManager` (`core/provider_manager.py`) — LiteLLM ID 解析 + PydanticAI native provider/model 構築 + 推論実行。`run_inference_with_model_async()` が中核実装、sync wrapper は running event loop 内で `InferenceError`
+- Agent / Provider / Model はキャッシュしない (推論呼び出しごとに毎回新規作成)
+- `os.environ` mutate 禁止: API key は `api_keys: dict[str, str]` 経由で provider object に明示注入のみ
+- LiteLLM `supports_vision()` で実行直前に fail-fast
 
 **Implementation Pattern:**
-- Base class `WebApiBaseAnnotator` with `PydanticAIAnnotatorMixin` for PydanticAI models
-- Provider-specific authentication and custom headers (e.g., OpenRouter referer/app_name)
+- 単一 base class `WebApiAnnotator` で OpenAI / Anthropic / Google / OpenRouter を統一処理
 - Structured output via Pydantic models (`AnnotationSchema` in `core/types.py`)
-- Robust error handling for rate limits, authentication, and response parsing
-- **API Model Discovery** (`core/api_model_discovery.py`) - Automatic discovery of available external API models
+- Provider 別差異 (`openrouter:` prefix 等) は `core/model_id.py` の `_BUILDER_DISPATCH` テーブルに集約
+- **API Model Discovery** (`core/api_model_discovery.py`) — LiteLLM 同梱 DB から runtime に WebAPI モデル一覧と capability metadata を取得 (TOML キャッシュなし)
+- WebAPI モデル登録は `core/registry.py:_register_webapi_models_from_discovery()` が `WebApiAnnotator` を直接 registry に entry する (旧 `PydanticAIWebAPIAnnotator` 経由は Phase 1.x で廃止)
 
 ### Test Architecture
 
@@ -184,12 +181,10 @@ estimated_size_gb = 1.5
 ### Development Guidelines
 
 **Adding New Models:**
-1. Create concrete class inheriting from appropriate framework base class
-2. For PydanticAI WebAPI models: inherit from `WebApiBaseAnnotator` + `PydanticAIAnnotatorMixin`
-3. Implement required abstract methods (`_generate_tags`, `_run_inference`, etc.)
-4. For PydanticAI models: implement `run_with_model()` method for provider-level execution
-5. Add model entry to `annotator_config.toml` with `api_model_id` for WebAPI models
-6. Add corresponding test in appropriate test directory
+1. **ローカル ML モデル**: 適切な framework base class (`TransformersBaseAnnotator` / `ONNXBaseAnnotator` / 等) を継承して実装
+2. **WebAPI モデル**: 通常は `WebApiAnnotator` (`core/webapi_annotator.py`) で自動対応される。LiteLLM 同梱 DB に登録された vision-capable モデルは `_register_webapi_models_from_discovery()` が起動時に自動 registry 登録する。LoRAIro 側からは `model_name_list=["openai/gpt-4o", ...]` のように直接 LiteLLM ID を渡せる。
+3. **新 provider 対応**: `core/model_id.py:_BUILDER_DISPATCH` テーブルに provider 別 builder を追加するだけで完結 (allowlist 編集不要)
+4. Add corresponding test in appropriate test directory
 
 **Code Style:**
 - Uses Ruff for linting/formatting (line length: 108)
@@ -203,16 +198,16 @@ estimated_size_gb = 1.5
 - Comprehensive error messages with context
 
 **Memory Considerations:**
-- All models should specify `estimated_size_gb` in config
-- Use `ModelLoad` for all model loading operations
-- For PydanticAI WebAPI models: Provider-level sharing reduces memory footprint
-- Consider device placement (CUDA vs CPU) based on model requirements
+- All models should specify `estimated_size_gb` in config (ローカル ML モデルのみ)
+- Use `ModelLoad` for all model loading operations (ローカル ML モデルのみ)
+- WebAPI モデルは cloud 推論のため device / memory 管理は不要 (`WebApiAnnotator.device = "api"`)
+- ローカル ML モデルは ML 系 base class (`TransformersBaseAnnotator` 等) が `__init__` で `determine_effective_device` を呼び CPU フォールバックを行う (Issue #35 で `BaseAnnotator` から責務移譲)
 
 **PydanticAI-Specific Guidelines:**
-- Use `PydanticAIProviderFactory.get_cached_agent()` for efficient Agent reuse
-- Implement `run_with_model()` for provider-level execution with model override support
-- Use `PydanticAIAnnotatorMixin._preprocess_images_to_binary()` for PIL→BinaryContent conversion
-- Provider instances are shared across models using the same provider and configuration
+- WebAPI 推論は `provider_manager.run_inference_with_model_async()` 経由で実行 (Agent / Provider / Model はキャッシュなし、毎回新規作成)
+- API key は `api_keys: dict[str, str]` 経由で provider object に明示注入 (`os.environ` mutate 禁止)
+- 画像入力は `core/image_preprocess.preprocess_images_to_binary()` で `BinaryContent` 化
+- Structured output は `await agent.run([prompt_text, binary_content])` の sequence 形式
 
 ### WebAPI Inference Architecture (ADR 0023 Phase 1)
 
