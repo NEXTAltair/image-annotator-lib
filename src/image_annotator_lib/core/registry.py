@@ -155,39 +155,52 @@ def _resolve_model_class(
     desired_class_name: str,
     model_name: str,
     available_classes: dict[str, type],
-    webapi_class: type | None,
     model_type_name: str,
 ) -> type | None:
-    """設定エントリからモデルクラスを解決する。
+    """設定エントリからモデルクラスを解決する (ローカル ML モデル専用)。
 
-    ADR 0023 Phase 1 (Issue #35): WebAPI 系は `WebApiAnnotator` 1 種に統一。
-    `PydanticAIWebAPIAnnotator` などの旧クラス名指定は obsolete として警告し
-    スキップする。
+    ADR 0023 Phase 1: WebAPI 用 user TOML override は **廃止** (LiteLLM 未登録モデルは
+    利用不可)。WebAPI モデルの registry 登録は `_register_webapi_models_from_discovery()`
+    が LiteLLM 同梱 DB から SSoT として行うため、本関数は **ローカル ML モデルの class
+    解決のみ** を担当する。
+
+    user TOML が `class = "WebApiAnnotator"` を指定した場合は、ADR 0023 の決定に従い
+    warning + skip する。`_register_webapi_models_from_discovery()` 経由では本関数は
+    呼ばれない (`WebApiAnnotator` を直接 `_try_register_model()` に渡すため)。
 
     Args:
         desired_class_name: 設定で指定されたクラス名。
         model_name: ログ用のモデル名。
         available_classes: スキャン済みの利用可能なクラス辞書。
-        webapi_class: `WebApiAnnotator` クラス (なければ None)。
         model_type_name: ログ用のモデルタイプ名。
 
     Returns:
         解決されたモデルクラス、またはスキップすべき場合はNone。
     """
-    # WebAPIクラスは統一実装 (`WebApiAnnotator`) を使用
-    if desired_class_name == "WebApiAnnotator" and webapi_class:
-        logger.debug(f"WebAPI モデル '{model_name}' に WebApiAnnotator 統一実装を使用")
-        return webapi_class
+    # ADR 0023 Phase 1 (Codex P1, PR #40): user TOML 経由の WebAPI モデル定義は禁止。
+    # WebApiAnnotator の registry 登録は LiteLLM 同梱 DB 由来の
+    # `_register_webapi_models_from_discovery()` が排他的に行うため、user TOML 側で
+    # `class = "WebApiAnnotator"` を指定しても registry には載せない (broken path 防止)。
+    if desired_class_name == "WebApiAnnotator":
+        logger.warning(
+            f"モデル '{model_name}' で `class = 'WebApiAnnotator'` が user TOML から指定されています。"
+            f"ADR 0023 Phase 1 以降、WebAPI モデル定義は LiteLLM 同梱 DB が SSoT で、"
+            f"user TOML 経由の WebAPI モデル定義はサポート対象外です。"
+            f"LiteLLM DB に登録されたモデル ID (例: 'openai/gpt-4o') を直接 model_name に "
+            f"指定してください。本エントリはスキップします。"
+        )
+        return None
 
     # 古いプロバイダー固有クラス・PydanticAIWebAPIAnnotator は警告してスキップ
     if _is_obsolete_annotator_class(desired_class_name):
         logger.warning(
             f"モデル '{model_name}' で旧クラス '{desired_class_name}' が指定されています。"
-            f"ADR 0023 Phase 1 以降はすべての WebAPI モデルで 'WebApiAnnotator' を使用してください。スキップします。"
+            f"ADR 0023 Phase 1 以降は WebAPI モデル定義に user TOML を使用しません "
+            f"(LiteLLM DB 由来の自動登録のみサポート)。スキップします。"
         )
         return None
 
-    # 非WebAPIクラス(ローカルMLモデルなど)は従来通りの処理
+    # ローカル ML モデルの class 解決
     model_cls = available_classes.get(desired_class_name)
     if model_cls is None:
         logger.warning(
@@ -272,9 +285,10 @@ def _register_models(
         available_classes = _gather_available_classes(directory)
         logger.debug(f"{len(available_classes)} 個の利用可能な {model_type_name} クラスが見つかりました")
 
-        # ADR 0023 Phase 1 (Issue #35): WebApiAnnotator は core/webapi_annotator.py に
-        # 配置されており model_class ディレクトリのスキャン対象外なので直接 import する。
-        from .webapi_annotator import WebApiAnnotator as _webapi_class
+        # ADR 0023 Phase 1 (Codex P1, PR #40): WebAPI モデルは _register_webapi_models_from_discovery()
+        # が LiteLLM 同梱 DB から SSoT として登録するため、`_register_models()` 経由で
+        # user TOML の `class = "WebApiAnnotator"` を解決することはない (本ループは
+        # ローカル ML モデルの解決のみを担当する)。
 
         for model_name, model_config in config.items():
             desired_class_name = model_config.get("class")
@@ -285,7 +299,7 @@ def _register_models(
                 continue
 
             model_cls = _resolve_model_class(
-                desired_class_name, model_name, available_classes, _webapi_class, model_type_name
+                desired_class_name, model_name, available_classes, model_type_name
             )
             if model_cls is None:
                 continue

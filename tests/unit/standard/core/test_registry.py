@@ -62,15 +62,18 @@ def test_is_obsolete_annotator_class_false_for_non_api():
 
 @pytest.mark.unit
 @pytest.mark.fast
-def test_resolve_model_class_webapi_annotator():
-    """WebApiAnnotator が指定された場合、統一実装が返される。"""
-    mock_webapi_class = type("WebApiAnnotator", (), {})
+def test_resolve_model_class_webapi_annotator_from_user_toml_is_rejected():
+    """ADR 0023 Phase 1 (Codex P1, PR #40): user TOML 経由の `class = "WebApiAnnotator"`
+    指定は registry に登録されない (broken path 防止)。
+
+    WebApiAnnotator の registry 登録は LiteLLM 同梱 DB 由来の
+    `_register_webapi_models_from_discovery()` が排他的に行うため、user TOML から
+    指定された場合は warning + skip する。
+    """
     available = {"SomeLocal": type("SomeLocal", (), {})}
 
-    result = registry._resolve_model_class(
-        "WebApiAnnotator", "test-model", available, mock_webapi_class, "annotator"
-    )
-    assert result is mock_webapi_class
+    result = registry._resolve_model_class("WebApiAnnotator", "test-model", available, "annotator")
+    assert result is None
 
 
 @pytest.mark.unit
@@ -79,11 +82,11 @@ def test_resolve_model_class_obsolete_returns_none():
     """古いプロバイダー固有クラス・PydanticAIWebAPIAnnotator が指定された場合、None が返される。"""
     available = {"OpenAIApiAnnotator": type("OpenAIApiAnnotator", (), {})}
 
-    result = registry._resolve_model_class("OpenAIApiAnnotator", "test-model", available, None, "annotator")
+    result = registry._resolve_model_class("OpenAIApiAnnotator", "test-model", available, "annotator")
     assert result is None
 
     result = registry._resolve_model_class(
-        "PydanticAIWebAPIAnnotator", "test-model", available, None, "annotator"
+        "PydanticAIWebAPIAnnotator", "test-model", available, "annotator"
     )
     assert result is None
 
@@ -95,7 +98,7 @@ def test_resolve_model_class_local_model():
     local_cls = type("LocalMLAnnotator", (), {})
     available = {"LocalMLAnnotator": local_cls}
 
-    result = registry._resolve_model_class("LocalMLAnnotator", "test-model", available, None, "annotator")
+    result = registry._resolve_model_class("LocalMLAnnotator", "test-model", available, "annotator")
     assert result is local_cls
 
 
@@ -103,7 +106,7 @@ def test_resolve_model_class_local_model():
 @pytest.mark.fast
 def test_resolve_model_class_not_found():
     """存在しないクラスが指定された場合、None が返される。"""
-    result = registry._resolve_model_class("NonExistentClass", "test-model", {}, None, "annotator")
+    result = registry._resolve_model_class("NonExistentClass", "test-model", {}, "annotator")
     assert result is None
 
 
