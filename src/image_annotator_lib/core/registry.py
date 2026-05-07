@@ -6,10 +6,9 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, TypeVar, cast
 
-from . import api_model_discovery
 from .api_model_discovery import is_allowed_provider
 from .base import BaseAnnotator
-from .config import AVAILABLE_API_MODELS_CONFIG_PATH, config_registry, load_available_api_models
+from .config import config_registry
 from .types import AnnotatorInfo, ModelType, TaskCapability
 from .utils import logger
 
@@ -503,10 +502,10 @@ def _resolve_registry_capabilities(model_name: str, is_api: bool) -> frozenset[T
     if is_api:
         # PydanticAIWebAPIAnnotator は AnnotationSchema (tags/captions/score) を返すため
         # 設定に capabilities が無くても全3種を申告する。
-        # SimplifiedAgentWrapper と同じ AnnotationSchema を使用するため同値を参照する。
-        from .simplified_agent_wrapper import SimplifiedAgentWrapper  # 循環 import 回避のため遅延
+        # WebApiAnnotator と同じ AnnotationSchema を使用するため同値を参照する。
+        from .webapi_annotator import WebApiAnnotator  # 循環 import 回避のため遅延
 
-        return SimplifiedAgentWrapper.ADVERTISED_CAPABILITIES
+        return WebApiAnnotator.ADVERTISED_CAPABILITIES
 
     return frozenset()
 
@@ -597,10 +596,11 @@ def _build_annotator_info_for_registry_model(
 def _build_annotator_info_for_direct_model(model_id: str) -> AnnotatorInfo:
     """PydanticAI 直接モデル (例: ``google/gemini-2.5-pro``) から AnnotatorInfo を構築する。
 
-    これらのモデルはレジストリには登録されておらず、SimplifiedAgentFactory 経由で
-    実行される。すべて WebAPI 呼び出しなので ``is_api=True``、device は持たない。
+    これらのモデルはレジストリには登録されておらず、`WebApiAnnotator` 経由で
+    実行される (ADR 0023 Phase 1)。すべて WebAPI 呼び出しなので ``is_api=True``、
+    device は持たない。
 
-    capabilities は SimplifiedAgentWrapper.ADVERTISED_CAPABILITIES を参照する。
+    capabilities は `WebApiAnnotator.ADVERTISED_CAPABILITIES` を参照する。
     申告値と実装が常に一致するよう、循環インポートを避けるため関数内で遅延 import する。
 
     Args:
@@ -608,14 +608,13 @@ def _build_annotator_info_for_direct_model(model_id: str) -> AnnotatorInfo:
 
     Returns:
         AnnotatorInfo: 型安全なメタデータ。model_type は "vision" 固定 (汎用 VLM)。
-        Phase 2 拡張で `provider` は model_id から推論、`api_model_id` は model_id 自体。
     """
-    from .simplified_agent_wrapper import SimplifiedAgentWrapper  # 循環 import 回避のため遅延
+    from .webapi_annotator import WebApiAnnotator  # 循環 import 回避のため遅延
 
     return AnnotatorInfo(
         name=model_id,
         model_type="vision",
-        capabilities=SimplifiedAgentWrapper.ADVERTISED_CAPABILITIES,
+        capabilities=WebApiAnnotator.ADVERTISED_CAPABILITIES,
         is_local=False,
         is_api=True,
         device=None,
@@ -717,18 +716,22 @@ def _is_annotation_compatible_webapi_model(model_id: str, model_info: dict[str, 
 
 
 def _register_webapi_models_from_discovery() -> None:
-    """available_api_models.toml を読み込み、WebAPI モデルをレジストリに直接登録する。
+    """LiteLLM 同梱 DB から WebAPI モデルをレジストリに直接登録する (ADR 0023 Phase 1)。
 
-    annotator_config.toml への書き込みを行わず、廃止済みモデルを除外する。
+    旧 `available_api_models.toml` 経由の登録は廃止。`discover_available_vision_models()`
+    の `metadata` (LiteLLM `get_model_info()` 由来) を直接使用する。
     """
-    logger.debug("available_api_models.toml から WebAPI モデルの直接登録を開始します...")
+    logger.debug("LiteLLM 同梱 DB から WebAPI モデルの直接登録を開始します...")
     try:
-        api_models = load_available_api_models()
+        from .api_model_discovery import discover_available_vision_models
+
+        result = discover_available_vision_models()
+        api_models: dict[str, dict[str, Any]] = result.get("metadata", {})
         if not api_models:
             logger.debug("利用可能な Web API モデル情報が見つかりません。登録をスキップします。")
             return
 
-        logger.debug(f"{len(api_models)} 件の Web API モデル情報をロードしました。")
+        logger.debug(f"{len(api_models)} 件の Web API モデル情報を取得しました。")
 
         available_classes = _gather_available_classes("model_class")
         pydantic_ai_class = available_classes.get("PydanticAIWebAPIAnnotator")
@@ -744,10 +747,7 @@ def _register_webapi_models_from_discovery() -> None:
                 logger.warning(f"モデルID '{model_id}' の情報形式が不正です。スキップします。")
                 continue
 
-            if not _is_annotation_compatible_webapi_model(model_id, model_info):
-                continue
             mode = model_info.get("mode", "chat")
-
             model_name_short = model_info.get("model_name_short")
             provider = model_info.get("provider")
 
@@ -762,21 +762,11 @@ def _register_webapi_models_from_discovery() -> None:
             ):
                 registered_count += 1
                 # `_WEBAPI_MODEL_METADATA` は WebAPI モデルメタデータの単一情報源 (SSoT)。
-                # `PydanticAIWebAPIAnnotator._build_agent_config` は `get_webapi_metadata()`
-                # 経由でこの辞書から `api_model_id` を取得する (config_registry に逆流注入しない)。
-                # `model_name_on_provider` は WebAPIModelConfig (Pydantic) の alias で、
-                # ``BaseAnnotator._load_config_from_registry`` が ``ModelConfigFactory.from_registry``
-                # で WebAPI 設定として認識するために必要 (本キー欠如時はローカル ML 扱いとなる)。
-                # Phase 2 (Issue #19/#26): AnnotatorInfo の詳細メタデータフィールドを SSoT に集約。
-                # max_output_tokens は TOML 由来値があれば採用、なければ 1800 default。
-                # estimated_size_gb は WebAPI モデルでは原則 None (ローカル ML 専用フィールド)。
-                # discontinued_at は active のみ登録するため None で明示 (deprecated は line 668 で skip)。
-                # provider は lowercase 正規化 (PR #27 Codex P2 反映):
-                #   `available_api_models.toml` は "OpenAI"/"Google" の display-case で記述されるが
-                #   `_infer_provider_from_model_id` の slash 経由出力は小文字 ("openai"/"google") のため
-                #   AnnotatorInfo.provider が混在する case-sensitive 不整合を解消する。
+                # ADR 0023 Phase 1 で `litellm_model_id` を正式キーにし、後方互換のため
+                # `api_model_id` も同値で残す (annotation_runner._resolve_litellm_model_id が双方を参照)。
                 metadata = {
                     "api_model_id": model_id,
+                    "litellm_model_id": model_id,
                     "model_name_on_provider": model_id,
                     "provider": str(provider).lower(),
                     "mode": mode,
@@ -817,49 +807,21 @@ def _register_webapi_models_from_discovery() -> None:
 
 
 def _discover_and_update_api_models(skip_api_discovery: bool) -> None:
-    """Web APIモデル情報の取得と設定ファイルの自動更新を行う。
+    """LiteLLM 同梱 DB から WebAPI モデル情報を取得し、registry に登録する (ADR 0023 Phase 1)。
+
+    旧 TOML cache / TTL refresh / OpenRouter fallback / background refresh はすべて廃止。
 
     Args:
         skip_api_discovery: Trueの場合、API検出をスキップする。
     """
-    ttl_expired = False
     if skip_api_discovery:
         logger.info(
             "環境変数 IMAGE_ANNOTATOR_SKIP_API_DISCOVERY=true のため、"
             "API モデル情報の取得をスキップします。"
         )
-    elif not AVAILABLE_API_MODELS_CONFIG_PATH.exists():
-        # 初回起動: 同期 fetch（後続の annotator_config 更新にデータが必要）
-        logger.info(f"{AVAILABLE_API_MODELS_CONFIG_PATH} が見つかりません。APIから最新情報を取得します...")
-        try:
-            api_model_discovery._fetch_and_update_vision_models()
-            logger.info(f"API からモデル情報を取得し、{AVAILABLE_API_MODELS_CONFIG_PATH} を更新しました。")
-        except Exception as api_e:
-            logger.error(f"API からのモデル情報取得中にエラーが発生しました: {api_e}", exc_info=True)
-            logger.warning(
-                "APIからのモデル情報取得に失敗したため、Web API モデルの自動設定は行われない可能性があります。"
-            )
-    elif api_model_discovery.should_refresh():
-        # TTL 超過: _update_config_with_api_models() のファイル読み取り後に起動する（書き込み競合を避けるため）
-        ttl_expired = True
-    else:
-        logger.debug("API モデル情報は TTL 内のため、既存キャッシュを使用します。")
+        return
 
-    # available_api_models.toml からWebAPIモデルをレジストリに直接登録
-    if AVAILABLE_API_MODELS_CONFIG_PATH.exists():
-        _register_webapi_models_from_discovery()
-    else:
-        logger.warning(
-            f"{AVAILABLE_API_MODELS_CONFIG_PATH} が存在しないため、Web API モデルの登録をスキップします。"
-        )
-
-    # ファイル読み取り完了後にバックグラウンド refresh を起動（read/write 競合を排除）
-    if ttl_expired:
-        api_model_discovery.trigger_background_refresh()
-        logger.info(
-            "TTL 超過のため API モデル情報の background refresh を起動しました。"
-            "次回起動時から最新モデル一覧が反映されます。"
-        )
+    _register_webapi_models_from_discovery()
 
 
 def initialize_registry() -> None:

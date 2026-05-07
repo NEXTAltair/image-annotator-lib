@@ -618,3 +618,153 @@ class InsufficientCreditsError(WebApiError):
 
         self.status_code = status_code
         super().__init__(message, provider_name, error_details)
+
+
+# ADR 0023 Phase 1: PydanticAI / LiteLLM WebAPI Inference Boundary
+# https://github.com/NEXTAltair/LoRAIro/blob/main/docs/decisions/0023-pydanticai-litellm-webapi-inference-boundary.md
+
+
+class IdMappingError(WebApiError):
+    """litellm_model_id の解析に失敗した場合の例外。
+
+    `core/model_id.resolve_model_ref()` が prefix 解析や builder dispatch に失敗した
+    ときに raise する。空文字 / `provider/model` 形式違反などが該当する。
+
+    Attributes:
+        litellm_model_id: 解析を試みた ID
+        reason: 解析失敗の理由
+    """
+
+    def __init__(
+        self,
+        litellm_model_id: str,
+        reason: str = "invalid format",
+        details: dict[str, Any] | None = None,
+    ):
+        error_details = details or {}
+        error_details["litellm_model_id"] = litellm_model_id
+        error_details["reason"] = reason
+
+        self.litellm_model_id = litellm_model_id
+        self.reason = reason
+        super().__init__(
+            f"Failed to parse litellm_model_id '{litellm_model_id}': {reason}",
+            provider_name="",
+            details=error_details,
+        )
+
+
+class UnknownProviderError(WebApiError):
+    """SUPPORTED_PROVIDERS に含まれない provider が指定された場合の例外。
+
+    Phase 1 では OpenAI / Anthropic / Google / OpenRouter のみ対応。Vertex AI / xAI
+    などは UnknownProviderError として弾く。
+
+    Attributes:
+        provider: 解析された provider 名
+        litellm_model_id: 元の ID
+    """
+
+    def __init__(
+        self,
+        provider: str,
+        litellm_model_id: str,
+        details: dict[str, Any] | None = None,
+    ):
+        error_details = details or {}
+        error_details["provider"] = provider
+        error_details["litellm_model_id"] = litellm_model_id
+
+        self.provider = provider
+        self.litellm_model_id = litellm_model_id
+        super().__init__(
+            f"Provider '{provider}' is not supported (litellm_model_id='{litellm_model_id}')",
+            provider_name=provider,
+            details=error_details,
+        )
+
+
+class MissingApiKeyError(WebApiError):
+    """api_keys dict に該当 provider のキーが含まれない場合の例外。
+
+    `ApiKeyMissingError` が環境変数ベースの欠落を示すのに対し、本例外は
+    ADR 0023 で定めた「明示注入のみ」契約上の欠落を示す。
+
+    Attributes:
+        provider: API key が必要な provider
+        litellm_model_id: 推論対象モデル
+    """
+
+    def __init__(
+        self,
+        provider: str,
+        litellm_model_id: str = "",
+        details: dict[str, Any] | None = None,
+    ):
+        error_details = details or {}
+        error_details["provider"] = provider
+        if litellm_model_id:
+            error_details["litellm_model_id"] = litellm_model_id
+
+        self.provider = provider
+        self.litellm_model_id = litellm_model_id
+        super().__init__(
+            f"API key for provider '{provider}' is missing in api_keys",
+            provider_name=provider,
+            details=error_details,
+        )
+
+
+class VisionUnsupportedError(WebApiError):
+    """LiteLLM の supports_vision() が False を返した場合の例外。
+
+    画像入力をサポートしない LLM (例: `openai/gpt-3.5-turbo`) を Vision モデルとして
+    使おうとした場合に、API 課金前に弾くために raise する。
+
+    Attributes:
+        litellm_model_id: 対象モデル ID
+    """
+
+    def __init__(
+        self,
+        litellm_model_id: str,
+        details: dict[str, Any] | None = None,
+    ):
+        error_details = details or {}
+        error_details["litellm_model_id"] = litellm_model_id
+
+        self.litellm_model_id = litellm_model_id
+        super().__init__(
+            f"Model '{litellm_model_id}' does not support vision input",
+            provider_name="",
+            details=error_details,
+        )
+
+
+class InferenceError(WebApiError):
+    """PydanticAI 実行時に発生したエラーをラップする例外。
+
+    HTTP error / validation failure / timeout などを `WebApiError` 階層に正規化する
+    ためのカテゴリ。`__cause__` に原因例外が設定される。
+
+    Attributes:
+        litellm_model_id: 推論対象モデル
+        cause: ラップされた原因例外 (オプション)
+    """
+
+    def __init__(
+        self,
+        message: str,
+        litellm_model_id: str = "",
+        cause: BaseException | None = None,
+        details: dict[str, Any] | None = None,
+    ):
+        error_details = details or {}
+        if litellm_model_id:
+            error_details["litellm_model_id"] = litellm_model_id
+        if cause is not None:
+            error_details["cause_type"] = type(cause).__name__
+
+        self.litellm_model_id = litellm_model_id
+        self.cause = cause
+        super().__init__(message, provider_name="", details=error_details)

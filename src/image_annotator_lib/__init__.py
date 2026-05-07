@@ -8,7 +8,12 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 from .api import PHashAnnotationResults as PHashAnnotationResults
 from .api import list_annotator_info
-from .core.api_model_discovery import discover_available_vision_models
+from .core.api_model_discovery import (
+    discover_available_vision_models,
+    get_available_models,
+    is_model_deprecated,
+    list_all_models,
+)
 from .core.config import config_registry
 from .core.constants import (
     AVAILABLE_API_MODELS_CONFIG_PATH,
@@ -21,17 +26,13 @@ from .core.registry import (
     initialize_registry,
     list_available_annotators,
 )
-from .core.simplified_agent_factory import (
-    create_agent,
-    get_available_models,
-    is_model_deprecated,
-    list_all_models,
-)
 from .core.types import AnnotationResult, AnnotatorInfo, ModelType
 from .core.utils import init_logger
 from .exceptions.errors import AnnotatorError, ModelLoadError, ModelNotFoundError, OutOfMemoryError
 
 # --- Public API ---
+# ADR 0023 Phase 1: create_agent は廃止 (SimplifiedAgentFactory 全廃)。
+# get_available_models / list_all_models / is_model_deprecated は LiteLLM runtime call に切替。
 __all__ = [
     "AVAILABLE_API_MODELS_CONFIG_PATH",
     "DEFAULT_PATHS",
@@ -48,7 +49,6 @@ __all__ = [
     "PHashAnnotationResults",
     "annotate",
     "config_registry",
-    "create_agent",
     "discover_available_vision_models",
     "get_available_models",
     "is_model_deprecated",
