@@ -46,17 +46,11 @@ def _is_litellm_direct_model_id(model_name: str) -> bool:
 def _is_webapi_annotator_class(annotator_class: type) -> bool:
     """registry 登録の WebAPI annotator クラスか判定する。
 
-    Phase 1 では既知の class 名で判定する (`PydanticAIWebAPIAnnotator` および
-    既存の provider 別ラッパー)。
+    ADR 0023 Phase 1 (Issue #35): WebAPI 系は `WebApiAnnotator` 1 種に統一されたため、
+    `issubclass(annotator_class, WebApiAnnotator)` で判定する。サブクラス継承での
+    test stub も自然に True になる。
     """
-    webapi_class_names = {
-        "PydanticAIWebAPIAnnotator",
-        "AnthropicApiAnnotator",
-        "GoogleApiAnnotator",
-        "OpenAIApiAnnotator",
-        "OpenRouterApiAnnotator",
-    }
-    return annotator_class.__name__ in webapi_class_names
+    return issubclass(annotator_class, WebApiAnnotator)
 
 
 def _resolve_litellm_model_id(model_name: str) -> str | None:

@@ -48,9 +48,13 @@ class WebApiAnnotator(BaseAnnotator):
             model_name: registry 登録済モデル名 (registry 経由の場合に渡す)。
                 省略時は `litellm_model_id` をモデル名として扱う (direct model registration)。
         """
-        # NOTE: BaseAnnotator.__init__ は config_registry / determine_effective_device に
-        # 依存するが、direct model 登録ルートでは registry に entry が無いため、
-        # 最小限の属性設定のみを行う。
+        # ADR 0023 Phase 1 / Issue #35:
+        # - direct LiteLLM ID 経路 (`google/gemini-...` 等) では config_registry に entry が
+        #   無いため、`BaseAnnotator.__init__` (内部で `_load_config_from_registry` を
+        #   呼び得る) を踏まずに必要最小限の attribute のみを設定する。
+        # - device 判定はローカル ML 系 base class (Transformers / ONNX / TF / CLIP /
+        #   Pipeline) の責務として分離されており (Issue #35)、本クラスは "api" 固定。
+        # - Agent / Provider / Model はキャッシュしない (ADR 0023)。
         self.model_name = model_name or litellm_model_id
         self.litellm_model_id = litellm_model_id
         self.api_keys = api_keys

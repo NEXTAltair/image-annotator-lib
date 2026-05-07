@@ -133,12 +133,13 @@ class RawOutput(TypedDict, total=False):
     error: str | None
 
 
-# Web API Annotator 用の型定義を追加
+# Web API Annotator 用の型定義
+# Note: ADR 0023 Phase 1 (Issue #35) で WebApiBaseAnnotator は廃止された。本型は
+# `prototypes/` 配下や test fixture のみで参照される dead type の可能性があるが、
+# `LoaderComponents` 共用体との整合維持のため残置している。types.py 全体の整理は
+# 別 issue で実施する。
 class WebApiFormattedOutput(TypedDict):
-    """
-    WebApiBaseAnnotator._format_predictions の戻り値の型定義。
-
-    _run_inferenceの戻り値(RawOutput型)を、後続処理･テスト･外部インターフェース用に整形した結果を格納します。
+    """整形済み WebAPI 出力の型定義 (旧 `WebApiBaseAnnotator` 由来)。
 
     Attributes:
         annotation: 解析されたアノテーション情報(タグ、キャプション、スコア等)を含むdict型。
