@@ -10,6 +10,7 @@ mutate しない (`api_keys` 経由の明示注入のみ)。
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 import litellm
@@ -175,6 +176,15 @@ class ProviderManager:
         raise MissingApiKeyError(provider=provider)
 
 
+# `finish_reason`/`finishReason` (Google) や `stop_reason`/`stopReason` (Anthropic) は
+# snake_case と camelCase / 区切りに `:` と `=` 双方が混在する。`.lower()` 後の
+# camelCase は `finishreason` 等になるため、正規表現 `finish_?reason\s*[:=]\s*safety`
+# で 4 通り (snake_case/camelCase x `:`/`=`) を一括カバーする。
+_FINISH_REASON_SAFETY_RE = re.compile(r"finish_?reason\s*[:=]\s*safety")
+_STOP_REASON_REFUSAL_RE = re.compile(r"stop_?reason\s*[:=]\s*refusal")
+_FINISH_REASON_CONTENT_FILTER_RE = re.compile(r"finish_?reason\s*[:=]\s*content_filter")
+
+
 def _classify_refusal(
     exc: BaseException,
     litellm_model_id: str,
@@ -184,11 +194,14 @@ def _classify_refusal(
 
     検出パターン (ADR 0023 Phase 1.5):
     - exception type 名に "ContentFilter" 含む (OpenAI) → ContentPolicyRefusalError
-    - exception message に "content_filter" 含む → ContentPolicyRefusalError
+    - exception message に "content_filter" 含む / `finish_reason=content_filter`
+      系の signature → ContentPolicyRefusalError
     - exception type 名に "Refusal" 含む (Anthropic) → SafetyRefusalError
-    - exception message の signature 検査:
-      - "stop_reason=refusal" / "stop_reason: refusal" → SafetyRefusalError
-      - "finishreason: safety" / "finish_reason=safety" → SafetyRefusalError
+    - exception message の signature 検査 (case-insensitive、snake_case/camelCase
+      および区切り `:`/`=` を正規表現で吸収):
+      - `stop_reason=refusal` / `stopReason: refusal` 等 → SafetyRefusalError
+      - `finish_reason=safety` / `finishReason=SAFETY` / `finishReason: SAFETY` 等
+        → SafetyRefusalError
       - "blocked due to safety" / "blockedreason" → SafetyRefusalError
     - 該当しなければ None (caller が generic error として扱う)
 
@@ -207,14 +220,16 @@ def _classify_refusal(
     exc_message = str(exc).lower()
 
     # ContentPolicy (OpenAI 系の content_filter) を優先判定
-    is_content_filter = "contentfilter" in exc_type_name or "content_filter" in exc_message
+    is_content_filter = (
+        "contentfilter" in exc_type_name
+        or "content_filter" in exc_message
+        or _FINISH_REASON_CONTENT_FILTER_RE.search(exc_message) is not None
+    )
 
     is_safety_refusal = (
         "refusal" in exc_type_name
-        or "stop_reason=refusal" in exc_message
-        or "stop_reason: refusal" in exc_message
-        or "finishreason: safety" in exc_message
-        or "finish_reason=safety" in exc_message
+        or _STOP_REASON_REFUSAL_RE.search(exc_message) is not None
+        or _FINISH_REASON_SAFETY_RE.search(exc_message) is not None
         or "blocked due to safety" in exc_message
         or "blockedreason" in exc_message
     )

@@ -100,6 +100,70 @@ def test_classify_refusal_google_blocked_due_to_safety():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Response blocked. finishReason=SAFETY",  # camelCase + `=` (Codex P1: PR #44)
+        "Response blocked. finishreason=safety",  # camelCase lowercased + `=`
+        "finishReason: SAFETY",  # camelCase + `:`
+        "finish_reason: SAFETY",  # snake_case + `:`
+        "finish_reason=safety",  # snake_case + `=`
+        "Generation halted due to finishReason=SAFETY in candidate",  # in-context
+    ],
+)
+def test_classify_refusal_finish_reason_safety_variants(message: str) -> None:
+    """`finishReason=SAFETY` の全 variant (snake_case/camelCase x `:`/`=`) をカバーする。
+
+    Codex P1 review (PR #44): camelCase + `=` の signature が漏れていた回帰防止。
+    """
+    classified = _classify_refusal(
+        Exception(message),
+        litellm_model_id="google/gemini-2.0-flash-lite",
+        image_phash="phash_finish_reason",
+    )
+    assert isinstance(classified, SafetyRefusalError), f"variant 取りこぼし: {message!r}"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "message",
+    [
+        "stop_reason=refusal",  # snake_case + `=`
+        "stop_reason: refusal",  # snake_case + `:`
+        "stopReason=refusal",  # camelCase + `=`
+        "stopReason: refusal",  # camelCase + `:`
+    ],
+)
+def test_classify_refusal_stop_reason_refusal_variants(message: str) -> None:
+    """`stop_reason=refusal` の全 variant (snake_case/camelCase x `:`/`=`) をカバー。"""
+    classified = _classify_refusal(
+        Exception(message),
+        litellm_model_id="anthropic/claude-3-5-sonnet-20241022",
+        image_phash="phash_stop_reason",
+    )
+    assert isinstance(classified, SafetyRefusalError), f"variant 取りこぼし: {message!r}"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "message",
+    [
+        "finish_reason=content_filter",  # snake_case + `=`
+        "finishReason=content_filter",  # camelCase + `=`
+        "finishReason: content_filter",  # camelCase + `:`
+    ],
+)
+def test_classify_refusal_finish_reason_content_filter_variants(message: str) -> None:
+    """`finish_reason=content_filter` の variant も ContentPolicyRefusalError に分類。"""
+    classified = _classify_refusal(
+        Exception(message),
+        litellm_model_id="openai/gpt-4o",
+        image_phash="phash_content_filter",
+    )
+    assert isinstance(classified, ContentPolicyRefusalError), f"variant 取りこぼし: {message!r}"
+
+
+@pytest.mark.unit
 def test_classify_refusal_non_refusal_returns_none():
     """非 refusal 例外 (TimeoutError 等) → None"""
     exc = TimeoutError("connection timeout after 30s")
