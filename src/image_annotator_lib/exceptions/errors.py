@@ -768,3 +768,84 @@ class InferenceError(WebApiError):
         self.litellm_model_id = litellm_model_id
         self.cause = cause
         super().__init__(message, provider_name="", details=error_details)
+
+
+class SafetyRefusalError(WebApiError):
+    """Provider が safety refusal を返した場合の例外。
+
+    OpenAI: finish_reason="content_filter"
+    Anthropic: stop_reason="refusal"
+    Google Gemini: finishReason="SAFETY" / BlockedReason
+    OpenRouter: 各 upstream provider の refusal を踏襲
+
+    ADR 0023 Phase 1.5 (Issue #42): retry しない / Rating テーブルは使わない /
+    LoRAIro 側 error_records に記録して以後の WebAPI annotation 対象から除外。
+
+    Attributes:
+        litellm_model_id: 拒否したモデル ID
+        image_phash: 拒否された画像の pHash (空文字許可)
+        provider_refusal_reason: provider 固有の refusal 理由文字列 (空文字許可)
+    """
+
+    def __init__(
+        self,
+        litellm_model_id: str,
+        image_phash: str = "",
+        provider_refusal_reason: str = "",
+        details: dict[str, Any] | None = None,
+    ):
+        error_details = details or {}
+        error_details["litellm_model_id"] = litellm_model_id
+        if image_phash:
+            error_details["image_phash"] = image_phash
+        if provider_refusal_reason:
+            error_details["provider_refusal_reason"] = provider_refusal_reason
+
+        self.litellm_model_id = litellm_model_id
+        self.image_phash = image_phash
+        self.provider_refusal_reason = provider_refusal_reason
+        super().__init__(
+            f"Safety refusal from '{litellm_model_id}': {provider_refusal_reason or 'no reason'}",
+            provider_name="",
+            details=error_details,
+        )
+
+
+class ContentPolicyRefusalError(WebApiError):
+    """Provider が content policy refusal を返した場合の例外。
+
+    SafetyRefusalError と同じ attribute 構造。主に OpenAI の content_filter
+    finish_reason を分類する用途。その他 provider の generic refusal は
+    SafetyRefusalError に寄せる。
+
+    ADR 0023 Phase 1.5 (Issue #42): SafetyRefusalError と同じ contract で
+    retry せず error_records に記録 → 送信前 filter で除外。
+
+    Attributes:
+        litellm_model_id: 拒否したモデル ID
+        image_phash: 拒否された画像の pHash (空文字許可)
+        provider_refusal_reason: provider 固有の refusal 理由文字列 (空文字許可)
+    """
+
+    def __init__(
+        self,
+        litellm_model_id: str,
+        image_phash: str = "",
+        provider_refusal_reason: str = "",
+        details: dict[str, Any] | None = None,
+    ):
+        error_details = details or {}
+        error_details["litellm_model_id"] = litellm_model_id
+        if image_phash:
+            error_details["image_phash"] = image_phash
+        if provider_refusal_reason:
+            error_details["provider_refusal_reason"] = provider_refusal_reason
+
+        self.litellm_model_id = litellm_model_id
+        self.image_phash = image_phash
+        self.provider_refusal_reason = provider_refusal_reason
+        super().__init__(
+            f"Content policy refusal from '{litellm_model_id}': {provider_refusal_reason or 'no reason'}",
+            provider_name="",
+            details=error_details,
+        )

@@ -17,8 +17,10 @@ from PIL import Image
 from pydantic_ai import Agent
 
 from ..exceptions.errors import (
+    ContentPolicyRefusalError,
     InferenceError,
     MissingApiKeyError,
+    SafetyRefusalError,
     VisionUnsupportedError,
 )
 from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
@@ -91,6 +93,20 @@ class ProviderManager:
                 run_result = await agent.run([_USER_PROMPT_TEXT, binary])
                 results[phash] = to_annotation_result(run_result.output, phash)
             except Exception as exc:
+                refusal_exc = _classify_refusal(exc, litellm_model_id, phash)
+                if refusal_exc is not None:
+                    # ADR 0023 Phase 1.5 (Issue #42): UnifiedAnnotationResult.error に
+                    # exception type 名 prefix で構造的伝搬。LoRAIro 側で error_records に
+                    # decode する (annotation_save_service)。
+                    logger.warning(
+                        f"WebAPI safety refusal: model={model_name}, "
+                        f"litellm_model_id={litellm_model_id}, phash={phash}, "
+                        f"reason={refusal_exc.provider_refusal_reason or 'no reason'}"
+                    )
+                    results[phash] = to_annotation_result(
+                        None, phash, error=f"{type(refusal_exc).__name__}: {refusal_exc}"
+                    )
+                    continue
                 logger.error(
                     f"WebAPI 推論失敗: model={model_name}, "
                     f"litellm_model_id={litellm_model_id}, error={exc}",
@@ -157,6 +173,65 @@ class ProviderManager:
             return api_keys[provider]
 
         raise MissingApiKeyError(provider=provider)
+
+
+def _classify_refusal(
+    exc: BaseException,
+    litellm_model_id: str,
+    image_phash: str,
+) -> SafetyRefusalError | ContentPolicyRefusalError | None:
+    """PydanticAI / provider SDK exception から safety/content refusal を検出する。
+
+    検出パターン (ADR 0023 Phase 1.5):
+    - exception type 名に "ContentFilter" 含む (OpenAI) → ContentPolicyRefusalError
+    - exception message に "content_filter" 含む → ContentPolicyRefusalError
+    - exception type 名に "Refusal" 含む (Anthropic) → SafetyRefusalError
+    - exception message の signature 検査:
+      - "stop_reason=refusal" / "stop_reason: refusal" → SafetyRefusalError
+      - "finishreason: safety" / "finish_reason=safety" → SafetyRefusalError
+      - "blocked due to safety" / "blockedreason" → SafetyRefusalError
+    - 該当しなければ None (caller が generic error として扱う)
+
+    PydanticAI / provider SDK の実 surface に追従するため、case-insensitive な
+    部分マッチで検出する。実例外の signature が判明次第 follow-up で精度向上可能。
+
+    Args:
+        exc: catch された例外
+        litellm_model_id: 推論対象モデル ID
+        image_phash: 対象画像の pHash
+
+    Returns:
+        分類された refusal exception、または None
+    """
+    exc_type_name = type(exc).__name__.lower()
+    exc_message = str(exc).lower()
+
+    # ContentPolicy (OpenAI 系の content_filter) を優先判定
+    is_content_filter = "contentfilter" in exc_type_name or "content_filter" in exc_message
+
+    is_safety_refusal = (
+        "refusal" in exc_type_name
+        or "stop_reason=refusal" in exc_message
+        or "stop_reason: refusal" in exc_message
+        or "finishreason: safety" in exc_message
+        or "finish_reason=safety" in exc_message
+        or "blocked due to safety" in exc_message
+        or "blockedreason" in exc_message
+    )
+
+    if is_content_filter:
+        return ContentPolicyRefusalError(
+            litellm_model_id=litellm_model_id,
+            image_phash=image_phash,
+            provider_refusal_reason=str(exc)[:200],
+        )
+    if is_safety_refusal:
+        return SafetyRefusalError(
+            litellm_model_id=litellm_model_id,
+            image_phash=image_phash,
+            provider_refusal_reason=str(exc)[:200],
+        )
+    return None
 
 
 __all__ = ["ProviderManager"]
