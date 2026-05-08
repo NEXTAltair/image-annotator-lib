@@ -410,7 +410,7 @@ def get_webapi_metadata(model_name: str) -> dict[str, Any] | None:
         model_name: ``model_name_short`` (例: ``"GPT-4o"``)。
 
     Returns:
-        メタデータ辞書 (``api_model_id`` / ``provider`` / ``max_output_tokens`` /
+        メタデータ辞書 (``litellm_model_id`` / ``provider`` / ``max_output_tokens`` /
         ``supports_vision`` / ``supports_response_schema`` / ``type`` / ``class`` などを含む)。
         未登録なら ``None``。
     """
@@ -589,12 +589,12 @@ def _build_annotator_info_for_registry_model(
         "local" if is_local else (str(raw_provider).lower() if raw_provider is not None else None)
     )
 
-    # ADR 0023 Phase 1 (Issue #35, PR #40): WebAPI モデルの外部 ID は metadata の
-    # `litellm_model_id` を SSoT として参照する。`AnnotatorInfo.api_model_id` field は
-    # LoRAIro DB schema との互換のため keep し、ここに `litellm_model_id` を設定する。
+    # ADR 0023 Phase 2 (Issue #41): metadata の `litellm_model_id` SSoT を
+    # `AnnotatorInfo.litellm_model_id` field に直接公開する。LoRAIro 側は ADR 0023
+    # line 73 に従い `api_model_id` 互換シムを廃止し、`litellm_model_id` を読む。
     # ローカル ML モデルは外部 ID を持たないため None。
     raw_litellm_id = model_config.get("litellm_model_id") if is_api else None
-    api_model_id: str | None = str(raw_litellm_id) if raw_litellm_id is not None else None
+    litellm_model_id: str | None = str(raw_litellm_id) if raw_litellm_id is not None else None
 
     return AnnotatorInfo(
         name=model_name,
@@ -604,7 +604,7 @@ def _build_annotator_info_for_registry_model(
         is_api=is_api,
         device=device if isinstance(device, str) else None,
         provider=provider,
-        api_model_id=api_model_id,
+        litellm_model_id=litellm_model_id,
         estimated_size_gb=_safe_float(
             model_config.get("estimated_size_gb"), model_name, "estimated_size_gb"
         ),
@@ -639,7 +639,7 @@ def _build_annotator_info_for_direct_model(model_id: str) -> AnnotatorInfo:
         is_api=True,
         device=None,
         provider=_infer_provider_from_model_id(model_id),
-        api_model_id=model_id,  # 直接モデルは model_id 自体が上流 API の識別子
+        litellm_model_id=model_id,  # 直接モデルは model_id 自体が LiteLLM ID
     )
 
 
