@@ -470,10 +470,11 @@ def _determine_model_type(
 
 
 def _requires_api_key(model_class: ModelClass, model_config: dict[str, Any]) -> bool:
-    """APIキーが必要かどうかを判定する
+    """APIキーが必要かどうかを判定する。
 
-    ADR 0023 Phase 1 (Issue #35): WebAPI 系は `WebApiAnnotator` のサブクラス判定で
-    判定する。`api_model_id` フォールバックは旧 metadata との後方互換のために残置。
+    ADR 0023 Phase 1 (Issue #35, PR #40): WebAPI 判定は `WebApiAnnotator` サブクラス
+    判定のみに統一。旧 `api_model_id` フォールバック (TOML 由来 metadata 後方互換) は
+    廃止された (ADR 0023 Phase 1: WebAPI 用 user TOML override 廃止に伴い不要)。
 
     Args:
         model_class: モデルクラス
@@ -490,10 +491,6 @@ def _requires_api_key(model_class: ModelClass, model_config: dict[str, Any]) -> 
     from .webapi_annotator import WebApiAnnotator
 
     if issubclass(model_class, WebApiAnnotator):
-        return True
-
-    # api_model_id が設定されている場合はAPI系 (旧 metadata 後方互換)
-    if model_config.get("api_model_id"):
         return True
 
     # デフォルトはローカルモデル(APIキー不要)
@@ -592,8 +589,12 @@ def _build_annotator_info_for_registry_model(
         "local" if is_local else (str(raw_provider).lower() if raw_provider is not None else None)
     )
 
-    raw_api_model_id = model_config.get("api_model_id")
-    api_model_id: str | None = str(raw_api_model_id) if raw_api_model_id is not None else None
+    # ADR 0023 Phase 1 (Issue #35, PR #40): WebAPI モデルの外部 ID は metadata の
+    # `litellm_model_id` を SSoT として参照する。`AnnotatorInfo.api_model_id` field は
+    # LoRAIro DB schema との互換のため keep し、ここに `litellm_model_id` を設定する。
+    # ローカル ML モデルは外部 ID を持たないため None。
+    raw_litellm_id = model_config.get("litellm_model_id") if is_api else None
+    api_model_id: str | None = str(raw_litellm_id) if raw_litellm_id is not None else None
 
     return AnnotatorInfo(
         name=model_name,
@@ -777,10 +778,10 @@ def _register_webapi_models_from_discovery() -> None:
             ):
                 registered_count += 1
                 # `_WEBAPI_MODEL_METADATA` は WebAPI モデルメタデータの単一情報源 (SSoT)。
-                # ADR 0023 Phase 1 で `litellm_model_id` を正式キーにし、後方互換のため
-                # `api_model_id` も同値で残す (annotation_runner._resolve_litellm_model_id が双方を参照)。
+                # ADR 0023 Phase 1 (Issue #35, PR #40): 外部 API ID は `litellm_model_id`
+                # を SSoT とする。旧 `api_model_id` キー重複は廃止 (ADR 0023 line 73:
+                # 「互換シムを残さない」)。
                 metadata = {
-                    "api_model_id": model_id,
                     "litellm_model_id": model_id,
                     "model_name_on_provider": model_id,
                     "provider": str(provider).lower(),

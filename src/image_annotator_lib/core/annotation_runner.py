@@ -56,11 +56,12 @@ def _is_webapi_annotator_class(annotator_class: type) -> bool:
 def _resolve_litellm_model_id(model_name: str) -> str | None:
     """registry 登録 WebAPI モデルから litellm_model_id を解決する。
 
-    旧 metadata では `api_model_id` キーで保存されていたが、ADR 0023 では
-    `litellm_model_id` として扱う。両方のキーを後方互換として参照する。
+    ADR 0023 Phase 1 (Issue #35, PR #40): 旧 `api_model_id` キーへのフォールバックは
+    廃止。`_register_webapi_models_from_discovery()` が `litellm_model_id` のみで
+    metadata を構築するため、本関数も `litellm_model_id` のみを参照する。
     """
     metadata = get_webapi_metadata(model_name) or {}
-    return metadata.get("litellm_model_id") or metadata.get("api_model_id")
+    return metadata.get("litellm_model_id")
 
 
 def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None = None) -> BaseAnnotator:
@@ -95,7 +96,7 @@ def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None 
             if not litellm_model_id:
                 raise KeyError(
                     f"Model '{actual_model_name}' is registered as WebAPI but has no "
-                    f"litellm_model_id / api_model_id in metadata"
+                    f"`litellm_model_id` in `_WEBAPI_MODEL_METADATA`"
                 )
             logger.debug(
                 f"WebApiAnnotator (registry WebAPI): model={actual_model_name}, "

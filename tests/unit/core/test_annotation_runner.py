@@ -54,24 +54,28 @@ class TestCreateAnnotatorInstanceLookupOrder:
         assert instance.litellm_model_id == "openrouter/openai/gpt-4o"
         assert instance.model_name == "openai/gpt-4o"
 
-    def test_registry_webapi_with_legacy_api_model_id_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """旧 metadata の ``api_model_id`` キーも `_resolve_litellm_model_id` の
-        フォールバックで吸収される。"""
+    def test_registry_webapi_missing_litellm_model_id_raises_key_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ADR 0023 Phase 1 (PR #40): metadata に `litellm_model_id` がない場合は KeyError。
+
+        旧 `api_model_id` キーへのフォールバックは Phase 1.x で廃止された
+        (ADR 0023 line 73「互換シムを残さない」)。
+        """
         monkeypatch.setattr(
             annotation_runner,
             "find_model_class_case_insensitive",
             lambda name: ("legacy-name", WebApiAnnotator) if name == "legacy-name" else None,
         )
+        # 旧 `api_model_id` のみ持つ metadata はもはや解決できず KeyError
         monkeypatch.setattr(
             annotation_runner,
             "get_webapi_metadata",
             lambda name: {"api_model_id": "openai/gpt-4o-mini"} if name == "legacy-name" else None,
         )
 
-        instance = annotation_runner._create_annotator_instance("legacy-name")
-        assert isinstance(instance, WebApiAnnotator)
-        assert instance.litellm_model_id == "openai/gpt-4o-mini"
-        assert instance.model_name == "legacy-name"
+        with pytest.raises(KeyError, match="litellm_model_id"):
+            annotation_runner._create_annotator_instance("legacy-name")
 
     def test_direct_litellm_id_used_when_not_in_registry(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """registry に無い `provider/model` 形式は direct LiteLLM ID として扱う。"""

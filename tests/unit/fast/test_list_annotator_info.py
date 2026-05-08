@@ -319,7 +319,7 @@ def test_webapi_model_phase2_fields_from_ssot(patched_registry):
         model_dict={"GPT-4o": WebApiAnnotator},
         webapi_metadata={
             "GPT-4o": {
-                "api_model_id": "openai/gpt-4o",
+                "litellm_model_id": "openai/gpt-4o",
                 "model_name_on_provider": "openai/gpt-4o",
                 "provider": "openai",
                 "max_output_tokens": 1800,
@@ -354,7 +354,7 @@ def test_webapi_model_user_toml_api_model_id_does_not_override_ssot(patched_regi
         },
         webapi_metadata={
             "GPT-4o": {
-                "api_model_id": "openai/gpt-4o",
+                "litellm_model_id": "openai/gpt-4o",
                 "model_name_on_provider": "openai/gpt-4o",
                 "provider": "openai",
                 "max_output_tokens": 1800,
@@ -428,7 +428,7 @@ def test_phase2_safe_helpers_handle_malformed_metadata(patched_registry):
         model_dict={"GPT-4o": WebApiAnnotator},
         webapi_metadata={
             "GPT-4o": {
-                "api_model_id": "openai/gpt-4o",
+                "litellm_model_id": "openai/gpt-4o",
                 "model_name_on_provider": "openai/gpt-4o",
                 "provider": "openai",
                 "max_output_tokens": "not-an-int",  # malformed
@@ -544,7 +544,7 @@ def test_provider_normalized_to_lowercase_across_sources(patched_registry):
         model_dict={"GPT-4o": WebApiAnnotator},
         webapi_metadata={
             "GPT-4o": {
-                "api_model_id": "openai/gpt-4o",
+                "litellm_model_id": "openai/gpt-4o",
                 "model_name_on_provider": "openai/gpt-4o",
                 "provider": "OpenAI",  # ← display-case (TOML 記述)
                 "max_output_tokens": 1800,
@@ -590,7 +590,7 @@ def test_webapi_user_toml_provider_does_not_override_ssot(patched_registry):
         },
         webapi_metadata={
             "CustomAPI": {
-                "api_model_id": "anthropic/claude-3-5-sonnet",
+                "litellm_model_id": "anthropic/claude-3-5-sonnet",
                 "model_name_on_provider": "anthropic/claude-3-5-sonnet",
                 "provider": "anthropic",
                 "max_output_tokens": 1800,
@@ -628,7 +628,7 @@ def test_malformed_webapi_user_override_does_not_abort_listing(patched_registry)
         },
         webapi_metadata={
             "GoodWebAPI": {
-                "api_model_id": "openai/gpt-4o",
+                "litellm_model_id": "openai/gpt-4o",
                 "model_name_on_provider": "openai/gpt-4o",
                 "provider": "openai",
                 "max_output_tokens": 1800,
