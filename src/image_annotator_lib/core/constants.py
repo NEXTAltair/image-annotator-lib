@@ -20,20 +20,22 @@ CACHE_DIR = PROJECT_ROOT / "models"
 SYSTEM_CONFIG_PATH = CONFIG_DIR / "annotator_config.toml"
 # ユーザー設定ファイルのパス (プロジェクトルート/config/user_config.toml)
 USER_CONFIG_PATH = CONFIG_DIR / "user_config.toml"
-# 動的 API モデル情報ファイルのパス (プロジェクトルート/config/available_api_models.toml)
-AVAILABLE_API_MODELS_CONFIG_PATH = CONFIG_DIR / "available_api_models.toml"
+
+# ADR 0023 Phase 1 (Issue #35, PR #40): `AVAILABLE_API_MODELS_CONFIG_PATH` 定数は廃止。
+# WebAPI モデル一覧は `core/api_model_discovery.py` で LiteLLM 同梱 DB から runtime
+# 取得する (TOML キャッシュなし)。
 
 DEFAULT_PATHS = {
     "config_toml": SYSTEM_CONFIG_PATH,  # プロジェクト config
     "user_config_toml": USER_CONFIG_PATH,  # プロジェクト config
-    "available_api_models_toml": AVAILABLE_API_MODELS_CONFIG_PATH,  # プロジェクト config
     "log_file": LOG_DIR / "image-annotator-lib.log",  # プロジェクト logs
     "cache_dir": CACHE_DIR,  # プロジェクト models
 }
 
 # ADR 0023 Phase 1: TOML cache / TTL refresh / OpenRouter fallback は廃止された。
 # 旧 `DEFAULT_API_MODELS_TTL_DAYS` / `ENV_API_MODELS_TTL_DAYS` /
-# `ENV_ENABLE_OPENROUTER_FALLBACK` 定数は本ファイルから削除済。
+# `ENV_ENABLE_OPENROUTER_FALLBACK` / `AVAILABLE_API_MODELS_CONFIG_PATH` 定数は
+# 本ファイルから削除済。
 
 # テンプレートパスも必要に応じてエクスポート (config.py で使う)
 # (直接定数を使うのでエクスポート不要かも)
