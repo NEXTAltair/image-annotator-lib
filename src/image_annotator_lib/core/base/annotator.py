@@ -33,6 +33,12 @@ class BaseAnnotator(ABC):
             Phase 1B: Dependency Injection導入
             - config引数経由でConfig Objectを注入可能
             - config=Noneの場合、後方互換のためconfig_registryから読み込み
+
+            Issue #35: device 判定 (CUDA 利用可否確認 + フォールバック) は
+            ローカル ML 系 base class (Transformers / ONNX / TensorFlow / CLIP /
+            Pipeline) の責務として委譲する。WebAPI 系 (`WebApiAnnotator`) は
+            cloud 推論のため device 概念がなく ``"api"`` を直接代入する。本クラスは
+            ``self.device`` を ``""`` で初期化し、サブクラスが上書きする契約。
         """
         self.model_name = model_name
         # Config Object注入 or 後方互換フォールバック
@@ -40,29 +46,11 @@ class BaseAnnotator(ABC):
 
         # model_pathはLocalMLModelConfig専用(WebAPIModelConfigにはない)
         self.model_path = getattr(self._config, "model_path", None)
-        self.device = self._validate_device(self._config.device)
+        # device 判定はサブクラス側で行う (上記 Note 参照)。型は str を維持し、
+        # サブクラス __init__ で必ず上書きされる契約とする。空文字は「未設定」を表す
+        # sentinel として扱う (mypy narrow のため None ではなく str を採用)。
+        self.device: str = ""
         self.components: LoaderComponents | None = None
-
-    def _validate_device(self, requested_device: str) -> str:
-        """要求されたデバイスを検証し、CUDA利用不可の場合はCPUにフォールバック。
-
-        このメソッドは、アノテーターのデバイス設定と実際のデバイス機能の
-        一貫性を保証します。ModelLoad.Loaderと同じ検証ロジックを使用して、
-        デバイスの不一致問題を防止します。
-
-        Args:
-            requested_device: 設定ファイルからのデバイス文字列 ("cuda", "cpu" など)
-
-        Returns:
-            検証されたデバイス文字列（CUDA利用不可の場合は "cpu"）
-
-        Note:
-            一貫した検証ロジックのため determine_effective_device() を使用。
-            パフォーマンス影響: アノテーター初期化あたり <1ms。
-        """
-        from ..utils import determine_effective_device
-
-        return determine_effective_device(requested_device, self.model_name)
 
     @abstractmethod
     def __enter__(self) -> Self:

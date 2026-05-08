@@ -77,16 +77,7 @@ def mock_empty_config():
         yield mock
 
 
-@pytest.fixture
-def mock_api_models_config():
-    """API モデル設定専用モック"""
-    api_models = {
-        "gpt-4o": {"provider": "openai", "context_length": 128000},
-        "claude-3-5-sonnet": {"provider": "anthropic", "context_length": 200000},
-        "gemini-pro": {"provider": "google", "context_length": 1000000},
-        "openrouter:meta-llama/llama-3": {"provider": "openrouter", "context_length": 8192},
-    }
-
-    with patch("image_annotator_lib.core.config.load_available_api_models") as mock:
-        mock.return_value = api_models
-        yield mock
+# ADR 0023 Phase 1 (Issue #35, PR #40): `load_available_api_models` は廃止された。
+# WebAPI モデル一覧の mock は `image_annotator_lib.core.api_model_discovery.discover_available_vision_models`
+# を直接 monkeypatch するか、test fixture で `_register_webapi_models_from_discovery` を
+# 差し替える形で対応する。本 fixture (`mock_api_models_config`) は削除。

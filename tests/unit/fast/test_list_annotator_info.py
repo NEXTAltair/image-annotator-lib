@@ -10,6 +10,7 @@ import pytest
 
 from image_annotator_lib import AnnotatorInfo, list_annotator_info
 from image_annotator_lib.core.types import TaskCapability
+from image_annotator_lib.core.webapi_annotator import WebApiAnnotator
 
 # --- テスト用ダミークラス ---
 
@@ -26,8 +27,9 @@ class _DummyCaptioner:
     """ローカル ML キャプショナーのダミー実装。クラス名から model_type=captioner と判定される。"""
 
 
-class PydanticAIWebAPIAnnotator:
-    """`_requires_api_key` がクラス名 'PydanticAIWebAPIAnnotator' を WebAPI と判定するためのダミー。"""
+# Note: ADR 0023 Phase 1 (Issue #35) で `_requires_api_key` は class 名照合ではなく
+# `issubclass(model_class, WebApiAnnotator)` 判定に変わった。WebAPI ダミー class は
+# 廃止し、registry に直接 `WebApiAnnotator` を登録する形式に書き換え済み。
 
 
 # --- Fixtures ---
@@ -38,11 +40,12 @@ def empty_registry():
     """レジストリと PydanticAI 直接モデルを両方空にする"""
     from image_annotator_lib.core import registry
 
+    # ADR 0023 Phase 1 (Issue #35): get_agent_factory は廃止された。直接モデル一覧は
+    # `api._discover_available_models` (= `api_model_discovery.get_available_models`) で取得する。
     with patch.object(registry, "_MODEL_CLASS_OBJ_REGISTRY", {}):
         with patch.object(registry, "_REGISTRY_INITIALIZED", True):
             with patch.object(registry, "_WEBAPI_MODEL_METADATA", {}):
-                with patch("image_annotator_lib.api.get_agent_factory") as mock_factory:
-                    mock_factory.return_value.get_available_models.return_value = []
+                with patch("image_annotator_lib.api._discover_available_models", return_value=[]):
                     yield
 
 
@@ -102,13 +105,15 @@ class _PatchedRegistryCtx:
         # 内部データを差し替えれば両方一貫した値を返せる。proxy の delattr 問題も回避できる。
         real_registry = get_config_registry()
         self._patches.append(patch.object(real_registry, "_merged_config_data", self.config_dict))
-        agent_patch = patch("image_annotator_lib.api.get_agent_factory")
-        self._patches.append(agent_patch)
+        # ADR 0023 Phase 1 (Issue #35): 直接モデル一覧は `api._discover_available_models`
+        # (`api_model_discovery.get_available_models`) で解決する。旧 `get_agent_factory` は廃止。
+        direct_patch = patch(
+            "image_annotator_lib.api._discover_available_models", return_value=self.direct_models
+        )
+        self._patches.append(direct_patch)
 
-        for p in self._patches[:-1]:
+        for p in self._patches:
             p.start()
-        agent_factory_mock = self._patches[-1].start()
-        agent_factory_mock.return_value.get_available_models.return_value = self.direct_models
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -151,9 +156,9 @@ def test_local_ml_model_classification(patched_registry):
 @pytest.mark.unit
 @pytest.mark.fast
 def test_webapi_model_classification(patched_registry):
-    """PydanticAIWebAPIAnnotator が is_api=True, device=None で分類される。"""
+    """WebApiAnnotator が is_api=True, device=None で分類される。"""
     with patched_registry(
-        model_dict={"Claude-3-Opus": PydanticAIWebAPIAnnotator},
+        model_dict={"Claude-3-Opus": WebApiAnnotator},
         config_dict={
             "Claude-3-Opus": {
                 "api_model_id": "claude-3-opus-20240229",
@@ -178,10 +183,10 @@ def test_webapi_model_capabilities_fallback(patched_registry):
     """config に capabilities が未設定の WebAPI モデルは全3種にフォールバックする (P1修正)。
 
     type="vision" のみで capabilities を省略した場合、get_model_capabilities は空を返すが、
-    _resolve_registry_capabilities が SimplifiedAgentWrapper.ADVERTISED_CAPABILITIES を採用する。
+    _resolve_registry_capabilities が WebApiAnnotator.ADVERTISED_CAPABILITIES を採用する。
     """
     with patched_registry(
-        model_dict={"GPT-4o-mini": PydanticAIWebAPIAnnotator},
+        model_dict={"GPT-4o-mini": WebApiAnnotator},
         config_dict={
             "GPT-4o-mini": {
                 "api_model_id": "gpt-4o-mini",
@@ -221,7 +226,7 @@ def test_pydanticai_direct_model_inclusion(patched_registry):
     assert info.is_local is False
     assert info.device is None
     assert info.model_type == "vision"
-    # SimplifiedAgentWrapper の AnnotationSchema は 3 capability すべてを返す
+    # WebApiAnnotator の AnnotationSchema は 3 capability すべてを返す
     assert TaskCapability.TAGS in info.capabilities
     assert TaskCapability.CAPTIONS in info.capabilities
     assert TaskCapability.SCORES in info.capabilities
@@ -233,7 +238,7 @@ def test_pydanticai_direct_model_dedup_with_registry(patched_registry):
     """レジストリにも PydanticAI factory にも同じ name がある場合、レジストリ側を優先して重複しない。"""
     shared_name = "google/gemini-2.5-pro"
     with patched_registry(
-        model_dict={shared_name: PydanticAIWebAPIAnnotator},
+        model_dict={shared_name: WebApiAnnotator},
         config_dict={shared_name: {"api_model_id": "gemini-2.5-pro", "capabilities": ["tags"]}},
         direct_models=[shared_name],
     ):
@@ -250,7 +255,7 @@ def test_invariants_is_local_xor_is_api(patched_registry):
     with patched_registry(
         model_dict={
             "local-tagger": _DummyTagger,
-            "remote-claude": PydanticAIWebAPIAnnotator,
+            "remote-claude": WebApiAnnotator,
         },
         config_dict={
             "local-tagger": {"type": "tagger", "device": "cpu", "capabilities": ["tags"]},
@@ -311,17 +316,17 @@ def test_local_ml_model_has_provider_local_and_estimated_size(patched_registry):
 def test_webapi_model_phase2_fields_from_ssot(patched_registry):
     """WebAPI モデルは `_WEBAPI_MODEL_METADATA` (SSoT) から Phase 2 フィールドを取得。"""
     with patched_registry(
-        model_dict={"GPT-4o": PydanticAIWebAPIAnnotator},
+        model_dict={"GPT-4o": WebApiAnnotator},
         webapi_metadata={
             "GPT-4o": {
-                "api_model_id": "openai/gpt-4o",
+                "litellm_model_id": "openai/gpt-4o",
                 "model_name_on_provider": "openai/gpt-4o",
                 "provider": "openai",
                 "max_output_tokens": 1800,
                 "estimated_size_gb": None,
                 "discontinued_at": None,
                 "type": "webapi",
-                "class": "PydanticAIWebAPIAnnotator",
+                "class": "WebApiAnnotator",
             }
         },
     ):
@@ -340,7 +345,7 @@ def test_webapi_model_phase2_fields_from_ssot(patched_registry):
 def test_webapi_model_user_toml_api_model_id_does_not_override_ssot(patched_registry):
     """WebAPI モデル定義は SSoT のみを採用し、user TOML api_model_id は無視される。"""
     with patched_registry(
-        model_dict={"GPT-4o": PydanticAIWebAPIAnnotator},
+        model_dict={"GPT-4o": WebApiAnnotator},
         config_dict={
             "GPT-4o": {
                 "api_model_id": "openai/gpt-4o-test-override",
@@ -349,14 +354,14 @@ def test_webapi_model_user_toml_api_model_id_does_not_override_ssot(patched_regi
         },
         webapi_metadata={
             "GPT-4o": {
-                "api_model_id": "openai/gpt-4o",
+                "litellm_model_id": "openai/gpt-4o",
                 "model_name_on_provider": "openai/gpt-4o",
                 "provider": "openai",
                 "max_output_tokens": 1800,
                 "estimated_size_gb": None,
                 "discontinued_at": None,
                 "type": "webapi",
-                "class": "PydanticAIWebAPIAnnotator",
+                "class": "WebApiAnnotator",
             }
         },
     ):
@@ -395,7 +400,7 @@ def test_local_ml_excludes_webapi_metadata_codex_p2_6(patched_registry):
                 "estimated_size_gb": None,
                 "discontinued_at": None,
                 "type": "webapi",
-                "class": "PydanticAIWebAPIAnnotator",
+                "class": "WebApiAnnotator",
             }
         },
     ):
@@ -420,17 +425,17 @@ def test_phase2_safe_helpers_handle_malformed_metadata(patched_registry):
     warning + None フォールバックする (Issue #23 で取込済みヘルパーの効果)。
     """
     with patched_registry(
-        model_dict={"GPT-4o": PydanticAIWebAPIAnnotator},
+        model_dict={"GPT-4o": WebApiAnnotator},
         webapi_metadata={
             "GPT-4o": {
-                "api_model_id": "openai/gpt-4o",
+                "litellm_model_id": "openai/gpt-4o",
                 "model_name_on_provider": "openai/gpt-4o",
                 "provider": "openai",
                 "max_output_tokens": "not-an-int",  # malformed
                 "estimated_size_gb": "not-a-float",  # malformed
                 "discontinued_at": "not-a-date",  # malformed
                 "type": "webapi",
-                "class": "PydanticAIWebAPIAnnotator",
+                "class": "WebApiAnnotator",
             }
         },
     ):
@@ -536,17 +541,17 @@ def test_provider_normalized_to_lowercase_across_sources(patched_registry):
     """
     with patched_registry(
         # Registry-backed WebAPI モデル: SSoT の display-case provider を持つ
-        model_dict={"GPT-4o": PydanticAIWebAPIAnnotator},
+        model_dict={"GPT-4o": WebApiAnnotator},
         webapi_metadata={
             "GPT-4o": {
-                "api_model_id": "openai/gpt-4o",
+                "litellm_model_id": "openai/gpt-4o",
                 "model_name_on_provider": "openai/gpt-4o",
                 "provider": "OpenAI",  # ← display-case (TOML 記述)
                 "max_output_tokens": 1800,
                 "estimated_size_gb": None,
                 "discontinued_at": None,
                 "type": "webapi",
-                "class": "PydanticAIWebAPIAnnotator",
+                "class": "WebApiAnnotator",
             }
         },
         # 直接モデル: model_id slash 前から推論 (既に小文字)
@@ -576,7 +581,7 @@ def test_provider_normalized_to_lowercase_across_sources(patched_registry):
 def test_webapi_user_toml_provider_does_not_override_ssot(patched_registry):
     """WebAPI provider は SSoT の値を採用し、user TOML provider はモデル定義に使わない。"""
     with patched_registry(
-        model_dict={"CustomAPI": PydanticAIWebAPIAnnotator},
+        model_dict={"CustomAPI": WebApiAnnotator},
         config_dict={
             "CustomAPI": {
                 "api_model_id": "custom/model",
@@ -585,14 +590,14 @@ def test_webapi_user_toml_provider_does_not_override_ssot(patched_registry):
         },
         webapi_metadata={
             "CustomAPI": {
-                "api_model_id": "anthropic/claude-3-5-sonnet",
+                "litellm_model_id": "anthropic/claude-3-5-sonnet",
                 "model_name_on_provider": "anthropic/claude-3-5-sonnet",
                 "provider": "anthropic",
                 "max_output_tokens": 1800,
                 "estimated_size_gb": None,
                 "discontinued_at": None,
                 "type": "webapi",
-                "class": "PydanticAIWebAPIAnnotator",
+                "class": "WebApiAnnotator",
             }
         },
     ):
@@ -615,22 +620,22 @@ def test_malformed_webapi_user_override_does_not_abort_listing(patched_registry)
     """
     with patched_registry(
         model_dict={
-            "GoodWebAPI": PydanticAIWebAPIAnnotator,
-            "BrokenWebAPI": PydanticAIWebAPIAnnotator,
+            "GoodWebAPI": WebApiAnnotator,
+            "BrokenWebAPI": WebApiAnnotator,
         },
         config_dict={
             "BrokenWebAPI": 12345,  # malformed (truthy + 非 dict、int)
         },
         webapi_metadata={
             "GoodWebAPI": {
-                "api_model_id": "openai/gpt-4o",
+                "litellm_model_id": "openai/gpt-4o",
                 "model_name_on_provider": "openai/gpt-4o",
                 "provider": "openai",
                 "max_output_tokens": 1800,
                 "estimated_size_gb": None,
                 "discontinued_at": None,
                 "type": "webapi",
-                "class": "PydanticAIWebAPIAnnotator",
+                "class": "WebApiAnnotator",
             },
             "BrokenWebAPI": {
                 "api_model_id": "anthropic/claude-3-opus",
@@ -640,7 +645,7 @@ def test_malformed_webapi_user_override_does_not_abort_listing(patched_registry)
                 "estimated_size_gb": None,
                 "discontinued_at": None,
                 "type": "webapi",
-                "class": "PydanticAIWebAPIAnnotator",
+                "class": "WebApiAnnotator",
             },
         },
     ):

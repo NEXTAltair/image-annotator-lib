@@ -122,7 +122,7 @@ def test_invalid_config_out_of_range_values(clean_config_registry):
 
     # Test 2: WebAPI timeout must be <= 300
     invalid_config_timeout = {
-        "class": "PydanticAIWebAPIAnnotator",
+        "class": "WebApiAnnotator",
         "model_name_on_provider": "gpt-4",
         "device": "cpu",
         "timeout": 500,  # Must be <= 300

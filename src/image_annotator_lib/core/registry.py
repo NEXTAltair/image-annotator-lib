@@ -86,8 +86,12 @@ def _gather_available_classes(directory: str) -> dict[str, ModelClass]:
         if module is None:
             continue
         for name, obj in inspect.getmembers(module, inspect.isclass):
-            # 古いプロバイダー固有のクラスは除外(PydanticAI統一後は不要)
+            # 古いプロバイダー固有のクラスは除外
+            # ADR 0023 Phase 1 (Issue #35): WebApiAnnotator 1 種に統一されたため、
+            # PydanticAIWebAPIAnnotator (旧統一クラス) と個別プロバイダー固有クラスは
+            # 全て obsolete。user TOML に古い class 名が残っている場合の防衛として残置。
             obsolete_classes = [
+                "PydanticAIWebAPIAnnotator",
                 "AnthropicApiAnnotator",
                 "GoogleApiAnnotator",
                 "OpenAIApiChatAnnotator",
@@ -95,7 +99,7 @@ def _gather_available_classes(directory: str) -> dict[str, ModelClass]:
             ]
             if name in obsolete_classes:
                 logger.debug(
-                    f"古いプロバイダー固有クラス '{name}' をスキップします(PydanticAI統一後は不要)"
+                    f"古いクラス '{name}' をスキップします (ADR 0023 Phase 1 で WebApiAnnotator に統合)"
                 )
                 continue
 
@@ -126,8 +130,10 @@ def _gather_available_classes(directory: str) -> dict[str, ModelClass]:
 def _is_obsolete_annotator_class(class_name: str) -> bool:
     """古いプロバイダー固有のアノテータークラスかどうかを判定する。
 
-    PydanticAI統合後、個別プロバイダークラス(例: OpenAIApiAnnotator,
-    OpenAIApiChatAnnotator, OpenAIApiResponseAnnotator)は廃止。
+    ADR 0023 Phase 1 (Issue #35) で `WebApiAnnotator` 1 種に統一。
+    `PydanticAIWebAPIAnnotator` および個別プロバイダークラス
+    (`OpenAIApiAnnotator` / `OpenAIApiChatAnnotator` /
+    `OpenAIApiResponseAnnotator` 等) は obsolete として扱う。
 
     Args:
         class_name: チェック対象のクラス名。
@@ -135,8 +141,11 @@ def _is_obsolete_annotator_class(class_name: str) -> bool:
     Returns:
         廃止クラスの場合True。
     """
-    if class_name == "PydanticAIWebAPIAnnotator":
+    if class_name == "WebApiAnnotator":
         return False
+    # PydanticAIWebAPIAnnotator は ADR 0023 Phase 1 で WebApiAnnotator に統合されたため obsolete
+    if class_name == "PydanticAIWebAPIAnnotator":
+        return True
     # *ApiAnnotator, *ApiChatAnnotator, *ApiResponseAnnotator を検出
     obsolete_suffixes = ("ApiAnnotator", "ApiChatAnnotator", "ApiResponseAnnotator")
     return any(class_name.endswith(suffix) for suffix in obsolete_suffixes)
@@ -146,38 +155,52 @@ def _resolve_model_class(
     desired_class_name: str,
     model_name: str,
     available_classes: dict[str, type],
-    pydantic_ai_class: type | None,
     model_type_name: str,
 ) -> type | None:
-    """設定エントリからモデルクラスを解決する。
+    """設定エントリからモデルクラスを解決する (ローカル ML モデル専用)。
 
-    WebAPIクラスは統一PydanticAI実装にマッピングし、
-    古いプロバイダー固有クラスは警告してスキップする。
+    ADR 0023 Phase 1: WebAPI 用 user TOML override は **廃止** (LiteLLM 未登録モデルは
+    利用不可)。WebAPI モデルの registry 登録は `_register_webapi_models_from_discovery()`
+    が LiteLLM 同梱 DB から SSoT として行うため、本関数は **ローカル ML モデルの class
+    解決のみ** を担当する。
+
+    user TOML が `class = "WebApiAnnotator"` を指定した場合は、ADR 0023 の決定に従い
+    warning + skip する。`_register_webapi_models_from_discovery()` 経由では本関数は
+    呼ばれない (`WebApiAnnotator` を直接 `_try_register_model()` に渡すため)。
 
     Args:
         desired_class_name: 設定で指定されたクラス名。
         model_name: ログ用のモデル名。
         available_classes: スキャン済みの利用可能なクラス辞書。
-        pydantic_ai_class: PydanticAIWebAPIAnnotatorクラス(なければNone)。
         model_type_name: ログ用のモデルタイプ名。
 
     Returns:
         解決されたモデルクラス、またはスキップすべき場合はNone。
     """
-    # WebAPIクラス(PydanticAIWebAPIAnnotator)の場合は統一実装を使用
-    if desired_class_name == "PydanticAIWebAPIAnnotator" and pydantic_ai_class:
-        logger.debug(f"WebAPIモデル '{model_name}' にPydanticAI統一実装を使用")
-        return pydantic_ai_class
-
-    # 古いプロバイダー固有クラスは警告してスキップ
-    if _is_obsolete_annotator_class(desired_class_name):
+    # ADR 0023 Phase 1 (Codex P1, PR #40): user TOML 経由の WebAPI モデル定義は禁止。
+    # WebApiAnnotator の registry 登録は LiteLLM 同梱 DB 由来の
+    # `_register_webapi_models_from_discovery()` が排他的に行うため、user TOML 側で
+    # `class = "WebApiAnnotator"` を指定しても registry には載せない (broken path 防止)。
+    if desired_class_name == "WebApiAnnotator":
         logger.warning(
-            f"モデル '{model_name}' で古いプロバイダー固有クラス '{desired_class_name}' が指定されています。"
-            f"PydanticAI統合後はすべてのWebAPIモデルで 'PydanticAIWebAPIAnnotator' を使用してください。スキップします。"
+            f"モデル '{model_name}' で `class = 'WebApiAnnotator'` が user TOML から指定されています。"
+            f"ADR 0023 Phase 1 以降、WebAPI モデル定義は LiteLLM 同梱 DB が SSoT で、"
+            f"user TOML 経由の WebAPI モデル定義はサポート対象外です。"
+            f"LiteLLM DB に登録されたモデル ID (例: 'openai/gpt-4o') を直接 model_name に "
+            f"指定してください。本エントリはスキップします。"
         )
         return None
 
-    # 非WebAPIクラス(ローカルMLモデルなど)は従来通りの処理
+    # 古いプロバイダー固有クラス・PydanticAIWebAPIAnnotator は警告してスキップ
+    if _is_obsolete_annotator_class(desired_class_name):
+        logger.warning(
+            f"モデル '{model_name}' で旧クラス '{desired_class_name}' が指定されています。"
+            f"ADR 0023 Phase 1 以降は WebAPI モデル定義に user TOML を使用しません "
+            f"(LiteLLM DB 由来の自動登録のみサポート)。スキップします。"
+        )
+        return None
+
+    # ローカル ML モデルの class 解決
     model_cls = available_classes.get(desired_class_name)
     if model_cls is None:
         logger.warning(
@@ -262,9 +285,10 @@ def _register_models(
         available_classes = _gather_available_classes(directory)
         logger.debug(f"{len(available_classes)} 個の利用可能な {model_type_name} クラスが見つかりました")
 
-        pydantic_ai_class = available_classes.get("PydanticAIWebAPIAnnotator")
-        if not pydantic_ai_class:
-            logger.error("PydanticAIWebAPIAnnotator クラスが見つかりません。WebAPIモデルは登録できません。")
+        # ADR 0023 Phase 1 (Codex P1, PR #40): WebAPI モデルは _register_webapi_models_from_discovery()
+        # が LiteLLM 同梱 DB から SSoT として登録するため、`_register_models()` 経由で
+        # user TOML の `class = "WebApiAnnotator"` を解決することはない (本ループは
+        # ローカル ML モデルの解決のみを担当する)。
 
         for model_name, model_config in config.items():
             desired_class_name = model_config.get("class")
@@ -275,7 +299,7 @@ def _register_models(
                 continue
 
             model_cls = _resolve_model_class(
-                desired_class_name, model_name, available_classes, pydantic_ai_class, model_type_name
+                desired_class_name, model_name, available_classes, model_type_name
             )
             if model_cls is None:
                 continue
@@ -446,7 +470,11 @@ def _determine_model_type(
 
 
 def _requires_api_key(model_class: ModelClass, model_config: dict[str, Any]) -> bool:
-    """APIキーが必要かどうかを判定する
+    """APIキーが必要かどうかを判定する。
+
+    ADR 0023 Phase 1 (Issue #35, PR #40): WebAPI 判定は `WebApiAnnotator` サブクラス
+    判定のみに統一。旧 `api_model_id` フォールバック (TOML 由来 metadata 後方互換) は
+    廃止された (ADR 0023 Phase 1: WebAPI 用 user TOML override 廃止に伴い不要)。
 
     Args:
         model_class: モデルクラス
@@ -459,19 +487,10 @@ def _requires_api_key(model_class: ModelClass, model_config: dict[str, Any]) -> 
     if "requires_api_key" in model_config:
         return bool(model_config["requires_api_key"])
 
-    # クラス名から判定
-    class_name = model_class.__name__
+    # WebApiAnnotator (またはサブクラス) は API key 必須
+    from .webapi_annotator import WebApiAnnotator
 
-    # PydanticAI WebAPI annotator は全てAPIキー必要
-    if class_name == "PydanticAIWebAPIAnnotator":
-        return True
-
-    # 古いAPI系クラス名の判定
-    if "api" in class_name.lower() or "webapi" in class_name.lower():
-        return True
-
-    # api_model_id が設定されている場合はAPI系
-    if model_config.get("api_model_id"):
+    if issubclass(model_class, WebApiAnnotator):
         return True
 
     # デフォルトはローカルモデル(APIキー不要)
@@ -483,7 +502,7 @@ def _resolve_registry_capabilities(model_name: str, is_api: bool) -> frozenset[T
 
     設定ファイルに明示的な capabilities がある場合はそれを使用する。
     WebAPI モデル (is_api=True) で capabilities が未設定の場合は、
-    PydanticAI AnnotationSchema が返す全3種 (TAGS/CAPTIONS/SCORES) を申告する。
+    `WebApiAnnotator.ADVERTISED_CAPABILITIES` (tags/captions/scores の 3 種) を申告する。
 
     Args:
         model_name: モデル名
@@ -499,9 +518,7 @@ def _resolve_registry_capabilities(model_name: str, is_api: bool) -> frozenset[T
         return frozenset(caps)
 
     if is_api:
-        # PydanticAIWebAPIAnnotator は AnnotationSchema (tags/captions/score) を返すため
-        # 設定に capabilities が無くても全3種を申告する。
-        # WebApiAnnotator と同じ AnnotationSchema を使用するため同値を参照する。
+        # ADR 0023 Phase 1: WebApiAnnotator は AnnotationSchema (tags/captions/score) を返す
         from .webapi_annotator import WebApiAnnotator  # 循環 import 回避のため遅延
 
         return WebApiAnnotator.ADVERTISED_CAPABILITIES
@@ -572,8 +589,12 @@ def _build_annotator_info_for_registry_model(
         "local" if is_local else (str(raw_provider).lower() if raw_provider is not None else None)
     )
 
-    raw_api_model_id = model_config.get("api_model_id")
-    api_model_id: str | None = str(raw_api_model_id) if raw_api_model_id is not None else None
+    # ADR 0023 Phase 1 (Issue #35, PR #40): WebAPI モデルの外部 ID は metadata の
+    # `litellm_model_id` を SSoT として参照する。`AnnotatorInfo.api_model_id` field は
+    # LoRAIro DB schema との互換のため keep し、ここに `litellm_model_id` を設定する。
+    # ローカル ML モデルは外部 ID を持たないため None。
+    raw_litellm_id = model_config.get("litellm_model_id") if is_api else None
+    api_model_id: str | None = str(raw_litellm_id) if raw_litellm_id is not None else None
 
     return AnnotatorInfo(
         name=model_name,
@@ -719,10 +740,14 @@ def _register_webapi_models_from_discovery() -> None:
 
     旧 `available_api_models.toml` 経由の登録は廃止。`discover_available_vision_models()`
     の `metadata` (LiteLLM `get_model_info()` 由来) を直接使用する。
+
+    Issue #35: 登録対象クラスは `WebApiAnnotator` (`core/webapi_annotator.py`) を
+    直接 import して使う。旧 `PydanticAIWebAPIAnnotator` 経路は廃止。
     """
     logger.debug("LiteLLM 同梱 DB から WebAPI モデルの直接登録を開始します...")
     try:
         from .api_model_discovery import discover_available_vision_models
+        from .webapi_annotator import WebApiAnnotator
 
         result = discover_available_vision_models()
         api_models: dict[str, dict[str, Any]] = result.get("metadata", {})
@@ -731,14 +756,6 @@ def _register_webapi_models_from_discovery() -> None:
             return
 
         logger.debug(f"{len(api_models)} 件の Web API モデル情報を取得しました。")
-
-        available_classes = _gather_available_classes("model_class")
-        pydantic_ai_class = available_classes.get("PydanticAIWebAPIAnnotator")
-        if not pydantic_ai_class:
-            logger.error(
-                "PydanticAIWebAPIAnnotator クラスが見つかりません。WebAPI モデルは登録できません。"
-            )
-            return
 
         registered_count = 0
         for model_id, model_info in api_models.items():
@@ -757,14 +774,14 @@ def _register_webapi_models_from_discovery() -> None:
                 continue
 
             if _try_register_model(
-                _MODEL_CLASS_OBJ_REGISTRY, model_name_short, pydantic_ai_class, BaseAnnotator
+                _MODEL_CLASS_OBJ_REGISTRY, model_name_short, WebApiAnnotator, BaseAnnotator
             ):
                 registered_count += 1
                 # `_WEBAPI_MODEL_METADATA` は WebAPI モデルメタデータの単一情報源 (SSoT)。
-                # ADR 0023 Phase 1 で `litellm_model_id` を正式キーにし、後方互換のため
-                # `api_model_id` も同値で残す (annotation_runner._resolve_litellm_model_id が双方を参照)。
+                # ADR 0023 Phase 1 (Issue #35, PR #40): 外部 API ID は `litellm_model_id`
+                # を SSoT とする。旧 `api_model_id` キー重複は廃止 (ADR 0023 line 73:
+                # 「互換シムを残さない」)。
                 metadata = {
-                    "api_model_id": model_id,
                     "litellm_model_id": model_id,
                     "model_name_on_provider": model_id,
                     "provider": str(provider).lower(),
@@ -795,7 +812,7 @@ def _register_webapi_models_from_discovery() -> None:
                     ),
                     "discontinued_at": None,
                     "type": "webapi",
-                    "class": "PydanticAIWebAPIAnnotator",
+                    "class": "WebApiAnnotator",
                 }
                 _WEBAPI_MODEL_METADATA[model_name_short] = metadata
 

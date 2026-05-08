@@ -15,6 +15,28 @@ import pytest
 from PIL import Image
 
 from image_annotator_lib.core.base.onnx import ONNXBaseAnnotator
+from image_annotator_lib.core.config import config_registry
+
+# ==============================================================================
+# Test Fixtures (autouse)
+# ==============================================================================
+
+
+@pytest.fixture(autouse=True)
+def _register_test_model_config():
+    """`ConcreteONNXAnnotator("test-model")` の構築に必要な最小 config を登録する。
+
+    Phase 1B 以降の `BaseAnnotator._load_config_from_registry` は、config_registry に
+    entry が無い model_name に対して `ValueError` を投げる仕様。
+    """
+    config_registry._merged_config_data["test-model"] = {
+        "class": "ConcreteONNXAnnotator",
+        "model_path": "/dummy/test/model.onnx",
+        "device": "cpu",
+    }
+    yield
+    config_registry._merged_config_data.pop("test-model", None)
+
 
 # ==============================================================================
 # Test Helpers

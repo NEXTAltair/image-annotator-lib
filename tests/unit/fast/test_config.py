@@ -10,8 +10,6 @@ from image_annotator_lib.core import config as config_module
 from image_annotator_lib.core.config import (
     ModelConfigRegistry,
     _load_config_from_file,
-    load_available_api_models,
-    save_available_api_models,
 )
 
 # Import shared fixtures
@@ -210,27 +208,10 @@ def test_load_config_from_file_errors(tmp_path):
         _load_config_from_file(bad_toml_path)
 
 
-@pytest.mark.fast
-def test_save_and_load_api_models(tmp_path, monkeypatch):
-    """Test saving and loading of the available_api_models.toml file."""
-    temp_file = tmp_path / "api_models.toml"
-    monkeypatch.setattr(config_module, "AVAILABLE_API_MODELS_CONFIG_PATH", temp_file)
-
-    test_data = {"model1": {"provider": "test"}}
-
-    save_available_api_models(test_data)
-
-    # Clear cache to force re-read from disk
-    load_available_api_models.cache_clear()
-
-    loaded_data = load_available_api_models()
-
-    assert loaded_data == test_data
-
-    # Check that the data is under the correct section
-    with open(temp_file) as f:
-        raw_data = toml.load(f)
-    assert raw_data["available_vision_models"] == test_data
+# ADR 0023 Phase 1 (Issue #35, PR #40): `save_available_api_models` /
+# `load_available_api_models` および `AVAILABLE_API_MODELS_CONFIG_PATH` は廃止された。
+# WebAPI モデル一覧は LiteLLM 同梱 DB から runtime 取得するため、TOML cache の
+# round-trip test (`test_save_and_load_api_models`) は不要となり削除。
 
 
 # ==============================================================================

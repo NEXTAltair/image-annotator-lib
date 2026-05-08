@@ -1,9 +1,6 @@
 import copy
 import importlib.resources
-import os
 import shutil
-import tempfile
-from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -11,7 +8,6 @@ from typing import Any
 import toml
 
 from .constants import (
-    AVAILABLE_API_MODELS_CONFIG_PATH,
     DEFAULT_PATHS,
     TEMPLATE_SYSTEM_CONFIG_PATH,
 )
@@ -317,125 +313,8 @@ class _ConfigRegistryProxy:
 
 config_registry = _ConfigRegistryProxy()
 
-# --- available_api_models.toml 用のスタンドアロン関数 --- #
-
-
-def _load_full_api_models_file() -> dict[str, Any]:
-    """available_api_models.toml のファイル全体を dict で返す内部ヘルパー。
-
-    キャッシュなし。ファイル不存在・パースエラー時は空 dict を返す。
-    """
-    file_path = AVAILABLE_API_MODELS_CONFIG_PATH
-    if not file_path.is_file():
-        return {}
-    try:
-        with open(file_path, encoding="utf-8") as f:
-            data = toml.load(f)
-        return data if isinstance(data, dict) else {}
-    except (toml.TomlDecodeError, OSError) as e:
-        logger.error(f"{file_path} の読み込みエラー: {e}")
-        return {}
-
-
-@lru_cache(maxsize=1)
-def load_available_api_models() -> dict[str, Any]:
-    """`available_api_models.toml` を読み込み、モデルデータを辞書として返す。
-
-    ファイルが存在しない場合や読み込みエラー時は空の辞書を返す。
-    """
-    file_path = AVAILABLE_API_MODELS_CONFIG_PATH
-    try:
-        logger.debug(f"動的 API モデル情報を読み込みます: {file_path}")
-        if not file_path.is_file():
-            logger.info(
-                f"{file_path} が見つかりません。初回実行の可能性があります。空のデータで開始します。"
-            )
-            return {}
-        data = _load_full_api_models_file()
-        if not data or "available_vision_models" not in data:
-            logger.warning(
-                f"{file_path} の形式が不正か、[available_vision_models] セクションがありません。"
-            )
-            return {}
-        model_data = data.get("available_vision_models", {})
-        if not isinstance(model_data, dict):
-            logger.warning(f"{file_path} の [available_vision_models] が辞書形式ではありません。")
-            return {}
-        logger.debug(f"動的 API モデル情報を正常に読み込みました: {file_path}")
-        return model_data
-    except Exception as e:
-        logger.exception(f"{file_path} の読み込み中に予期せぬエラーが発生しました: {e}")
-        return {}
-
-
-def load_api_models_meta() -> dict[str, Any]:
-    """`available_api_models.toml` の `[meta]` セクションを返す。欠落時は空 dict。"""
-    data = _load_full_api_models_file()
-    meta = data.get("meta", {})
-    return meta if isinstance(meta, dict) else {}
-
-
-def load_last_refresh() -> datetime | None:
-    """`meta.last_refresh` を timezone-aware datetime で返す。
-
-    欠落・パース失敗時は None を返す。
-    """
-    meta = load_api_models_meta()
-    value = meta.get("last_refresh")
-    if value is None:
-        return None
-    # toml ライブラリが datetime 型に変換している場合
-    if isinstance(value, datetime):
-        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-    try:
-        dt_val = datetime.fromisoformat(str(value))
-        if dt_val.tzinfo is None:
-            dt_val = dt_val.replace(tzinfo=UTC)
-        return dt_val
-    except ValueError:
-        logger.warning(f"meta.last_refresh のパースに失敗しました: {value!r}")
-        return None
-
-
-def save_available_api_models(
-    data: dict[str, Any],
-    last_refresh: datetime | None = None,
-) -> None:
-    """与えられたモデルデータを `available_api_models.toml` に書き込む。
-
-    Args:
-        data: 保存するモデルデータ辞書 (available_vision_models セクションの内容)。
-        last_refresh: 書き込む refresh タイムスタンプ。None の場合は既存 meta を維持。
-    """
-    file_path = AVAILABLE_API_MODELS_CONFIG_PATH
-    try:
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # 既存 meta を保持しつつ last_refresh のみ更新
-        existing = _load_full_api_models_file()
-        raw_meta = existing.get("meta", {})
-        meta: dict[str, Any] = dict(raw_meta) if isinstance(raw_meta, dict) else {}
-        if last_refresh is not None:
-            meta["last_refresh"] = last_refresh.isoformat()
-
-        full_data_to_save: dict[str, Any] = {}
-        if meta:
-            full_data_to_save["meta"] = meta
-        full_data_to_save["available_vision_models"] = data
-
-        logger.debug(f"動的 API モデル情報を書き込みます: {file_path}")
-        fd, tmp_path = tempfile.mkstemp(dir=file_path.parent, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                toml.dump(full_data_to_save, f)
-            os.replace(tmp_path, file_path)
-        except Exception:
-            os.unlink(tmp_path)
-            raise
-        load_available_api_models.cache_clear()
-        logger.debug(f"動的 API モデル情報を正常に書き込みました: {file_path}")
-
-    except OSError as e:
-        logger.error(f"{file_path} への書き込み中に I/O エラーが発生しました: {e}")
-    except Exception as e:
-        logger.exception(f"{file_path} への書き込み中に予期せぬエラーが発生しました: {e}")
+# ADR 0023 Phase 1 (Issue #35 PR #40): `available_api_models.toml` cache は **明示的に廃止**。
+# 旧 `_load_full_api_models_file` / `load_available_api_models` / `load_api_models_meta` /
+# `load_last_refresh` / `save_available_api_models` は本ファイルから削除された。
+# WebAPI モデル一覧と capability metadata は `core/api_model_discovery.py` で
+# LiteLLM 同梱 DB から runtime 取得する (TOML キャッシュなし)。

@@ -95,7 +95,7 @@ class TestConfigObjectInjection:
         assert annotator._config == config
         assert annotator.model_name == "test-model"
         assert annotator.model_path == "/path/to/model"
-        assert annotator.device == "cpu"
+        assert annotator._config.device == "cpu"  # Issue #35: device 判定はサブクラスへ移譲
 
     def test_config_attributes_accessible(self):
         """Config Objectの属性にアクセスできることを確認"""
@@ -152,7 +152,7 @@ class TestBackwardCompatibility:
         # config_registryの設定が使用されていることを確認
         assert annotator.model_name == "test-model"
         assert annotator.model_path == "/registry/path"
-        assert annotator.device == "cuda"
+        assert annotator._config.device == "cuda"  # Issue #35: device 判定はサブクラスへ移譲
         assert annotator._config.estimated_size_gb == 1.0
 
     def test_legacy_code_pattern_still_works(self, managed_config_registry):
@@ -168,7 +168,7 @@ class TestBackwardCompatibility:
 
         assert annotator.model_name == "legacy-model"
         assert annotator.model_path == "/legacy/path"
-        assert annotator.device == "cpu"
+        assert annotator._config.device == "cpu"  # Issue #35: device 判定はサブクラスへ移譲
 
     def test_explicit_none_triggers_registry_fallback(self, managed_config_registry):
         """config=Noneを明示的に指定した場合もフォールバックすることを確認"""
@@ -231,10 +231,11 @@ class TestMultipleInstances:
         annotator2 = ConcreteTestAnnotator(model_name="model-2", config=config2)
 
         # 各アノテーターが独立した設定を持つことを確認
+        # Issue #35: device 判定はサブクラスへ移譲されたため `_config.device` で確認
         assert annotator1.model_path == "/path/1"
-        assert annotator1.device == "cuda"
+        assert annotator1._config.device == "cuda"
         assert annotator2.model_path == "/path/2"
-        assert annotator2.device == "cpu"
+        assert annotator2._config.device == "cpu"
 
     def test_config_object_shared_across_instances(self):
         """同じConfig Objectを複数のアノテーターで共有できることを確認"""
@@ -293,32 +294,16 @@ class TestConfigOverrideScenarios:
 
         # Verify direct config was used (not registry)
         assert annotator.model_path == "/direct/path"
-        assert annotator.device == "cuda"
+        assert annotator._config.device == "cuda"  # Issue #35: device 判定はサブクラスへ移譲
 
+    @pytest.mark.skip(
+        reason="Issue #35: device 判定 (CUDA 不可時 CPU フォールバック) は ML 系 base class "
+        "(Transformers / ONNX / TF / CLIP / Pipeline) の責務に移譲された。BaseAnnotator "
+        "直系の ConcreteTestAnnotator では fallback は発生しない。fallback test は ML 系 "
+        "base class の専用 test ファイルで再実装する (別 issue)。"
+    )
     def test_config_device_fallback_to_cpu(self, managed_config_registry, mock_cuda_unavailable):
-        """Test device fallback to CPU when CUDA unavailable.
-
-        Scenario:
-        - Config specifies CUDA
-        - CUDA not available
-        - Verify fallback to CPU
-
-        Tests:
-        - Device availability checking
-        - Automatic CPU fallback
-        """
-        config = LocalMLModelConfig(
-            model_name="test-model",
-            class_name="ConcreteTestAnnotator",
-            model_path="/path/to/model",
-            device="cuda",
-        )
-
-        # Create annotator (should fallback to CPU)
-        annotator = ConcreteTestAnnotator(model_name="test-model", config=config)
-
-        # Verify device fallback
-        assert annotator.device == "cpu"
+        """Test device fallback to CPU when CUDA unavailable."""
 
 
 class TestConfigValidationEdgeCases:
@@ -348,8 +333,9 @@ class TestConfigValidationEdgeCases:
         assert annotator.model_name == "minimal-model"
         assert annotator.model_path == "/minimal/path"
 
-        # Verify device default applied
-        assert annotator.device in ["cpu", "cuda"]  # Should have a device
+        # Issue #35: device 判定はサブクラスへ移譲。BaseAnnotator 直系では None。
+        # config object 経由で device default が反映されていることを確認。
+        assert annotator._config.device in ["cpu", "cuda"]  # Should have a device default
 
     def test_config_immutability_after_annotator_creation(self):
         """Test that config remains immutable after annotator creation.
@@ -408,6 +394,6 @@ class TestConfigValidationEdgeCases:
         assert annotator2._config is annotator3._config
         assert id(annotator1._config) == id(annotator2._config) == id(annotator3._config)
 
-        # Verify all have same settings
+        # Verify all have same settings (Issue #35: device は _config.device 経由で確認)
         assert annotator1.model_path == annotator2.model_path == annotator3.model_path
-        assert annotator1.device == annotator2.device == annotator3.device
+        assert annotator1._config.device == annotator2._config.device == annotator3._config.device

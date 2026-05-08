@@ -23,6 +23,10 @@ class TensorflowBaseAnnotator(BaseAnnotator):
 
     def __init__(self, model_name: str, config: BaseModelConfig | None = None):
         super().__init__(model_name=model_name, config=config)
+        # device 判定はローカル ML 系 base class の責務 (Issue #35 で BaseAnnotator から移譲)
+        from ..utils import determine_effective_device
+
+        self.device = determine_effective_device(self._config.device, self.model_name)
         if tf is None:
             raise ImportError("TensorFlow がインストールされていません。")
         try:
