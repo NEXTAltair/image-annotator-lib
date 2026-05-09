@@ -9,7 +9,6 @@ from typing import Any
 from PIL import Image
 
 from .core.annotation_runner import run_annotation
-from .core.api_model_discovery import get_available_models as _discover_available_models
 from .core.registry import list_available_annotators as _registry_list_annotators
 from .core.types import AnnotatorInfo, PHashAnnotationResults
 from .core.utils import logger
@@ -54,8 +53,10 @@ def list_available_annotators() -> list[str]:
 def list_annotator_info() -> list[AnnotatorInfo]:
     """登録済み全アノテーターのメタデータを返す。
 
-    レジストリ経由のモデル + PydanticAI 直接モデル (``provider/model_id`` 形式)
-    を統合した完全リストを返す。重複は登録済みレジストリ側を優先して除外する。
+    ADR 0023 Phase 1 / Issue #45: WebAPI モデルは
+    `_register_webapi_models_from_discovery()` が起動時に LiteLLM 同梱 DB から
+    registry に自動登録するため、本関数は registry のみを参照する
+    (direct LiteLLM ID 経由の列挙は廃止)。
 
     Returns:
         AnnotatorInfo のリスト (name 昇順でソート済み)。
@@ -67,7 +68,6 @@ def list_annotator_info() -> list[AnnotatorInfo]:
     from .core.registry import (
         _MODEL_CLASS_OBJ_REGISTRY,
         _REGISTRY_INITIALIZED,
-        _build_annotator_info_for_direct_model,
         _build_annotator_info_for_registry_model,
         get_webapi_metadata,
         initialize_registry,
@@ -78,9 +78,8 @@ def list_annotator_info() -> list[AnnotatorInfo]:
         initialize_registry()
 
     infos: list[AnnotatorInfo] = []
-    seen_names: set[str] = set()
 
-    # 1) レジストリ登録済みモデル
+    # レジストリ登録済みモデル (WebAPI / ローカル ML 両方)
     try:
         all_config = config_registry.get_all_config()
     except Exception as e:
@@ -122,20 +121,14 @@ def list_annotator_info() -> list[AnnotatorInfo]:
                 # ローカル ML モデル: user TOML のみ (WebAPI metadata は混入させない)
                 model_config = user_overrides
             infos.append(_build_annotator_info_for_registry_model(model_name, model_class, model_config))
-            seen_names.add(model_name)
         except Exception as e:
             logger.error(f"モデル '{model_name}' の AnnotatorInfo 構築失敗: {e}", exc_info=True)
 
-    # 2) LiteLLM 直接モデル (レジストリと重複するものは除外)
-    # ADR 0023 Phase 1: SimplifiedAgentFactory は廃止され、LiteLLM 同梱 DB を runtime SSoT とする。
-    try:
-        for model_id in _discover_available_models():
-            if model_id in seen_names:
-                continue
-            infos.append(_build_annotator_info_for_direct_model(model_id))
-            seen_names.add(model_id)
-    except Exception as e:
-        logger.error(f"LiteLLM 直接モデルの取得失敗: {e}", exc_info=True)
+    # ADR 0023 Phase 1 / Issue #45: direct LiteLLM ID 経路は廃止された。
+    # LiteLLM 同梱 DB の WebAPI モデルは `_register_webapi_models_from_discovery()` が
+    # 起動時に registry へ自動登録するため、上記で全て列挙される。registry に
+    # 存在しない LiteLLM ID を `list_annotator_info()` で表示しても annotate() で
+    # KeyError になるだけで UX 上有害なため、direct discovery 列挙は削除した。
 
     infos.sort(key=lambda info: info.name)
     logger.info(f"AnnotatorInfo リスト生成完了: {len(infos)} 件")

@@ -37,7 +37,7 @@ class TestWebApiAnnotatorBasics:
 
     def test_init_does_not_consult_config_registry(self) -> None:
         # BaseAnnotator.__init__ をスキップして config_registry に依存しないことを確認
-        # (依存していると direct LiteLLM ID で KeyError になるはず)
+        # (依存していると config_registry に entry の無い model_name で KeyError になるはず)
         annotator = WebApiAnnotator(
             litellm_model_id="google/gemini-2.5-pro",
             api_keys={"google": "fake-key"},
@@ -57,9 +57,7 @@ class TestWebApiAnnotatorBasics:
 class TestWebApiAnnotatorIssue35Regression:
     """Issue #35 regression: WebAPI 経路で `determine_effective_device` が呼ばれない。"""
 
-    def test_init_does_not_invoke_determine_effective_device(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_init_does_not_invoke_determine_effective_device(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """`WebApiAnnotator.__init__` 経由で CUDA 判定が走らないこと。
 
         ADR 0023 Phase 1 (Issue #35) で WebAPI 経路は `BaseAnnotator.__init__` を

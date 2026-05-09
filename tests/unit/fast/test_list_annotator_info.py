@@ -37,16 +37,13 @@ class _DummyCaptioner:
 
 @pytest.fixture
 def empty_registry():
-    """レジストリと PydanticAI 直接モデルを両方空にする"""
+    """レジストリを空にする (Issue #45 で direct LiteLLM モデル経路は廃止)。"""
     from image_annotator_lib.core import registry
 
-    # ADR 0023 Phase 1 (Issue #35): get_agent_factory は廃止された。直接モデル一覧は
-    # `api._discover_available_models` (= `api_model_discovery.get_available_models`) で取得する。
     with patch.object(registry, "_MODEL_CLASS_OBJ_REGISTRY", {}):
         with patch.object(registry, "_REGISTRY_INITIALIZED", True):
             with patch.object(registry, "_WEBAPI_MODEL_METADATA", {}):
-                with patch("image_annotator_lib.api._discover_available_models", return_value=[]):
-                    yield
+                yield
 
 
 @pytest.fixture
@@ -57,7 +54,6 @@ def patched_registry():
     def _setup(
         model_dict: dict,
         config_dict: dict | None = None,
-        direct_models: list[str] | None = None,
         webapi_metadata: dict | None = None,
     ):
         """戻り値: () のコンテキストマネージャ。withで使う。
@@ -65,32 +61,32 @@ def patched_registry():
         Args:
             model_dict: `_MODEL_CLASS_OBJ_REGISTRY` に設定するモデル名→クラス辞書
             config_dict: `config_registry._merged_config_data` に設定する辞書
-            direct_models: PydanticAI 直接モデルの ID リスト
             webapi_metadata: `_WEBAPI_MODEL_METADATA` (SSoT) に設定する辞書 (Issue #26)
+
+        Note:
+            ADR 0023 / Issue #45 で direct LiteLLM ID dispatch 経路は廃止された。
+            起動時 discovery で WebAPI モデルは registry に自動登録されるため、
+            `direct_models` 引数も併せて削除されている。
         """
         config_dict = config_dict or {}
-        direct_models = direct_models or []
         webapi_metadata = webapi_metadata or {}
 
-        # _config が dict の場合はそれを書き換え、なければ get_all_config を patch
-        return _PatchedRegistryCtx(model_dict, config_dict, direct_models, webapi_metadata)
+        return _PatchedRegistryCtx(model_dict, config_dict, webapi_metadata)
 
     return _setup
 
 
 class _PatchedRegistryCtx:
-    """_MODEL_CLASS_OBJ_REGISTRY と get_all_config と agent_factory を一括 patch するコンテキスト。"""
+    """_MODEL_CLASS_OBJ_REGISTRY と get_all_config を一括 patch するコンテキスト。"""
 
     def __init__(
         self,
         model_dict: dict,
         config_dict: dict,
-        direct_models: list[str],
         webapi_metadata: dict | None = None,
     ):
         self.model_dict = model_dict
         self.config_dict = config_dict
-        self.direct_models = direct_models
         self.webapi_metadata = webapi_metadata or {}
         self._patches: list = []
 
@@ -105,12 +101,6 @@ class _PatchedRegistryCtx:
         # 内部データを差し替えれば両方一貫した値を返せる。proxy の delattr 問題も回避できる。
         real_registry = get_config_registry()
         self._patches.append(patch.object(real_registry, "_merged_config_data", self.config_dict))
-        # ADR 0023 Phase 1 (Issue #35): 直接モデル一覧は `api._discover_available_models`
-        # (`api_model_discovery.get_available_models`) で解決する。旧 `get_agent_factory` は廃止。
-        direct_patch = patch(
-            "image_annotator_lib.api._discover_available_models", return_value=self.direct_models
-        )
-        self._patches.append(direct_patch)
 
         for p in self._patches:
             p.start()
@@ -127,7 +117,7 @@ class _PatchedRegistryCtx:
 @pytest.mark.unit
 @pytest.mark.fast
 def test_empty_registry_returns_empty_list(empty_registry):
-    """レジストリ空 + PydanticAI 直接モデル空のとき、空リストを返す。"""
+    """レジストリ空のとき、空リストを返す (Issue #45 で direct LiteLLM 経路廃止)。"""
     result = list_annotator_info()
     assert result == []
 
@@ -207,45 +197,11 @@ def test_webapi_model_capabilities_fallback(patched_registry):
     assert TaskCapability.SCORES in info.capabilities
 
 
-@pytest.mark.unit
-@pytest.mark.fast
-def test_pydanticai_direct_model_inclusion(patched_registry):
-    """PydanticAI 直接モデル (provider/model 形式) が結果に含まれ、is_api=True で分類される。"""
-    direct_id = "google/gemini-2.5-pro"
-    with patched_registry(
-        model_dict={},
-        config_dict={},
-        direct_models=[direct_id],
-    ):
-        result = list_annotator_info()
-
-    assert len(result) == 1
-    info = result[0]
-    assert info.name == direct_id
-    assert info.is_api is True
-    assert info.is_local is False
-    assert info.device is None
-    assert info.model_type == "vision"
-    # WebApiAnnotator の AnnotationSchema は 3 capability すべてを返す
-    assert TaskCapability.TAGS in info.capabilities
-    assert TaskCapability.CAPTIONS in info.capabilities
-    assert TaskCapability.SCORES in info.capabilities
-
-
-@pytest.mark.unit
-@pytest.mark.fast
-def test_pydanticai_direct_model_dedup_with_registry(patched_registry):
-    """レジストリにも PydanticAI factory にも同じ name がある場合、レジストリ側を優先して重複しない。"""
-    shared_name = "google/gemini-2.5-pro"
-    with patched_registry(
-        model_dict={shared_name: WebApiAnnotator},
-        config_dict={shared_name: {"api_model_id": "gemini-2.5-pro", "capabilities": ["tags"]}},
-        direct_models=[shared_name],
-    ):
-        result = list_annotator_info()
-
-    names = [info.name for info in result]
-    assert names.count(shared_name) == 1
+# ADR 0023 / Issue #45: direct LiteLLM ID dispatch 経路は廃止されたため、以下の旧テストは削除:
+#   - test_pydanticai_direct_model_inclusion
+#   - test_pydanticai_direct_model_dedup_with_registry
+# 起動時 discovery で WebAPI モデルは registry に自動登録されるため、registry 経由の
+# AnnotatorInfo として `test_webapi_model_classification` 等で同等の検証が行われている。
 
 
 @pytest.mark.unit
@@ -265,11 +221,10 @@ def test_invariants_is_local_xor_is_api(patched_registry):
                 "capabilities": ["tags", "captions"],
             },
         },
-        direct_models=["openai/gpt-4o"],
     ):
         result = list_annotator_info()
 
-    assert len(result) == 3
+    assert len(result) == 2
     for info in result:
         # XOR 不変条件
         assert info.is_local != info.is_api, f"{info.name}: is_local と is_api が同じ"
@@ -451,24 +406,10 @@ def test_phase2_safe_helpers_handle_malformed_metadata(patched_registry):
     assert info.discontinued_at is None
 
 
-@pytest.mark.unit
-@pytest.mark.fast
-def test_pydanticai_direct_model_has_inferred_provider_and_api_model_id(patched_registry):
-    """PydanticAI 直接モデルは model_id から provider 推論 + api_model_id=model_id。"""
-    with patched_registry(
-        model_dict={},
-        direct_models=["google/gemini-2.5-pro", "anthropic/claude-3-5-sonnet-latest"],
-    ):
-        result = list_annotator_info()
-
-    by_name = {info.name: info for info in result}
-    assert by_name["google/gemini-2.5-pro"].provider == "google"
-    assert by_name["google/gemini-2.5-pro"].litellm_model_id == "google/gemini-2.5-pro"
-    assert by_name["anthropic/claude-3-5-sonnet-latest"].provider == "anthropic"
-    assert (
-        by_name["anthropic/claude-3-5-sonnet-latest"].litellm_model_id
-        == "anthropic/claude-3-5-sonnet-latest"
-    )
+# ADR 0023 / Issue #45: test_pydanticai_direct_model_has_inferred_provider_and_api_model_id を削除。
+# direct LiteLLM ID 経路の AnnotatorInfo 構築は廃止された。registry 経由の WebAPI モデルは
+# `_register_webapi_models_from_discovery()` が provider 情報を含む metadata を生成するため、
+# `test_webapi_model_phase2_fields_from_ssot` 等で SSoT 経由の検証が行われている。
 
 
 # ============================================================================
@@ -532,13 +473,16 @@ def test_malformed_user_overrides_skips_only_bad_model(patched_registry):
 
 @pytest.mark.unit
 @pytest.mark.fast
-def test_provider_normalized_to_lowercase_across_sources(patched_registry):
-    """PR #27 Codex P2 回帰防止: provider 名は出所に関係なく lowercase に正規化される。
+def test_provider_normalized_to_lowercase_from_ssot(patched_registry):
+    """PR #27 Codex P2 回帰防止: provider 名は SSoT の display-case を lowercase に正規化する。
 
-    `available_api_models.toml` は "OpenAI"/"Google" の display-case で記述されるが、
-    `_infer_provider_from_model_id` の slash 経由出力は "openai"/"google" の小文字。
-    AnnotatorInfo.provider が混在すると case-sensitive consumer が誤分類する。
-    本テストは 3 経路 (registry/SSoT/直接モデル) すべてで lowercase で一貫することを保証する。
+    `_register_webapi_models_from_discovery()` は LiteLLM の provider prefix を
+    `provider` キーに格納するが、登録 metadata の display-case ("OpenAI"/"Google" 等)
+    は AnnotatorInfo の provider で lowercase に正規化される必要がある (case-sensitive
+    consumer の誤分類防止)。
+
+    Issue #45: direct LiteLLM ID dispatch 経路は廃止されたため、direct モデル経路の
+    provider 推論テストは削除。registry-backed の正規化のみ検証する。
     """
     with patched_registry(
         # Registry-backed WebAPI モデル: SSoT の display-case provider を持つ
@@ -555,8 +499,6 @@ def test_provider_normalized_to_lowercase_across_sources(patched_registry):
                 "class": "WebApiAnnotator",
             }
         },
-        # 直接モデル: model_id slash 前から推論 (既に小文字)
-        direct_models=["google/gemini-2.5-pro", "anthropic/claude-3-5-sonnet-latest"],
     ):
         result = list_annotator_info()
 
@@ -565,9 +507,6 @@ def test_provider_normalized_to_lowercase_across_sources(patched_registry):
     assert by_name["GPT-4o"].provider == "openai", (
         f"registry-backed WebAPI provider が小文字でない: {by_name['GPT-4o'].provider!r}"
     )
-    # direct モデル: 既に小文字 (一貫性確認)
-    assert by_name["google/gemini-2.5-pro"].provider == "google"
-    assert by_name["anthropic/claude-3-5-sonnet-latest"].provider == "anthropic"
 
     # 全 provider が小文字 (case-sensitive consumer 向けの不変条件)
     for info in result:

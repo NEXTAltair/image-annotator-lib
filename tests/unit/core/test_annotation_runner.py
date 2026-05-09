@@ -1,10 +1,9 @@
-"""ADR 0023 Phase 1: core/annotation_runner._create_annotator_instance の lookup 順序テスト。
+"""ADR 0023 Phase 1 / Issue #45: core/annotation_runner._create_annotator_instance の lookup テスト。
 
-Codex review P1 (https://github.com/NEXTAltair/image-annotator-lib/pull/38#discussion_r3203496580)
-で指摘された「registry の OpenRouter エントリが direct LiteLLM dispatch に奪われる」問題の
-regression test。Issue #35 で `_is_webapi_annotator_class` が
-`issubclass(cls, WebApiAnnotator)` 判定に変わったため、stub class も
-`WebApiAnnotator` 由来であることを直接 registry 値として使う。
+Issue #45 で direct LiteLLM ID dispatch 経路が廃止された。本テストでは:
+- registry 経由で WebAPI / ローカル ML が正しくインスタンス化されること
+- registry 未登録の任意モデル名 (`provider/model` 形式含む) が KeyError で弾かれること
+を検証する。
 """
 
 from __future__ import annotations
@@ -25,18 +24,18 @@ class _StubLocalAnnotator:
 class TestCreateAnnotatorInstanceLookupOrder:
     """registry-first lookup の検証。"""
 
-    def test_registry_openrouter_entry_takes_precedence_over_direct_litellm(
+    def test_registry_resolves_slash_form_to_litellm_metadata(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """OpenRouter モデルが registry に slash 形式 (例: ``openai/gpt-4o``) で登録されている場合、
-        direct OpenAI ではなく ``openrouter/openai/gpt-4o`` で WebApiAnnotator が構築される。
+        """registry に slash 形式 (例: ``openai/gpt-4o``) で登録された OpenRouter モデルが、
+        metadata の `litellm_model_id` (``openrouter/openai/gpt-4o``) で WebApiAnnotator
+        として構築される。Issue #45 で direct dispatch 経路は廃止されたため、
+        registry-only の resolution path のみが残る。
         """
         monkeypatch.setattr(
             annotation_runner,
             "find_model_class_case_insensitive",
-            lambda name: (
-                ("openai/gpt-4o", WebApiAnnotator) if name == "openai/gpt-4o" else None
-            ),
+            lambda name: (("openai/gpt-4o", WebApiAnnotator) if name == "openai/gpt-4o" else None),
         )
         monkeypatch.setattr(
             annotation_runner,
@@ -77,19 +76,22 @@ class TestCreateAnnotatorInstanceLookupOrder:
         with pytest.raises(KeyError, match="litellm_model_id"):
             annotation_runner._create_annotator_instance("legacy-name")
 
-    def test_direct_litellm_id_used_when_not_in_registry(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """registry に無い `provider/model` 形式は direct LiteLLM ID として扱う。"""
+    def test_unregistered_provider_model_format_raises_key_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Issue #45: registry に存在しない `provider/model` 形式は direct dispatch されず
+        KeyError になる。capability check 抜けで非 vision モデルが API 課金前に弾けない
+        問題を回避するため、direct LiteLLM ID 経路は廃止された。
+        """
         monkeypatch.setattr(
             annotation_runner,
             "find_model_class_case_insensitive",
             lambda name: None,
         )
-        monkeypatch.setattr(annotation_runner, "get_webapi_metadata", lambda name: None)
+        monkeypatch.setattr(annotation_runner, "get_cls_obj_registry", lambda: {})
 
-        instance = annotation_runner._create_annotator_instance("anthropic/claude-3-5-sonnet-20241022")
-        assert isinstance(instance, WebApiAnnotator)
-        assert instance.litellm_model_id == "anthropic/claude-3-5-sonnet-20241022"
-        assert instance.model_name == "anthropic/claude-3-5-sonnet-20241022"
+        with pytest.raises(KeyError, match="not found in registry"):
+            annotation_runner._create_annotator_instance("anthropic/claude-3-5-sonnet-20241022")
 
     def test_local_ml_model_instantiated_directly(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """registry の非 WebAPI クラスは旧来通り直接インスタンス化する。"""
@@ -103,10 +105,9 @@ class TestCreateAnnotatorInstanceLookupOrder:
         assert instance.model_name == "local-tagger"
 
     def test_unknown_model_raises_key_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """registry にも direct LiteLLM 形式にも該当しない場合 KeyError。"""
+        """registry に該当しないモデル名は KeyError (slash 形式かどうかに関わらず)。"""
         monkeypatch.setattr(annotation_runner, "find_model_class_case_insensitive", lambda name: None)
         monkeypatch.setattr(annotation_runner, "get_cls_obj_registry", lambda: {})
-        monkeypatch.setattr(annotation_runner, "get_available_models", lambda: [])
 
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError, match="not found in registry"):
             annotation_runner._create_annotator_instance("just-a-name")

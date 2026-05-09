@@ -124,7 +124,7 @@ The `ModelLoad` class implements sophisticated memory management:
 ### Web API Integration (ADR 0023 Phase 1 / Phase 1.x)
 
 **統一 WebAPI Architecture:**
-- `WebApiAnnotator` (`core/webapi_annotator.py`) — direct LiteLLM ID (`google/gemini-...`) と registry 登録 WebAPI モデル双方を扱う唯一の `BaseAnnotator` サブクラス
+- `WebApiAnnotator` (`core/webapi_annotator.py`) — registry 登録 WebAPI モデル経由でインスタンス化される唯一の `BaseAnnotator` サブクラス (Issue #45 で direct LiteLLM ID dispatch 経路は廃止)
 - `ProviderManager` (`core/provider_manager.py`) — LiteLLM ID 解析 + PydanticAI native provider/model 構築 + 推論実行。`run_inference_with_model_async()` が中核実装、sync wrapper は running event loop 内で `InferenceError`
 - Agent / Provider / Model はキャッシュしない (推論呼び出しごとに毎回新規作成)
 - `os.environ` mutate 禁止: API key は `api_keys: dict[str, str]` 経由で provider object に明示注入のみ
@@ -182,7 +182,7 @@ estimated_size_gb = 1.5
 
 **Adding New Models:**
 1. **ローカル ML モデル**: 適切な framework base class (`TransformersBaseAnnotator` / `ONNXBaseAnnotator` / 等) を継承して実装
-2. **WebAPI モデル**: 通常は `WebApiAnnotator` (`core/webapi_annotator.py`) で自動対応される。LiteLLM 同梱 DB に登録された vision-capable モデルは `_register_webapi_models_from_discovery()` が起動時に自動 registry 登録する。LoRAIro 側からは `model_name_list=["openai/gpt-4o", ...]` のように直接 LiteLLM ID を渡せる。
+2. **WebAPI モデル**: 通常は `WebApiAnnotator` (`core/webapi_annotator.py`) で自動対応される。LiteLLM 同梱 DB に登録された vision + function_calling 対応モデルは `_register_webapi_models_from_discovery()` が起動時に自動 registry 登録する。LoRAIro 側からは `model_name_list=["openai/gpt-4o", ...]` のように **registry に登録された** LiteLLM ID slash 形式を渡せる (Issue #45: registry 未登録の任意 ID 直接呼び出しは廃止)。
 3. **新 provider 対応**: `core/model_id.py:_BUILDER_DISPATCH` テーブルに provider 別 builder を追加するだけで完結 (allowlist 編集不要)
 4. Add corresponding test in appropriate test directory
 
@@ -230,7 +230,7 @@ estimated_size_gb = 1.5
 | LiteLLM ID と PydanticAI 実行 descriptor の mapping | `core/model_id.py` |
 | Schema → Result 変換 / 軽微正規化 | `core/result_adapter.py` |
 | PIL Image → BinaryContent 変換 | `core/image_preprocess.py` |
-| BaseAnnotator wrapping (direct LiteLLM ID + registry 登録 WebAPI) | `core/webapi_annotator.py` |
+| BaseAnnotator wrapping (registry 登録 WebAPI モデル) | `core/webapi_annotator.py` |
 | Agent 構築・実行 (キャッシュなし) | `core/provider_manager.py` |
 
 **主要コンポーネント:**
@@ -250,7 +250,7 @@ estimated_size_gb = 1.5
    - `output_retries=1` で structured output validation failure を 1 回再生成
 
 3. **`core/webapi_annotator.py`** — `BaseAnnotator` 継承の汎用 wrapper
-   - direct LiteLLM ID (`google/gemini-...`) と registry 登録 WebAPI モデルの双方を扱う
+   - registry 登録 WebAPI モデル経由でインスタンス化される (Issue #45 で direct LiteLLM ID dispatch 経路は廃止)
    - `BaseAnnotator.__init__` の `config_registry` 依存を回避するため最小限の field 設定
    - `__enter__` / `__exit__` は no-op
 
@@ -267,11 +267,12 @@ estimated_size_gb = 1.5
   - `InferenceError` — PydanticAI 実行時エラーの wrap
   - `SafetyRefusalError` / `ContentPolicyRefusalError` — provider safety/content refusal (Phase 1.5 Issue #42)
 
-**Usage Pattern (ADR 0023 Phase 1):**
+**Usage Pattern (ADR 0023 Phase 1 / Issue #45):**
 ```python
 from image_annotator_lib import annotate
 
-# direct LiteLLM ID 経由 (registry 登録不要)
+# registry-resolved LiteLLM ID 経由 (起動時 discovery で自動登録された
+# `provider/model` 形式のモデル名を渡す)。registry 未登録の任意 LiteLLM ID は KeyError。
 results = annotate(
     images_list=[...],
     model_name_list=["openai/gpt-4o", "anthropic/claude-3-5-sonnet-20241022"],

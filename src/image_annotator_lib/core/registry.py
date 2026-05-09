@@ -612,36 +612,6 @@ def _build_annotator_info_for_registry_model(
     )
 
 
-def _build_annotator_info_for_direct_model(model_id: str) -> AnnotatorInfo:
-    """PydanticAI 直接モデル (例: ``google/gemini-2.5-pro``) から AnnotatorInfo を構築する。
-
-    これらのモデルはレジストリには登録されておらず、`WebApiAnnotator` 経由で
-    実行される (ADR 0023 Phase 1)。すべて WebAPI 呼び出しなので ``is_api=True``、
-    device は持たない。
-
-    capabilities は `WebApiAnnotator.ADVERTISED_CAPABILITIES` を参照する。
-    申告値と実装が常に一致するよう、循環インポートを避けるため関数内で遅延 import する。
-
-    Args:
-        model_id: ``provider/model_name`` 形式のモデル ID
-
-    Returns:
-        AnnotatorInfo: 型安全なメタデータ。model_type は "vision" 固定 (汎用 VLM)。
-    """
-    from .webapi_annotator import WebApiAnnotator  # 循環 import 回避のため遅延
-
-    return AnnotatorInfo(
-        name=model_id,
-        model_type="vision",
-        capabilities=WebApiAnnotator.ADVERTISED_CAPABILITIES,
-        is_local=False,
-        is_api=True,
-        device=None,
-        provider=_infer_provider_from_model_id(model_id),
-        litellm_model_id=model_id,  # 直接モデルは model_id 自体が LiteLLM ID
-    )
-
-
 def normalize_model_name(model_name: str) -> str | None:
     """モデル名を正規化(大文字・小文字を区別しない検索で実際のキー名を返す)
 
