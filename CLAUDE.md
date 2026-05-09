@@ -128,13 +128,13 @@ The `ModelLoad` class implements sophisticated memory management:
 - `ProviderManager` (`core/provider_manager.py`) — LiteLLM ID 解析 + PydanticAI native provider/model 構築 + 推論実行。`run_inference_with_model_async()` が中核実装、sync wrapper は running event loop 内で `InferenceError`
 - Agent / Provider / Model はキャッシュしない (推論呼び出しごとに毎回新規作成)
 - `os.environ` mutate 禁止: API key は `api_keys: dict[str, str]` 経由で provider object に明示注入のみ
-- LiteLLM `supports_vision()` で実行直前に fail-fast
+- Capability 判定 (`supports_vision` + `supports_function_calling`) は discovery / registry 段階で完結 (Issue #45)。推論層は capability 前提で動作する
 
 **Implementation Pattern:**
 - 単一 base class `WebApiAnnotator` で OpenAI / Anthropic / Google / OpenRouter を統一処理
-- Structured output via Pydantic models (`AnnotationSchema` in `core/types.py`)
+- Structured output は PydanticAI default Tool Output で得る (Pydantic schema = `AnnotationSchema` in `core/types.py`)
 - Provider 別差異 (`openrouter:` prefix 等) は `core/model_id.py` の `_BUILDER_DISPATCH` テーブルに集約
-- **API Model Discovery** (`core/api_model_discovery.py`) — LiteLLM 同梱 DB から runtime に WebAPI モデル一覧と capability metadata を取得 (TOML キャッシュなし)
+- **API Model Discovery** (`core/api_model_discovery.py`) — LiteLLM 同梱 DB から runtime に WebAPI モデル一覧と capability metadata を取得 (TOML キャッシュなし)。絞り込み主条件は `supports_vision` + `supports_function_calling` (Issue #45)。`supports_response_schema` は判定に使わない
 - WebAPI モデル登録は `core/registry.py:_register_webapi_models_from_discovery()` が `WebApiAnnotator` を直接 registry に entry する (旧 `PydanticAIWebAPIAnnotator` 経由は Phase 1.x で廃止)
 
 ### Test Architecture
@@ -216,7 +216,10 @@ estimated_size_gb = 1.5
 > 詳細仕様は [LoRAIro ADR 0023 — PydanticAI / LiteLLM WebAPI Inference Boundary](https://github.com/NEXTAltair/LoRAIro/blob/main/docs/decisions/0023-pydanticai-litellm-webapi-inference-boundary.md) を参照。
 > 関連 ISSUE: [#37 (ADR)](https://github.com/NEXTAltair/image-annotator-lib/issues/37) /
 > [#36 (Phase 1 実装)](https://github.com/NEXTAltair/image-annotator-lib/issues/36) /
-> [#35 (device 判定分離)](https://github.com/NEXTAltair/image-annotator-lib/issues/35)
+> [#35 (device 判定分離)](https://github.com/NEXTAltair/image-annotator-lib/issues/35) /
+> [#42 (refusal 例外階層)](https://github.com/NEXTAltair/image-annotator-lib/issues/42) /
+> [#41 (litellm_model_id rename)](https://github.com/NEXTAltair/image-annotator-lib/issues/41) /
+> [#45 (function_calling 主条件)](https://github.com/NEXTAltair/image-annotator-lib/issues/45)
 
 **責務分離:**
 
@@ -242,7 +245,7 @@ estimated_size_gb = 1.5
    - `run_inference_with_model_async()`: async core 実装
    - `run_inference_with_model()`: sync wrapper (running event loop 内では明示エラー)
    - 推論呼び出しごとに Agent / Provider / Model を新規作成 (キャッシュなし)
-   - `litellm.supports_vision()` で実行直前 fail-fast
+   - Capability check は不要 (Issue #45 で discovery 段階に集約済み)
    - PydanticAI: `await agent.run([prompt_text, binary_content])` の sequence 形式
    - `output_retries=1` で structured output validation failure を 1 回再生成
 
@@ -261,8 +264,8 @@ estimated_size_gb = 1.5
   - `IdMappingError` — litellm_model_id 解析失敗
   - `UnknownProviderError` — `SUPPORTED_PROVIDERS` 外
   - `MissingApiKeyError` — api_keys に該当 provider キーなし
-  - `VisionUnsupportedError` — `litellm.supports_vision()` False
   - `InferenceError` — PydanticAI 実行時エラーの wrap
+  - `SafetyRefusalError` / `ContentPolicyRefusalError` — provider safety/content refusal (Phase 1.5 Issue #42)
 
 **Usage Pattern (ADR 0023 Phase 1):**
 ```python

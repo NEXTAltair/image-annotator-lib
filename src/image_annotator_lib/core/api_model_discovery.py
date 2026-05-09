@@ -37,11 +37,17 @@ def is_allowed_provider(model_id: str) -> bool:
 
 
 def _is_litellm_model_annotation_compatible(info: dict[str, Any]) -> bool:
-    """画像アノテーションに適したモデルか判定する (Vision + 構造化出力)。"""
+    """画像アノテーションに適したモデルか判定する (Vision + Tool/Function calling)。
+
+    ADR 0023 Phase 1 (Issue #45): structured output は PydanticAI default Tool Output
+    で得るため、`supports_response_schema` ではなく `supports_function_calling` を
+    主条件にする。`supports_response_schema` は NativeOutput 最適化の参考用 metadata
+    として LiteLLM 側にあるが、本判定では使わない。
+    """
     mode = info.get("mode", "chat")
     return (
         info.get("supports_vision") is True
-        and info.get("supports_response_schema") is True
+        and info.get("supports_function_calling") is True
         and mode in _SUPPORTED_LITELLM_MODES
     )
 
@@ -67,7 +73,6 @@ def _format_litellm_metadata(model_id: str, info: dict[str, Any]) -> dict[str, A
         "max_input_tokens": info.get("max_input_tokens"),
         "max_output_tokens": info.get("max_output_tokens"),
         "supports_vision": info.get("supports_vision"),
-        "supports_response_schema": info.get("supports_response_schema"),
         "supports_function_calling": info.get("supports_function_calling"),
         "supports_tool_choice": info.get("supports_tool_choice"),
         "supports_parallel_function_calling": info.get("supports_parallel_function_calling"),
@@ -85,7 +90,8 @@ def _collect_models(
     """LiteLLM `model_cost` を allowlist / capability / deprecation で filter する。
 
     Args:
-        require_compatible: True なら `supports_vision` + `supports_response_schema` 必須。
+        require_compatible: True なら `supports_vision` + `supports_function_calling` 必須
+            (ADR 0023 Phase 1 / Issue #45)。
         exclude_deprecated: True なら `deprecation_date` が設定されている entry を除外。
 
     Returns:
