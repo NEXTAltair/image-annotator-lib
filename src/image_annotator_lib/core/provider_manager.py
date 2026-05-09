@@ -10,6 +10,7 @@ mutate しない (`api_keys` 経由の明示注入のみ)。
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from typing import Any
 
@@ -176,13 +177,102 @@ class ProviderManager:
         raise MissingApiKeyError(provider=provider)
 
 
-# `finish_reason`/`finishReason` (Google) や `stop_reason`/`stopReason` (Anthropic) は
-# snake_case と camelCase / 区切りに `:` と `=` 双方が混在する。`.lower()` 後の
-# camelCase は `finishreason` 等になるため、正規表現 `finish_?reason\s*[:=]\s*safety`
-# で 4 通り (snake_case/camelCase x `:`/`=`) を一括カバーする。
-_FINISH_REASON_SAFETY_RE = re.compile(r"finish_?reason\s*[:=]\s*safety")
-_STOP_REASON_REFUSAL_RE = re.compile(r"stop_?reason\s*[:=]\s*refusal")
-_FINISH_REASON_CONTENT_FILTER_RE = re.compile(r"finish_?reason\s*[:=]\s*content_filter")
+# --- Refusal 分類のための内部 helper ---
+#
+# ADR 0023 Phase 1.5 (Codex P1 r3212094633): PydanticAI 統合の利点を活かし、
+# exception の string を grep する旧方式から、`exc.body` の構造化ペイロード
+# (JSON / dict) を再帰探索して `finish_reason` / `stop_reason` フィールドを
+# 直接取得する設計に変更。文字列 grep は legacy fallback としてのみ残す。
+#
+# 構造化ファースト方式の利点:
+# - JSON quote 形式 (`"finishReason": "SAFETY"`) も provider 横断で一様に処理
+# - `finish_reason` フィールド限定検査で偽陽性 (e.g. "safety filter applied" 等の
+#   誤マッチ) を構造的に排除
+# - Provider 別 response 構造 (`candidates[].finishReason` / `choices[].finish_reason`
+#   / 直下 `stop_reason`) を再帰 walker で吸収
+
+_REASON_KEY_NORMALIZED = frozenset({"finishreason", "stopreason"})
+
+# Legacy fallback: body が無い / JSON でない exception 経路用 (PydanticAI 以外の
+# 例外型、または旧 SDK 直叩き経路)。`.lower()` 適用後の文字列で snake_case / camelCase
+# / `:` / `=` を吸収する。引用符を許容するため `["']*` を含む。
+_FINISH_REASON_SAFETY_RE = re.compile(r"""finish_?reason["']?\s*[:=]\s*["']?safety""")
+_STOP_REASON_REFUSAL_RE = re.compile(r"""stop_?reason["']?\s*[:=]\s*["']?refusal""")
+_FINISH_REASON_CONTENT_FILTER_RE = re.compile(r"""finish_?reason["']?\s*[:=]\s*["']?content_filter""")
+
+
+def _walk_for_reason(obj: Any) -> str | None:
+    """dict / list を再帰的に walk して `finishReason`/`stopReason` の値を返す。
+
+    Args:
+        obj: 探索対象 (dict / list / その他 — その他は None を返す)。
+
+    Returns:
+        最初に見つかった reason 値を lowercase 化して返す。見つからなければ None。
+    """
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if isinstance(key, str):
+                normalized_key = key.lower().replace("_", "")
+                if normalized_key in _REASON_KEY_NORMALIZED and isinstance(value, str):
+                    return value.lower()
+            nested = _walk_for_reason(value)
+            if nested is not None:
+                return nested
+    elif isinstance(obj, list):
+        for item in obj:
+            nested = _walk_for_reason(item)
+            if nested is not None:
+                return nested
+    return None
+
+
+def _extract_reason_from_body(body: Any) -> str | None:
+    """PydanticAI exception の `body` 属性から refusal reason を抽出する。
+
+    `UnexpectedModelBehavior(message, body)` / `ModelHTTPError(..., body)` は
+    body 属性に response payload を持つ。JSON 文字列 / dict / list / object を
+    安全に parse して `finishReason` / `stop_reason` 等を取り出す。
+
+    Args:
+        body: PydanticAI exception の body 属性 (str / dict / list / None)。
+
+    Returns:
+        抽出された reason の lowercase 値、または抽出できなければ None。
+    """
+    if body is None:
+        return None
+
+    parsed: Any = body
+    if isinstance(body, str):
+        try:
+            parsed = json.loads(body)
+        except (json.JSONDecodeError, ValueError):
+            # JSON でない body (plain text 等) は legacy fallback に任せる
+            return None
+
+    return _walk_for_reason(parsed)
+
+
+def _classify_reason(
+    reason: str | None,
+) -> type[SafetyRefusalError] | type[ContentPolicyRefusalError] | None:
+    """抽出された reason 値を refusal exception type に分類する。
+
+    Args:
+        reason: lowercase 化された reason 値 (`safety` / `refusal` /
+            `content_filter` / その他)。
+
+    Returns:
+        対応する exception type、または分類対象外なら None。
+    """
+    if reason is None:
+        return None
+    if reason == "content_filter":
+        return ContentPolicyRefusalError
+    if reason in {"safety", "refusal", "blocked"}:
+        return SafetyRefusalError
+    return None
 
 
 def _classify_refusal(
@@ -192,21 +282,21 @@ def _classify_refusal(
 ) -> SafetyRefusalError | ContentPolicyRefusalError | None:
     """PydanticAI / provider SDK exception から safety/content refusal を検出する。
 
-    検出パターン (ADR 0023 Phase 1.5):
-    - exception type 名に "ContentFilter" 含む (OpenAI) → ContentPolicyRefusalError
-    - exception message に "content_filter" 含む / `finish_reason=content_filter`
-      系の signature → ContentPolicyRefusalError
-    - exception type 名に "Refusal" 含む (Anthropic) → SafetyRefusalError
-    - exception message の signature 検査 (case-insensitive、snake_case/camelCase
-      および区切り `:`/`=` を正規表現で吸収):
-      - `stop_reason=refusal` / `stopReason: refusal` 等 → SafetyRefusalError
-      - `finish_reason=safety` / `finishReason=SAFETY` / `finishReason: SAFETY` 等
-        → SafetyRefusalError
-      - "blocked due to safety" / "blockedreason" → SafetyRefusalError
-    - 該当しなければ None (caller が generic error として扱う)
+    判定は 3 段階の優先度で行う (Codex P1 r3212094633 / Issue #42):
 
-    PydanticAI / provider SDK の実 surface に追従するため、case-insensitive な
-    部分マッチで検出する。実例外の signature が判明次第 follow-up で精度向上可能。
+    1. **PydanticAI `exc.body` 構造化ペイロード**: `UnexpectedModelBehavior`/
+       `ModelHTTPError` が body 属性で provider response (JSON / dict) を保持
+       するため、これを再帰 walk して `finishReason`/`stop_reason` を直接抽出。
+       - `finish_reason=content_filter` → ContentPolicyRefusalError
+       - `finish_reason=safety` / `stop_reason=refusal` / blocked → SafetyRefusalError
+       Provider 横断で一様に動作し、引用符 / 区切りの違いに影響されない。
+
+    2. **Exception type 名 fallback**: PydanticAI 以外の SDK で provider 専用例外
+       型を持つ場合 (e.g. OpenAI `ContentFilterFinishReasonError`)。
+
+    3. **String regex fallback (legacy)**: body 属性が無い経路 / 非 JSON body
+       のため、message 文字列を case-insensitive 部分マッチ。snake_case/camelCase
+       および `:`/`=` 区切り、引用符の有無を正規表現で吸収。
 
     Args:
         exc: catch された例外
@@ -214,21 +304,48 @@ def _classify_refusal(
         image_phash: 対象画像の pHash
 
     Returns:
-        分類された refusal exception、または None
+        分類された refusal exception、または該当しなければ None
+        (caller が generic error として扱う)。
     """
+    # Priority 1: PydanticAI exc.body 構造化ペイロード
+    body = getattr(exc, "body", None)
+    body_reason = _extract_reason_from_body(body)
+    refusal_cls = _classify_reason(body_reason)
+    if refusal_cls is not None:
+        return refusal_cls(
+            litellm_model_id=litellm_model_id,
+            image_phash=image_phash,
+            provider_refusal_reason=f"finish_reason={body_reason}",
+        )
+
+    # Priority 2: Exception type 名 (OpenAI ContentFilterFinishReasonError 等)
     exc_type_name = type(exc).__name__.lower()
+    if "contentfilter" in exc_type_name:
+        return ContentPolicyRefusalError(
+            litellm_model_id=litellm_model_id,
+            image_phash=image_phash,
+            provider_refusal_reason=str(exc)[:200],
+        )
+    if "refusal" in exc_type_name:
+        return SafetyRefusalError(
+            litellm_model_id=litellm_model_id,
+            image_phash=image_phash,
+            provider_refusal_reason=str(exc)[:200],
+        )
+
+    # Priority 3: String regex fallback (legacy / 非 PydanticAI 経路)
+    # message 本体に加え、body が非 JSON で priority 1 が failed した場合の
+    # body 文字列も搜索対象に含める (PydanticAI 以外の plain-text body 救済)。
     exc_message = str(exc).lower()
+    if body is not None and body_reason is None:
+        body_str = body if isinstance(body, str) else str(body)
+        exc_message = f"{exc_message} {body_str.lower()}"
 
-    # ContentPolicy (OpenAI 系の content_filter) を優先判定
     is_content_filter = (
-        "contentfilter" in exc_type_name
-        or "content_filter" in exc_message
-        or _FINISH_REASON_CONTENT_FILTER_RE.search(exc_message) is not None
+        "content_filter" in exc_message or _FINISH_REASON_CONTENT_FILTER_RE.search(exc_message) is not None
     )
-
     is_safety_refusal = (
-        "refusal" in exc_type_name
-        or _STOP_REASON_REFUSAL_RE.search(exc_message) is not None
+        _STOP_REASON_REFUSAL_RE.search(exc_message) is not None
         or _FINISH_REASON_SAFETY_RE.search(exc_message) is not None
         or "blocked due to safety" in exc_message
         or "blockedreason" in exc_message

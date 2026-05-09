@@ -4,6 +4,8 @@
 SafetyRefusalError / ContentPolicyRefusalError を正しく分類することを確認する。
 """
 
+from typing import Any
+
 import pytest
 
 from image_annotator_lib.core.provider_manager import _classify_refusal
@@ -240,3 +242,207 @@ def test_classify_refusal_empty_image_phash_allowed():
     assert isinstance(classified, SafetyRefusalError)
     assert classified.image_phash == ""
     assert "image_phash" not in classified.details
+
+
+# ========================================================================
+# PydanticAI exc.body 構造化ペイロード経路 (Codex P1 r3212094633)
+#
+# UnexpectedModelBehavior(message, body) / ModelHTTPError(..., body) の body 属性に
+# provider response (JSON 文字列 / dict) を保持するパターンを検証。引用符・区切り
+# の差異に影響されず、構造化探索で reason を取得することを確認する。
+# ========================================================================
+
+
+class _FakePydanticAIException(Exception):
+    """PydanticAI の UnexpectedModelBehavior / ModelHTTPError を模した最小 stub。
+
+    実物の `body` attribute ファースト判定動作を確認するための test 用。
+    """
+
+    def __init__(self, message: str, body: Any = None):
+        super().__init__(message)
+        self.body = body
+
+
+@pytest.mark.unit
+def test_classify_refusal_body_json_finish_reason_safety():
+    """Codex P1 (PR #44 r3212094633): exc.body の JSON 文字列で finishReason: SAFETY を検出。
+
+    Google Gemini の典型的な refusal response。引用符付きの quoted JSON を
+    body 経由で構造化探索することで、regex の引用符問題を構造的に回避。
+    """
+    body = '{"candidates":[{"finishReason":"SAFETY","safetyRatings":[]}]}'
+    exc = _FakePydanticAIException("model returned no content", body=body)
+    classified = _classify_refusal(
+        exc,
+        litellm_model_id="google/gemini-2.0-flash-lite",
+        image_phash="phash_body_safety",
+    )
+    assert isinstance(classified, SafetyRefusalError)
+    assert classified.litellm_model_id == "google/gemini-2.0-flash-lite"
+    assert "safety" in classified.provider_refusal_reason
+
+
+@pytest.mark.unit
+def test_classify_refusal_body_json_stop_reason_refusal():
+    """exc.body の JSON で stop_reason: refusal を検出 (Anthropic)。"""
+    body = '{"id":"msg_xyz","stop_reason":"refusal","content":[]}'
+    exc = _FakePydanticAIException("anthropic refusal", body=body)
+    classified = _classify_refusal(
+        exc,
+        litellm_model_id="anthropic/claude-3-5-sonnet-20241022",
+        image_phash="phash_body_anthropic",
+    )
+    assert isinstance(classified, SafetyRefusalError)
+
+
+@pytest.mark.unit
+def test_classify_refusal_body_json_finish_reason_content_filter():
+    """exc.body の JSON で finish_reason: content_filter を検出 (OpenAI)。"""
+    body = '{"choices":[{"finish_reason":"content_filter","message":{}}]}'
+    exc = _FakePydanticAIException("openai content filter", body=body)
+    classified = _classify_refusal(
+        exc,
+        litellm_model_id="openai/gpt-4o",
+        image_phash="phash_body_openai",
+    )
+    assert isinstance(classified, ContentPolicyRefusalError)
+
+
+@pytest.mark.unit
+def test_classify_refusal_body_dict_native():
+    """exc.body が既に dict object の場合も正しく扱える (json.loads スキップ)。"""
+    body = {"candidates": [{"finishReason": "SAFETY"}]}
+    exc = _FakePydanticAIException("gemini dict body", body=body)
+    classified = _classify_refusal(
+        exc,
+        litellm_model_id="google/gemini-2.5-pro",
+        image_phash="phash_body_dict",
+    )
+    assert isinstance(classified, SafetyRefusalError)
+
+
+@pytest.mark.unit
+def test_classify_refusal_body_nested_dict():
+    """ネストされた dict 構造でも再帰的に reason を見つける。"""
+    body = {
+        "outer": {"middle": {"candidates": [{"finishReason": "SAFETY"}]}},
+    }
+    exc = _FakePydanticAIException("nested", body=body)
+    classified = _classify_refusal(
+        exc,
+        litellm_model_id="google/gemini-2.5-pro",
+        image_phash="phash_nested",
+    )
+    assert isinstance(classified, SafetyRefusalError)
+
+
+@pytest.mark.unit
+def test_classify_refusal_body_priority_over_string_match():
+    """body 構造化判定 (priority 1) が string match (priority 3) より優先される。
+
+    body が SAFETY を示し、message は無関係 noise でも refusal 判定される。
+    """
+    body = '{"candidates":[{"finishReason":"SAFETY"}]}'
+    exc = _FakePydanticAIException(
+        "Generic error message without any refusal keywords",
+        body=body,
+    )
+    classified = _classify_refusal(
+        exc,
+        litellm_model_id="google/gemini-2.0-flash-lite",
+        image_phash="phash_priority",
+    )
+    assert isinstance(classified, SafetyRefusalError)
+
+
+@pytest.mark.unit
+def test_classify_refusal_body_invalid_json_falls_back_to_string():
+    """body が JSON parse できない文字列の場合、string match fallback (priority 3) で判定。"""
+    body = "not a JSON, but contains stop_reason=refusal somewhere"
+    exc = _FakePydanticAIException("anthropic non-json", body=body)
+    classified = _classify_refusal(
+        exc,
+        litellm_model_id="anthropic/claude-3-5-sonnet-20241022",
+        image_phash="phash_invalid_json",
+    )
+    # body は parse 失敗で None 返却 → priority 3 (string regex) で match
+    assert isinstance(classified, SafetyRefusalError)
+
+
+@pytest.mark.unit
+def test_classify_refusal_body_unrelated_finish_reason_returns_none():
+    """body の finish_reason が refusal 系以外なら None (e.g. "stop", "length")。"""
+    body = '{"candidates":[{"finishReason":"STOP"}]}'
+    exc = _FakePydanticAIException("normal completion", body=body)
+    classified = _classify_refusal(
+        exc,
+        litellm_model_id="google/gemini-2.0-flash-lite",
+        image_phash="phash_normal",
+    )
+    assert classified is None
+
+
+@pytest.mark.unit
+def test_classify_refusal_body_none_falls_back_to_other_priorities():
+    """body 属性が None なら priority 2 (type 名) → priority 3 (string) へ fallback。"""
+
+    class FakeContentFilterError(Exception):
+        pass
+
+    exc = FakeContentFilterError("blocked")  # body 属性なし
+    classified = _classify_refusal(
+        exc,
+        litellm_model_id="openai/gpt-4o",
+        image_phash="phash_no_body",
+    )
+    # body 無し → priority 2 で type 名 match
+    assert isinstance(classified, ContentPolicyRefusalError)
+
+
+@pytest.mark.unit
+def test_classify_refusal_body_quoted_signature_codex_regression():
+    """Codex P1 (PR #44 r3212094633) 回帰防止: 引用符付き JSON も struct-aware で取れる。
+
+    旧実装では `"finishReason":"SAFETY"` (key/value 共に引用符付き) が regex に
+    マッチせず取りこぼしていた。body 経路では引用符問わず構造化探索で取れる。
+    """
+    quoted_payload = '{"finishReason":"SAFETY"}'  # 完全 quoted
+    exc = _FakePydanticAIException(
+        # message には refusal 手がかり無し (旧 string 実装は素抜けする)
+        "model returned no content",
+        body=quoted_payload,
+    )
+    classified = _classify_refusal(
+        exc,
+        litellm_model_id="google/gemini-2.0-flash-lite",
+        image_phash="phash_quoted",
+    )
+    assert isinstance(classified, SafetyRefusalError)
+
+
+# ========================================================================
+# Legacy fallback 経路: regex 拡張 (引用符許容) 単体動作確認
+# ========================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "message",
+    [
+        # 引用符付き signature を string match fallback でも吸収できる
+        '"finishReason":"SAFETY"',
+        '"finishreason": "safety"',
+        "finishReason='SAFETY'",
+    ],
+)
+def test_classify_refusal_quoted_signature_in_string_fallback(message: str) -> None:
+    """body 属性が無い (旧 SDK 直叩き等) 経路でも、string regex fallback が引用符
+    付き signature を拾えること (priority 3 の robustness 確認)。"""
+    exc = Exception(message)  # body 属性なし、純粋 string 経路
+    classified = _classify_refusal(
+        exc,
+        litellm_model_id="google/gemini-2.0-flash-lite",
+        image_phash="phash_legacy_quoted",
+    )
+    assert isinstance(classified, SafetyRefusalError), f"variant 取りこぼし: {message!r}"
