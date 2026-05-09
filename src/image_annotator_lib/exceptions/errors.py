@@ -715,32 +715,6 @@ class MissingApiKeyError(WebApiError):
         )
 
 
-class VisionUnsupportedError(WebApiError):
-    """LiteLLM の supports_vision() が False を返した場合の例外。
-
-    画像入力をサポートしない LLM (例: `openai/gpt-3.5-turbo`) を Vision モデルとして
-    使おうとした場合に、API 課金前に弾くために raise する。
-
-    Attributes:
-        litellm_model_id: 対象モデル ID
-    """
-
-    def __init__(
-        self,
-        litellm_model_id: str,
-        details: dict[str, Any] | None = None,
-    ):
-        error_details = details or {}
-        error_details["litellm_model_id"] = litellm_model_id
-
-        self.litellm_model_id = litellm_model_id
-        super().__init__(
-            f"Model '{litellm_model_id}' does not support vision input",
-            provider_name="",
-            details=error_details,
-        )
-
-
 class InferenceError(WebApiError):
     """PydanticAI 実行時に発生したエラーをラップする例外。
 

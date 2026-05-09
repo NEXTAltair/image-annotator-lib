@@ -1,8 +1,8 @@
 """WebAPI 推論用の汎用 BaseAnnotator サブクラス (ADR 0023 Phase 1)。
 
 旧 `SimplifiedAgentWrapper` と `PydanticAIWebAPIWrapper` を統合した唯一の
-WebAPI 入口。direct model registration (`google/gemini-...` 等) と registry 登録済
-WebAPI モデルの双方を本クラスで処理する。
+WebAPI 入口。registry 登録済 WebAPI モデル経由でインスタンス化される
+(Issue #45: direct LiteLLM ID dispatch 経路は廃止)。
 
 Agent / Provider / Model はキャッシュせず推論呼び出しごとに新規作成する。
 
@@ -45,13 +45,15 @@ class WebApiAnnotator(BaseAnnotator):
             litellm_model_id: `openai/gpt-4o` のような LiteLLM 形式 ID。
             api_keys: provider 名 (`openai` / `anthropic` / `google` / `openrouter`)
                 をキーとする API key dict。
-            model_name: registry 登録済モデル名 (registry 経由の場合に渡す)。
-                省略時は `litellm_model_id` をモデル名として扱う (direct model registration)。
+            model_name: registry 登録済モデル名 (registry 経由の通常呼び出しで渡される)。
+                省略時は `litellm_model_id` をモデル名として扱う (テスト stub 等の特殊用途)。
         """
-        # ADR 0023 Phase 1 / Issue #35:
-        # - direct LiteLLM ID 経路 (`google/gemini-...` 等) では config_registry に entry が
-        #   無いため、`BaseAnnotator.__init__` (内部で `_load_config_from_registry` を
-        #   呼び得る) を踏まずに必要最小限の attribute のみを設定する。
+        # ADR 0023 Phase 1 / Issue #35 / Issue #45:
+        # - WebAPI モデルは registry 経由でのみインスタンス化される (Issue #45 で
+        #   direct dispatch 経路廃止)。本 __init__ も registry の litellm_model_id を
+        #   そのまま受け取って動作する設計。
+        # - `BaseAnnotator.__init__` は config_registry 依存のため踏まず、必要最小限の
+        #   attribute のみを直接設定する。
         # - device 判定はローカル ML 系 base class (Transformers / ONNX / TF / CLIP /
         #   Pipeline) の責務として分離されており (Issue #35)、本クラスは "api" 固定。
         # - Agent / Provider / Model はキャッシュしない (ADR 0023)。

@@ -5,7 +5,6 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, TypeVar, cast
 
-from .api_model_discovery import is_allowed_provider
 from .base import BaseAnnotator
 from .config import config_registry
 from .types import AnnotatorInfo, ModelType, TaskCapability
@@ -613,36 +612,6 @@ def _build_annotator_info_for_registry_model(
     )
 
 
-def _build_annotator_info_for_direct_model(model_id: str) -> AnnotatorInfo:
-    """PydanticAI 直接モデル (例: ``google/gemini-2.5-pro``) から AnnotatorInfo を構築する。
-
-    これらのモデルはレジストリには登録されておらず、`WebApiAnnotator` 経由で
-    実行される (ADR 0023 Phase 1)。すべて WebAPI 呼び出しなので ``is_api=True``、
-    device は持たない。
-
-    capabilities は `WebApiAnnotator.ADVERTISED_CAPABILITIES` を参照する。
-    申告値と実装が常に一致するよう、循環インポートを避けるため関数内で遅延 import する。
-
-    Args:
-        model_id: ``provider/model_name`` 形式のモデル ID
-
-    Returns:
-        AnnotatorInfo: 型安全なメタデータ。model_type は "vision" 固定 (汎用 VLM)。
-    """
-    from .webapi_annotator import WebApiAnnotator  # 循環 import 回避のため遅延
-
-    return AnnotatorInfo(
-        name=model_id,
-        model_type="vision",
-        capabilities=WebApiAnnotator.ADVERTISED_CAPABILITIES,
-        is_local=False,
-        is_api=True,
-        device=None,
-        provider=_infer_provider_from_model_id(model_id),
-        litellm_model_id=model_id,  # 直接モデルは model_id 自体が LiteLLM ID
-    )
-
-
 def normalize_model_name(model_name: str) -> str | None:
     """モデル名を正規化(大文字・小文字を区別しない検索で実際のキー名を返す)
 
@@ -716,25 +685,6 @@ def _parse_discontinued_at(value: Any, model_name: str) -> datetime.datetime | N
     return None
 
 
-def _is_annotation_compatible_webapi_model(model_id: str, model_info: dict[str, Any]) -> bool:
-    if not is_allowed_provider(model_id):
-        logger.debug(f"モデルID '{model_id}' は許可外プロバイダーのためスキップします。")
-        return False
-    if model_info.get("deprecated_on") is not None:
-        return False
-    if model_info.get("supports_vision") is not True:
-        logger.debug(f"モデルID '{model_id}' は Vision 非対応のためスキップします。")
-        return False
-    if model_info.get("supports_response_schema") is not True:
-        logger.debug(f"モデルID '{model_id}' は structured output 非対応のためスキップします。")
-        return False
-    mode = model_info.get("mode", "chat")
-    if mode not in {"chat", "responses"}:
-        logger.debug(f"モデルID '{model_id}' は mode={mode!r} のためスキップします。")
-        return False
-    return True
-
-
 def _register_webapi_models_from_discovery() -> None:
     """LiteLLM 同梱 DB から WebAPI モデルをレジストリに直接登録する (ADR 0023 Phase 1)。
 
@@ -795,7 +745,9 @@ def _register_webapi_models_from_discovery() -> None:
                     or 1800,
                     "max_tokens": _safe_int(model_info.get("max_tokens"), model_id, "max_tokens"),
                     "supports_vision": True,
-                    "supports_response_schema": True,
+                    # ADR 0023 Phase 1 (Issue #45): structured output は PydanticAI default
+                    # Tool Output で得るため、`supports_response_schema` キーは metadata から
+                    # 削除した。`supports_function_calling` を WebAPI モデル登録の主条件に統一。
                     "supports_function_calling": bool(model_info.get("supports_function_calling")),
                     "supports_tool_choice": bool(model_info.get("supports_tool_choice")),
                     "supports_parallel_function_calling": bool(

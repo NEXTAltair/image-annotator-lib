@@ -9,8 +9,11 @@
 - pHash 単位での結果集約
 - モデル実行失敗時の error result 記録
 
-ADR 0023: WebAPI 経路は `WebApiAnnotator` 1 種に統一された。direct model
-(`provider/model` 形式) と registry 登録 WebAPI モデルの双方を扱う。
+ADR 0023 / Issue #45: WebAPI モデルは LiteLLM 同梱 DB から起動時に discovery され、
+`_register_webapi_models_from_discovery()` 経由で registry に自動登録される。
+本モジュールは **registry 解決のみ** を行い、registry に存在しない `provider/model`
+形式の direct LiteLLM ID dispatch 経路は廃止された (capability check / model
+allowlist の責務を discovery / registry SSoT に集約)。
 
 参考: docs/decisions/0023-pydanticai-litellm-webapi-inference-boundary.md
 """
@@ -19,9 +22,7 @@ from typing import Any
 
 from PIL import Image
 
-from .api_model_discovery import get_available_models
 from .base.annotator import BaseAnnotator
-from .model_id import SUPPORTED_PROVIDERS
 from .registry import (
     find_model_class_case_insensitive,
     get_cls_obj_registry,
@@ -33,14 +34,6 @@ from .utils import calculate_phash, logger
 from .webapi_annotator import WebApiAnnotator
 
 _MODEL_INSTANCE_REGISTRY: dict[str, Any] = {}
-
-
-def _is_litellm_direct_model_id(model_name: str) -> bool:
-    """`provider/model` 形式で `SUPPORTED_PROVIDERS` に該当するか判定する。"""
-    if "/" not in model_name:
-        return False
-    provider = model_name.split("/", 1)[0].lower()
-    return provider in SUPPORTED_PROVIDERS
 
 
 def _is_webapi_annotator_class(annotator_class: type) -> bool:
@@ -65,32 +58,33 @@ def _resolve_litellm_model_id(model_name: str) -> str | None:
 
 
 def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None = None) -> BaseAnnotator:
-    """モデル名から annotator インスタンスを生成する。
+    """モデル名から annotator インスタンスを生成する (registry のみ参照)。
 
-    探索順は **registry 優先 → direct LiteLLM ID** とする。これは LiteLLM の
-    OpenRouter 経由モデルが registry 上で `model_name_short = "openai/gpt-4o"` のような
-    slash 形式キーで登録される (実 `litellm_model_id` は `openrouter/openai/gpt-4o`)
-    ため、direct check を先回りさせると registry のメタデータを取りこぼし、誤った
-    プロバイダー / API key で実行される問題を回避するため (Codex review P1)。
+    ADR 0023 / Issue #45: 探索は registry のみ。`_register_webapi_models_from_discovery()`
+    が起動時に LiteLLM 同梱 DB から WebAPI モデルを自動登録するため、`provider/model`
+    形式の LiteLLM ID も registry 経由で解決される (例: `openai/gpt-4o` は
+    `model_name_short = "openai/gpt-4o"` のキーで登録)。registry に存在しない
+    任意の `provider/model` を `WebApiAnnotator` に直接渡す経路は廃止された
+    (capability check が抜けて非 vision モデルが API 課金前に弾けない問題を回避)。
 
     Args:
-        model_name: モデル名。registry 登録名または `provider/model` 形式の LiteLLM ID。
+        model_name: registry 登録名 (起動時 discovery で自動登録された LiteLLM ID
+            slash 形式を含む)。
         api_keys: WebAPI モデル用の provider -> API key dict (オプション)。
 
     Returns:
         `BaseAnnotator` サブクラスのインスタンス。
 
     Raises:
-        KeyError: registry / direct LiteLLM のどちらにも該当しない場合。
+        KeyError: registry に該当しない場合。
     """
     logger.debug(f"Creating annotator instance for model: '{model_name}'")
 
-    # 1. registry を先にチェック (OpenRouter の slash 形式 model_name_short も吸収)
     model_result = find_model_class_case_insensitive(model_name)
     if model_result is not None:
         actual_model_name, Annotator_class = model_result
 
-        # 1a. registry 登録 WebAPI モデル: metadata の litellm_model_id で WebApiAnnotator を構築
+        # registry 登録 WebAPI モデル: metadata の litellm_model_id で WebApiAnnotator を構築
         if _is_webapi_annotator_class(Annotator_class):
             litellm_model_id = _resolve_litellm_model_id(actual_model_name)
             if not litellm_model_id:
@@ -108,7 +102,7 @@ def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None 
                 model_name=actual_model_name,
             )
 
-        # 1b. registry 登録 ローカル ML モデル: 直接インスタンス化
+        # registry 登録 ローカル ML モデル: 直接インスタンス化
         instance = Annotator_class(model_name=actual_model_name)
         logger.debug(
             f"モデル '{model_name}' -> '{actual_model_name}' を直接インスタンス化 "
@@ -116,28 +110,20 @@ def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None 
         )
         return instance
 
-    # 2. registry に無く direct LiteLLM ID 形式なら direct dispatch
-    if _is_litellm_direct_model_id(model_name):
-        logger.debug(f"WebApiAnnotator (direct LiteLLM): {model_name}")
-        return WebApiAnnotator(litellm_model_id=model_name, api_keys=api_keys)
-
-    # 3. どちらでもない → KeyError
+    # registry 未登録 → KeyError
     registry = get_cls_obj_registry()
     available_models = list(registry.keys())
-    try:
-        available_direct_models = get_available_models()
-    except Exception as exc:
-        logger.warning(f"LiteLLM 直接モデル一覧の取得に失敗: {exc}")
-        available_direct_models = []
     error_details = {
         "requested_model": model_name,
         "registry_models_count": len(available_models),
-        "direct_models_count": len(available_direct_models),
         "registry_sample": available_models[:5],
-        "direct_models_sample": available_direct_models[:5],
     }
     logger.error(f"Model resolution failed: {error_details}")
-    raise KeyError(f"Model '{model_name}' not found in registry or available LiteLLM models.")
+    raise KeyError(
+        f"Model '{model_name}' not found in registry. "
+        f"WebAPI モデルは起動時 discovery で registry に自動登録されます "
+        f"(ADR 0023 / Issue #45: registry 未登録の `provider/model` 直接呼び出しは廃止)。"
+    )
 
 
 def get_annotator_instance(model_name: str, api_keys: dict[str, str] | None = None) -> Any:

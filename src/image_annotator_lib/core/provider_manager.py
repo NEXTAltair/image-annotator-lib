@@ -14,7 +14,6 @@ import json
 import re
 from typing import Any
 
-import litellm
 from PIL import Image
 from pydantic_ai import Agent
 
@@ -23,7 +22,6 @@ from ..exceptions.errors import (
     InferenceError,
     MissingApiKeyError,
     SafetyRefusalError,
-    VisionUnsupportedError,
 )
 from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
 from .image_preprocess import preprocess_images_to_binary
@@ -75,9 +73,9 @@ class ProviderManager:
             agent = _test_agent
         else:
             ref = resolve_model_ref(litellm_model_id, config)
-            # ADR 0023: 推論実行直前に LiteLLM の capability で fail-fast
-            if not litellm.supports_vision(ref.litellm_model_id):
-                raise VisionUnsupportedError(litellm_model_id=ref.litellm_model_id)
+            # ADR 0023 Phase 1 (Issue #45): capability check は discovery 段階で完結。
+            # registry 経由の通常パスでは登録時に supports_vision / supports_function_calling
+            # が確認済みのため、推論直前 fail-fast は冗長として削除した。
             api_key = cls._resolve_api_key(model_name, ref.provider, api_keys)
             model = build_pydantic_model(ref, api_key, config)
             agent = Agent(
