@@ -269,7 +269,7 @@ estimated_size_gb = 1.5
 
 5. **`core/http_retry.py`** — HTTP transport retry policy (Phase 1.8 / Issue #46)
    - `build_retry_transport()` / `build_retry_http_client()`: PydanticAI `AsyncTenacityTransport` を組み込んだ async transport / client を返す
-   - `RETRYABLE_HTTP_STATUSES = {408, 409, 429, 500, 502, 503, 504}` + 主要 network 例外 (`httpx.ConnectError` / `ReadTimeout` / `WriteTimeout` / `RemoteProtocolError`) を retry
+   - `RETRYABLE_HTTP_STATUSES = {408, 409, 429, 500, 502, 503, 504}` + 主要 network 例外 (`httpx.TimeoutException` 階層 = `ConnectTimeout` / `ReadTimeout` / `WriteTimeout` / `PoolTimeout` / `httpx.ConnectError` / `httpx.RemoteProtocolError`) を retry
    - `HTTP_RETRY_MAX_ATTEMPTS = 3` (initial + 2 retries) / `HTTP_RETRY_MAX_WAIT_SECONDS = 60.0` (provider token-bucket window 想定、ADR 0023 Phase 1.8 補遺で根拠を明記)
    - `Retry-After` ヘッダを `wait_retry_after(max_wait=60)` で尊重 (cap-only、halt-on-exceed は Phase 2)
    - model fallback / LiteLLM Router retry は採用しない (ADR 0023 line 313-314)

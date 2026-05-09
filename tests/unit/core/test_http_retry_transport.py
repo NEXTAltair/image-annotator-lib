@@ -138,10 +138,30 @@ class TestNonRetryableStatusCodes:
 
 
 class TestNetworkExceptionRetry:
-    """`httpx.ConnectError` / `ReadTimeout` 等の transient network 例外も retry される。"""
+    """`httpx.ConnectError` / `TimeoutException` 系などの transient network 例外も retry される。"""
 
     def test_connect_error_then_success(self) -> None:
         scripted = _ScriptedTransport([_raises(httpx.ConnectError("DNS resolution failed")), _ok()])
+        transport = _make_transport_with_mock(scripted)
+
+        response = _run(_send_get(transport))
+
+        assert response.status_code == 200
+        assert scripted.call_count == 2
+
+    @pytest.mark.parametrize(
+        ("exc_cls", "message"),
+        [
+            # Codex P1 r3214045319: ConnectTimeout は ConnectError と別系統 (TimeoutException 配下) で
+            # 旧コードでは漏れていた。`TimeoutException` を retry tuple に含めることで全 timeout を救済する。
+            (httpx.ConnectTimeout, "tls handshake timed out"),
+            (httpx.ReadTimeout, "read timeout"),
+            (httpx.WriteTimeout, "write timeout"),
+            (httpx.PoolTimeout, "pool exhausted"),
+        ],
+    )
+    def test_timeout_subclasses_retry(self, exc_cls: type[httpx.TimeoutException], message: str) -> None:
+        scripted = _ScriptedTransport([_raises(exc_cls(message)), _ok()])
         transport = _make_transport_with_mock(scripted)
 
         response = _run(_send_get(transport))

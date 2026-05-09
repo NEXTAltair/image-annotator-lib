@@ -49,14 +49,19 @@ HTTP_RETRY_MAX_WAIT_SECONDS = 60.0
 # Tenacity ``retry_if_exception_type`` に渡す例外タプル。
 # - ``httpx.HTTPStatusError``: ``_validate_response_for_retry`` 経由で
 #   retryable status code に対してのみ raise される。
-# - 残りの 4 種は httpx native の transient network 例外。``HTTPError``
-#   などのより上位を捕まえると ``InvalidURL`` 等の terminal error も
+# - ``httpx.TimeoutException``: ``ConnectTimeout`` / ``ReadTimeout`` /
+#   ``WriteTimeout`` / ``PoolTimeout`` の base class。connect 段階の TCP/TLS
+#   timeout (`ConnectTimeout`) と pool 枯渇 (`PoolTimeout`) も含めて全 timeout を retry 対象にする
+#   (Codex P1 r3214045319: 旧コードは `ReadTimeout` / `WriteTimeout` のみ列挙していたため
+#   `ConnectTimeout` が漏れていた)。
+# - ``httpx.ConnectError`` (TCP 接続失敗 / DNS 等) と ``httpx.RemoteProtocolError``
+#   (server-side connection close) は ``NetworkError`` / ``ProtocolError`` の代表。
+# - ``HTTPError`` など上位を捕まえると ``InvalidURL`` 等の terminal error も
 #   retry してしまうので、目的別の sub class のみ列挙する。
 _RETRYABLE_NETWORK_EXCEPTIONS: tuple[type[BaseException], ...] = (
     httpx.HTTPStatusError,
+    httpx.TimeoutException,
     httpx.ConnectError,
-    httpx.ReadTimeout,
-    httpx.WriteTimeout,
     httpx.RemoteProtocolError,
 )
 
