@@ -132,7 +132,7 @@ The `ModelLoad` class implements sophisticated memory management:
 
 **Implementation Pattern:**
 - 単一 base class `WebApiAnnotator` で OpenAI / Anthropic / Google / OpenRouter を統一処理
-- Structured output は PydanticAI default Tool Output で得る (Pydantic schema = `AnnotationSchema` in `core/types.py`)
+- Structured output は PydanticAI default Tool Output で得る。`Agent.output_type` には `core/output_normalization.py:normalize_annotation_output` (callable) を渡し、軽微な drift (文字列 tags / 数値文字列 score 等) を `AnnotationSchema` (in `core/types.py`) validation の **前** に正規化する (Issue #47)
 - Provider 別差異 (`openrouter:` prefix 等) は `core/model_id.py` の `_BUILDER_DISPATCH` テーブルに集約
 - **API Model Discovery** (`core/api_model_discovery.py`) — LiteLLM 同梱 DB から runtime に WebAPI モデル一覧と capability metadata を取得 (TOML キャッシュなし)。絞り込み主条件は `supports_vision` + `supports_function_calling` (Issue #45)。`supports_response_schema` は判定に使わない
 - WebAPI モデル登録は `core/registry.py:_register_webapi_models_from_discovery()` が `WebApiAnnotator` を直接 registry に entry する (旧 `PydanticAIWebAPIAnnotator` 経由は Phase 1.x で廃止)
@@ -208,6 +208,7 @@ estimated_size_gb = 1.5
 - API key は `api_keys: dict[str, str]` 経由で provider object に明示注入 (`os.environ` mutate 禁止)
 - 画像入力は `core/image_preprocess.preprocess_images_to_binary()` で `BinaryContent` 化
 - Structured output は `await agent.run([prompt_text, binary_content])` の sequence 形式
+- `Agent.output_type` は `core/output_normalization.py:normalize_annotation_output` (callable) — PydanticAI が tool として LLM に公開し、関数の docstring が tool description として使われる。`AnnotationSchema` 直指定ではなく callable 経路を採る (Issue #47: validation 前正規化を集約)
 
 ### WebAPI Inference Architecture (ADR 0023 Phase 1)
 
@@ -219,7 +220,8 @@ estimated_size_gb = 1.5
 > [#35 (device 判定分離)](https://github.com/NEXTAltair/image-annotator-lib/issues/35) /
 > [#42 (refusal 例外階層)](https://github.com/NEXTAltair/image-annotator-lib/issues/42) /
 > [#41 (litellm_model_id rename)](https://github.com/NEXTAltair/image-annotator-lib/issues/41) /
-> [#45 (function_calling 主条件)](https://github.com/NEXTAltair/image-annotator-lib/issues/45)
+> [#45 (function_calling 主条件)](https://github.com/NEXTAltair/image-annotator-lib/issues/45) /
+> [#47 (output normalization)](https://github.com/NEXTAltair/image-annotator-lib/issues/47)
 
 **責務分離:**
 
@@ -228,7 +230,8 @@ estimated_size_gb = 1.5
 | WebAPI モデル discovery / capability metadata | LiteLLM 同梱 DB (runtime call、TOML キャッシュなし) |
 | 推論実行 / multimodal input / structured output / output retry | PydanticAI native provider/model |
 | LiteLLM ID と PydanticAI 実行 descriptor の mapping | `core/model_id.py` |
-| Schema → Result 変換 / 軽微正規化 | `core/result_adapter.py` |
+| 軽微正規化 (validation 前 / Issue #47) | `core/output_normalization.py` |
+| Schema → Result 変換 (validation 後) | `core/result_adapter.py` |
 | PIL Image → BinaryContent 変換 | `core/image_preprocess.py` |
 | BaseAnnotator wrapping (registry 登録 WebAPI モデル) | `core/webapi_annotator.py` |
 | Agent 構築・実行 (キャッシュなし) | `core/provider_manager.py` |
@@ -247,14 +250,25 @@ estimated_size_gb = 1.5
    - 推論呼び出しごとに Agent / Provider / Model を新規作成 (キャッシュなし)
    - Capability check は不要 (Issue #45 で discovery 段階に集約済み)
    - PydanticAI: `await agent.run([prompt_text, binary_content])` の sequence 形式
-   - `output_retries=1` で structured output validation failure を 1 回再生成
+   - `Agent.output_type` には `core/output_normalization.py:normalize_annotation_output` (callable) を渡す (Issue #47)
+   - `output_retries=1` で **output normalization / schema validation failure を 1 回再生成** (`ModelRetry` 経由)
 
-3. **`core/webapi_annotator.py`** — `BaseAnnotator` 継承の汎用 wrapper
+3. **`core/output_normalization.py`** — PydanticAI output function による軽微正規化 (Issue #47)
+   - `normalize_annotation_output(tags, captions, score) -> AnnotationSchema`
+   - `tags=str` (カンマ分割) / `captions=str` / `score=numeric_string` / trim / drop empty を validation 前に補正
+   - 補正不能 (None / dict / list 内非文字列 等) は `ModelRetry` を raise
+   - 壊れた JSON 修復 / free text からの regex 復元 / provider 別 parser は実装しない
+
+4. **`core/result_adapter.py`** — 検証済み schema → 結果変換 (Phase 1.7 / Issue #47)
+   - `to_annotation_result(schema_output, phash, error)`: 検証済み `AnnotationSchema` → `AnnotationResult` 変換
+   - 最終防衛 trim/drop empty のみ残す (主経路は `core/output_normalization.py` 側)
+
+5. **`core/webapi_annotator.py`** — `BaseAnnotator` 継承の汎用 wrapper
    - registry 登録 WebAPI モデル経由でインスタンス化される (Issue #45 で direct LiteLLM ID dispatch 経路は廃止)
    - `BaseAnnotator.__init__` の `config_registry` 依存を回避するため最小限の field 設定
    - `__enter__` / `__exit__` は no-op
 
-4. **`core/api_model_discovery.py`** — LiteLLM 同梱 DB の runtime query
+6. **`core/api_model_discovery.py`** — LiteLLM 同梱 DB の runtime query
    - `discover_available_vision_models()` → `{"models": [...], "metadata": {...}}`
    - `get_available_models()` / `list_all_models()` / `is_model_deprecated()` を helper として公開
    - 旧 `available_api_models.toml` キャッシュ / TTL refresh / OpenRouter fallback は廃止
