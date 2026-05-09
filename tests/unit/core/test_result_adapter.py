@@ -37,6 +37,8 @@ class TestToAnnotationResult:
         assert result["formatted_output"] is None
 
     def test_strips_whitespace(self) -> None:
+        # Issue #47: pre-validation normalization lives in output_normalization.
+        # result_adapter keeps only final-defense cleanup for validated schema values.
         schema = AnnotationSchema(tags=["  1girl  ", "blue eyes  "], captions=["  a girl"], score=8.0)
         result = to_annotation_result(schema, phash="abc")
         assert result["tags"] == ["1girl", "blue eyes"]
@@ -45,6 +47,7 @@ class TestToAnnotationResult:
         assert formatted["captions"] == ["a girl"]
 
     def test_excludes_empty_strings(self) -> None:
+        # Issue #47: this is final-defense cleanup, not raw output repair.
         schema = AnnotationSchema(tags=["1girl", "", "  ", "blue eyes"], captions=[], score=5.0)
         result = to_annotation_result(schema, phash="abc")
         assert result["tags"] == ["1girl", "blue eyes"]

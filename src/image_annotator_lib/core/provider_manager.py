@@ -26,11 +26,13 @@ from ..exceptions.errors import (
 from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
 from .image_preprocess import preprocess_images_to_binary
 from .model_id import build_pydantic_model, resolve_model_ref
+from .output_normalization import normalize_annotation_output
 from .result_adapter import to_annotation_result
-from .types import AnnotationResult, AnnotationSchema
+from .types import AnnotationResult
 from .utils import calculate_phash, logger
 
-# ADR 0023 Phase 1 retry policy: structured output validation failure を 1 回再生成
+# ADR 0023 Phase 1 retry policy: output normalization / schema validation failure を 1 回再生成。
+# HTTP/API transient retry is handled separately by Issue #46 transport retry work.
 _OUTPUT_RETRIES = 1
 
 # Agent.run の user message として渡す短い指示。BASE_PROMPT は system_prompt 側で詳細を伝える。
@@ -80,7 +82,7 @@ class ProviderManager:
             model = build_pydantic_model(ref, api_key, config)
             agent = Agent(
                 model=model,
-                output_type=AnnotationSchema,
+                output_type=normalize_annotation_output,
                 system_prompt=BASE_PROMPT,
                 output_retries=_OUTPUT_RETRIES,
             )
