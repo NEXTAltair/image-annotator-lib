@@ -24,6 +24,7 @@ from ..exceptions.errors import (
     SafetyRefusalError,
 )
 from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
+from .http_retry import build_retry_http_client
 from .image_preprocess import preprocess_images_to_binary
 from .model_id import build_pydantic_model, resolve_model_ref
 from .output_normalization import normalize_annotation_output
@@ -31,8 +32,12 @@ from .result_adapter import to_annotation_result
 from .types import AnnotationResult
 from .utils import calculate_phash, logger
 
-# ADR 0023 Phase 1 retry policy: output normalization / schema validation failure を 1 回再生成。
-# HTTP/API transient retry is handled separately by Issue #46 transport retry work.
+# ADR 0023 retry policy:
+# - output normalization / schema validation failure: PydanticAI `output_retries=1` で 1 回再生成
+#   (`ModelRetry` 経由)。
+# - HTTP/API transient failure: Phase 1.8 (Issue #46) で `core/http_retry.py` の
+#   `AsyncTenacityTransport` が provider HTTP client 層で initial+2 retries (max 3 attempts)。
+# 両 retry は独立した経路で機能し、互いに干渉しない。
 _OUTPUT_RETRIES = 1
 
 # Agent.run の user message として渡す短い指示。BASE_PROMPT は system_prompt 側で詳細を伝える。
@@ -71,6 +76,11 @@ class ProviderManager:
         Returns:
             `dict[phash, AnnotationResult]`。画像ごとに 1 entry。
         """
+        # ADR 0023 Phase 1.8 (Issue #46): transport retry 付き AsyncClient を推論呼び出しごとに
+        # 新規生成する。Agent / Provider / Model キャッシュなし方針 (ADR 0023 Agent ライフサイクル)
+        # に揃え、httpx.AsyncClient も同じ寿命で aclose() する。test 経路 (`_test_agent` 注入) では
+        # provider 構築自体を skip するため http_client は不要 (None のまま)。
+        http_client = None
         if _test_agent is not None:
             agent = _test_agent
         else:
@@ -79,43 +89,56 @@ class ProviderManager:
             # registry 経由の通常パスでは登録時に supports_vision / supports_function_calling
             # が確認済みのため、推論直前 fail-fast は冗長として削除した。
             api_key = cls._resolve_api_key(model_name, ref.provider, api_keys)
-            model = build_pydantic_model(ref, api_key, config)
-            agent = Agent(
-                model=model,
-                output_type=normalize_annotation_output,
-                system_prompt=BASE_PROMPT,
-                output_retries=_OUTPUT_RETRIES,
-            )
-
-        binary_contents = preprocess_images_to_binary(images_list)
-        results: dict[str, AnnotationResult] = {}
-        for index, (image, binary) in enumerate(zip(images_list, binary_contents, strict=True)):
-            phash = calculate_phash(image) or f"unknown_image_{index}"
+            http_client = build_retry_http_client()
             try:
-                run_result = await agent.run([_USER_PROMPT_TEXT, binary])
-                results[phash] = to_annotation_result(run_result.output, phash)
-            except Exception as exc:
-                refusal_exc = _classify_refusal(exc, litellm_model_id, phash)
-                if refusal_exc is not None:
-                    # ADR 0023 Phase 1.5 (Issue #42): UnifiedAnnotationResult.error に
-                    # exception type 名 prefix で構造的伝搬。LoRAIro 側で error_records に
-                    # decode する (annotation_save_service)。
-                    logger.warning(
-                        f"WebAPI safety refusal: model={model_name}, "
-                        f"litellm_model_id={litellm_model_id}, phash={phash}, "
-                        f"reason={refusal_exc.provider_refusal_reason or 'no reason'}"
-                    )
-                    results[phash] = to_annotation_result(
-                        None, phash, error=f"{type(refusal_exc).__name__}: {refusal_exc}"
-                    )
-                    continue
-                logger.error(
-                    f"WebAPI 推論失敗: model={model_name}, "
-                    f"litellm_model_id={litellm_model_id}, error={exc}",
-                    exc_info=True,
+                model = build_pydantic_model(ref, api_key, config, http_client=http_client)
+                agent = Agent(
+                    model=model,
+                    output_type=normalize_annotation_output,
+                    system_prompt=BASE_PROMPT,
+                    output_retries=_OUTPUT_RETRIES,
                 )
-                results[phash] = to_annotation_result(None, phash, error=str(exc))
-        return results
+            except BaseException:
+                # provider/model/Agent 構築途中で失敗した場合は、開いた AsyncClient を確実に閉じる。
+                await http_client.aclose()
+                raise
+
+        try:
+            binary_contents = preprocess_images_to_binary(images_list)
+            results: dict[str, AnnotationResult] = {}
+            for index, (image, binary) in enumerate(zip(images_list, binary_contents, strict=True)):
+                phash = calculate_phash(image) or f"unknown_image_{index}"
+                try:
+                    run_result = await agent.run([_USER_PROMPT_TEXT, binary])
+                    results[phash] = to_annotation_result(run_result.output, phash)
+                except Exception as exc:
+                    refusal_exc = _classify_refusal(exc, litellm_model_id, phash)
+                    if refusal_exc is not None:
+                        # ADR 0023 Phase 1.5 (Issue #42): UnifiedAnnotationResult.error に
+                        # exception type 名 prefix で構造的伝搬。LoRAIro 側で error_records に
+                        # decode する (annotation_save_service)。
+                        logger.warning(
+                            f"WebAPI safety refusal: model={model_name}, "
+                            f"litellm_model_id={litellm_model_id}, phash={phash}, "
+                            f"reason={refusal_exc.provider_refusal_reason or 'no reason'}"
+                        )
+                        results[phash] = to_annotation_result(
+                            None, phash, error=f"{type(refusal_exc).__name__}: {refusal_exc}"
+                        )
+                        continue
+                    # ADR 0023 Phase 1.8 (Issue #46): transport retry 枯渇時は
+                    # tenacity が httpx 例外を reraise する (RetryConfig(reraise=True))。
+                    # 既存の str(exc) 文字列伝搬経路でそのまま LoRAIro 側に流れる。
+                    logger.error(
+                        f"WebAPI 推論失敗: model={model_name}, "
+                        f"litellm_model_id={litellm_model_id}, error={exc}",
+                        exc_info=True,
+                    )
+                    results[phash] = to_annotation_result(None, phash, error=str(exc))
+            return results
+        finally:
+            if http_client is not None:
+                await http_client.aclose()
 
     @classmethod
     def run_inference_with_model(
