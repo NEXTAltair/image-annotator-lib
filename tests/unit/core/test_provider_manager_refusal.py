@@ -446,3 +446,86 @@ def test_classify_refusal_quoted_signature_in_string_fallback(message: str) -> N
         image_phash="phash_legacy_quoted",
     )
     assert isinstance(classified, SafetyRefusalError), f"variant 取りこぼし: {message!r}"
+
+
+# ========================================================================
+# Codex P2 (r3212139750): body precedence 回帰防止
+#
+# `_walk_for_reasons` は全 reason を返し、`_classify_reasons` が
+# ContentPolicy > Safety の precedence で判定する。両者共存ペイロードでも
+# 結果が dict 走査順に依存しないことを確認する。
+# ========================================================================
+
+
+@pytest.mark.unit
+def test_classify_refusal_body_content_filter_precedence_when_refusal_first():
+    """body に refusal が先、content_filter が後 → ContentPolicyRefusalError を返す。
+
+    Codex P2 r3212139750: 単一 reason 返却の旧設計だと dict 走査順依存で
+    SafetyRefusalError を返してしまっていた。`_classify_reasons` の precedence
+    で常に ContentPolicy が優先されるようにする。
+    """
+    body = {
+        "stop_reason": "refusal",  # 先に検出される
+        "choices": [{"finish_reason": "content_filter"}],  # 後で検出される
+    }
+    exc = _FakePydanticAIException("mixed-refusal-first", body=body)
+    classified = _classify_refusal(
+        exc,
+        litellm_model_id="openai/gpt-4o",
+        image_phash="phash_mixed_refusal_first",
+    )
+    assert isinstance(classified, ContentPolicyRefusalError), (
+        "ContentPolicy が precedence で勝つはず (旧実装は dict 順依存で誤判定していた)"
+    )
+
+
+@pytest.mark.unit
+def test_classify_refusal_body_content_filter_precedence_when_filter_first():
+    """body に content_filter が先、refusal が後 → ContentPolicyRefusalError を返す。
+
+    順序が逆の場合も同じ結果 (順序非依存性の確認)。
+    """
+    body = {
+        "choices": [{"finish_reason": "content_filter"}],  # 先に検出される
+        "stop_reason": "refusal",  # 後で検出される
+    }
+    exc = _FakePydanticAIException("mixed-filter-first", body=body)
+    classified = _classify_refusal(
+        exc,
+        litellm_model_id="openai/gpt-4o",
+        image_phash="phash_mixed_filter_first",
+    )
+    assert isinstance(classified, ContentPolicyRefusalError)
+
+
+@pytest.mark.unit
+def test_classify_refusal_body_walker_collects_all_reasons():
+    """`_walk_for_reasons` が複数 reason を全て収集することの直接確認。"""
+    from image_annotator_lib.core.provider_manager import _walk_for_reasons
+
+    body = {
+        "stop_reason": "refusal",
+        "candidates": [{"finishReason": "SAFETY"}],
+        "choices": [{"finish_reason": "content_filter"}],
+    }
+    reasons = _walk_for_reasons(body)
+    assert set(reasons) == {"refusal", "safety", "content_filter"}, (
+        f"全 reason を収集すべき: 実際 {reasons}"
+    )
+
+
+@pytest.mark.unit
+def test_classify_refusal_body_only_safety_reasons():
+    """ContentPolicy が body に無く Safety 系のみなら SafetyRefusalError を返す。"""
+    body = {
+        "stop_reason": "refusal",
+        "candidates": [{"finishReason": "SAFETY"}],
+    }
+    exc = _FakePydanticAIException("only-safety", body=body)
+    classified = _classify_refusal(
+        exc,
+        litellm_model_id="anthropic/claude-3-5-sonnet-20241022",
+        image_phash="phash_only_safety",
+    )
+    assert isinstance(classified, SafetyRefusalError)

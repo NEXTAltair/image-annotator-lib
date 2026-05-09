@@ -201,34 +201,39 @@ _STOP_REASON_REFUSAL_RE = re.compile(r"""stop_?reason["']?\s*[:=]\s*["']?refusal
 _FINISH_REASON_CONTENT_FILTER_RE = re.compile(r"""finish_?reason["']?\s*[:=]\s*["']?content_filter""")
 
 
-def _walk_for_reason(obj: Any) -> str | None:
-    """dict / list を再帰的に walk して `finishReason`/`stopReason` の値を返す。
+def _walk_for_reasons(obj: Any, reasons: list[str] | None = None) -> list[str]:
+    """dict / list を再帰的に walk して `finishReason`/`stopReason` の値を **全て** 収集する。
+
+    Codex P2 (PR #44 r3212139750): 単一値しか返さないと dict 走査順依存で
+    precedence が崩れる (e.g. body に `stop_reason="refusal"` と
+    `finish_reason="content_filter"` が両立する場合、本来 ContentPolicy 優先
+    すべきところ traversal order によって SafetyRefusal を返す不具合)。
+    全件収集して caller 側 (`_classify_reasons`) で precedence 判定する設計に分離。
 
     Args:
-        obj: 探索対象 (dict / list / その他 — その他は None を返す)。
+        obj: 探索対象 (dict / list / その他 — その他は素通り)。
+        reasons: 累積バッファ (再帰用、外部呼び出しでは None 推奨)。
 
     Returns:
-        最初に見つかった reason 値を lowercase 化して返す。見つからなければ None。
+        traversal 順での全 reason 値 (lowercase) のリスト。見つからなければ空。
     """
+    if reasons is None:
+        reasons = []
     if isinstance(obj, dict):
         for key, value in obj.items():
             if isinstance(key, str):
                 normalized_key = key.lower().replace("_", "")
                 if normalized_key in _REASON_KEY_NORMALIZED and isinstance(value, str):
-                    return value.lower()
-            nested = _walk_for_reason(value)
-            if nested is not None:
-                return nested
+                    reasons.append(value.lower())
+            _walk_for_reasons(value, reasons)
     elif isinstance(obj, list):
         for item in obj:
-            nested = _walk_for_reason(item)
-            if nested is not None:
-                return nested
-    return None
+            _walk_for_reasons(item, reasons)
+    return reasons
 
 
-def _extract_reason_from_body(body: Any) -> str | None:
-    """PydanticAI exception の `body` 属性から refusal reason を抽出する。
+def _extract_reasons_from_body(body: Any) -> list[str]:
+    """PydanticAI exception の `body` 属性から refusal reason を全件抽出する。
 
     `UnexpectedModelBehavior(message, body)` / `ModelHTTPError(..., body)` は
     body 属性に response payload を持つ。JSON 文字列 / dict / list / object を
@@ -238,10 +243,11 @@ def _extract_reason_from_body(body: Any) -> str | None:
         body: PydanticAI exception の body 属性 (str / dict / list / None)。
 
     Returns:
-        抽出された reason の lowercase 値、または抽出できなければ None。
+        traversal 順での全 reason 値リスト (lowercase)。
+        body が None / 非 JSON 文字列 / 非構造化 object なら空リスト。
     """
     if body is None:
-        return None
+        return []
 
     parsed: Any = body
     if isinstance(body, str):
@@ -249,28 +255,40 @@ def _extract_reason_from_body(body: Any) -> str | None:
             parsed = json.loads(body)
         except (json.JSONDecodeError, ValueError):
             # JSON でない body (plain text 等) は legacy fallback に任せる
-            return None
+            return []
 
-    return _walk_for_reason(parsed)
+    return _walk_for_reasons(parsed)
 
 
-def _classify_reason(
-    reason: str | None,
+# Refusal classification の precedence (Codex P2 r3212139750):
+# legacy regex 経路と整合させる: ContentPolicy (`content_filter`) > Safety
+# (`refusal` / `safety` / `blocked`) の順で判定する。両者が body に共存
+# する場合 (e.g. `stop_reason="refusal"` + `finish_reason="content_filter"`)
+# でも ContentPolicy が優先される。
+_CONTENT_FILTER_REASONS = frozenset({"content_filter"})
+_SAFETY_REASONS = frozenset({"safety", "refusal", "blocked"})
+
+
+def _classify_reasons(
+    reasons: list[str],
 ) -> type[SafetyRefusalError] | type[ContentPolicyRefusalError] | None:
-    """抽出された reason 値を refusal exception type に分類する。
+    """抽出された reason 集合を refusal exception type に precedence 付きで分類する。
+
+    Codex P2 (PR #44 r3212139750): `_walk_for_reasons` が全件返すため、ここで
+    legacy regex 経路と同じ precedence (ContentPolicy > Safety) を enforce する。
 
     Args:
-        reason: lowercase 化された reason 値 (`safety` / `refusal` /
-            `content_filter` / その他)。
+        reasons: 抽出された全 reason 値リスト (lowercase)。
 
     Returns:
         対応する exception type、または分類対象外なら None。
     """
-    if reason is None:
+    if not reasons:
         return None
-    if reason == "content_filter":
+    reasons_set = set(reasons)
+    if reasons_set & _CONTENT_FILTER_REASONS:
         return ContentPolicyRefusalError
-    if reason in {"safety", "refusal", "blocked"}:
+    if reasons_set & _SAFETY_REASONS:
         return SafetyRefusalError
     return None
 
@@ -309,13 +327,15 @@ def _classify_refusal(
     """
     # Priority 1: PydanticAI exc.body 構造化ペイロード
     body = getattr(exc, "body", None)
-    body_reason = _extract_reason_from_body(body)
-    refusal_cls = _classify_reason(body_reason)
+    body_reasons = _extract_reasons_from_body(body)
+    refusal_cls = _classify_reasons(body_reasons)
     if refusal_cls is not None:
+        # provider_refusal_reason には全検出 reason を含める (debug / log 用途)
+        reason_summary = ",".join(body_reasons)
         return refusal_cls(
             litellm_model_id=litellm_model_id,
             image_phash=image_phash,
-            provider_refusal_reason=f"finish_reason={body_reason}",
+            provider_refusal_reason=f"finish_reason={reason_summary}"[:200],
         )
 
     # Priority 2: Exception type 名 (OpenAI ContentFilterFinishReasonError 等)
@@ -337,7 +357,7 @@ def _classify_refusal(
     # message 本体に加え、body が非 JSON で priority 1 が failed した場合の
     # body 文字列も搜索対象に含める (PydanticAI 以外の plain-text body 救済)。
     exc_message = str(exc).lower()
-    if body is not None and body_reason is None:
+    if body is not None and not body_reasons:
         body_str = body if isinstance(body, str) else str(body)
         exc_message = f"{exc_message} {body_str.lower()}"
 
