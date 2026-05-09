@@ -305,7 +305,7 @@ def test_local_ml_model_has_provider_local_and_estimated_size(patched_registry):
 
     info = result[0]
     assert info.provider == "local"
-    assert info.api_model_id is None
+    assert info.litellm_model_id is None
     assert info.estimated_size_gb == 1.5
     assert info.discontinued_at is None
     assert info.max_output_tokens is None
@@ -334,7 +334,7 @@ def test_webapi_model_phase2_fields_from_ssot(patched_registry):
 
     info = result[0]
     assert info.provider == "openai"
-    assert info.api_model_id == "openai/gpt-4o"
+    assert info.litellm_model_id == "openai/gpt-4o"
     assert info.max_output_tokens == 1800
     assert info.estimated_size_gb is None
     assert info.discontinued_at is None
@@ -368,7 +368,7 @@ def test_webapi_model_user_toml_api_model_id_does_not_override_ssot(patched_regi
         result = list_annotator_info()
 
     info = result[0]
-    assert info.api_model_id == "openai/gpt-4o"
+    assert info.litellm_model_id == "openai/gpt-4o"
     assert info.max_output_tokens == 1800
     assert info.provider == "openai"
 
@@ -411,7 +411,7 @@ def test_local_ml_excludes_webapi_metadata_codex_p2_6(patched_registry):
     assert info.is_local is True
     assert info.is_api is False
     # WebAPI 由来の `api_model_id` は混入しない
-    assert info.api_model_id is None
+    assert info.litellm_model_id is None
     # provider はローカル "local" にフォールバック
     assert info.provider == "local"
 
@@ -463,10 +463,11 @@ def test_pydanticai_direct_model_has_inferred_provider_and_api_model_id(patched_
 
     by_name = {info.name: info for info in result}
     assert by_name["google/gemini-2.5-pro"].provider == "google"
-    assert by_name["google/gemini-2.5-pro"].api_model_id == "google/gemini-2.5-pro"
+    assert by_name["google/gemini-2.5-pro"].litellm_model_id == "google/gemini-2.5-pro"
     assert by_name["anthropic/claude-3-5-sonnet-latest"].provider == "anthropic"
     assert (
-        by_name["anthropic/claude-3-5-sonnet-latest"].api_model_id == "anthropic/claude-3-5-sonnet-latest"
+        by_name["anthropic/claude-3-5-sonnet-latest"].litellm_model_id
+        == "anthropic/claude-3-5-sonnet-latest"
     )
 
 
@@ -605,7 +606,7 @@ def test_webapi_user_toml_provider_does_not_override_ssot(patched_registry):
 
     info = result[0]
     assert info.provider == "anthropic"
-    assert info.api_model_id == "anthropic/claude-3-5-sonnet"
+    assert info.litellm_model_id == "anthropic/claude-3-5-sonnet"
 
 
 @pytest.mark.unit

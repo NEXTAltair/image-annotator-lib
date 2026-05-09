@@ -315,8 +315,12 @@ class AnnotatorInfo:
     provider: str | None = None
     """プロバイダー名。ローカルモデルは "local"、API モデルは "openai"/"anthropic"/"google" 等。
     config_registry に未登録の PydanticAI 直接モデルは model_id の slash 前から推論。"""
-    api_model_id: str | None = None
-    """上流 API のモデル識別子 (例: "gpt-4o-2024-11-20")。ローカルモデルは None。"""
+    litellm_model_id: str | None = None
+    """LiteLLM ID (例: "openai/gpt-4o")。ローカルモデルは None。
+
+    ADR 0023 Phase 2 (Issue #41): 旧 `api_model_id` field は本 field にリネームされた。
+    LoRAIro 側は ADR 0023 line 73 に従い互換シムを残さず一括破壊的変更で追従する。
+    """
     estimated_size_gb: float | None = None
     """ローカル ML モデルのダウンロードサイズ推定値 (GB)。API モデルは None。"""
     discontinued_at: datetime.datetime | None = None
