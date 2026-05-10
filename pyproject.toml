@@ -58,6 +58,7 @@ dependencies = [
     "torchvision>=0.21.0",
     "datetime>=5.5",
     "pydantic-ai>=0.3.2",
+    "tenacity>=9.0", # ADR 0023 Phase 1.8 (Issue #46): pydantic_ai.retries が要求 (transitive を明示化)
     "litellm>=1.0.0",
     "pyyaml>=6.0.2",
     "polars>=1.31.0",

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from ..exceptions.errors import IdMappingError, MissingApiKeyError, UnknownProviderError
 
 if TYPE_CHECKING:
+    import httpx
     from pydantic_ai.models import Model
 
 
@@ -138,6 +139,8 @@ def build_pydantic_model(
     ref: PydanticAIModelRef,
     api_key: str,
     config: dict[str, Any] | None = None,
+    *,
+    http_client: httpx.AsyncClient | None = None,
 ) -> Model:
     """PydanticAI Model object を api_key 明示注入で構築する。
 
@@ -147,6 +150,9 @@ def build_pydantic_model(
         ref: `resolve_model_ref()` の戻り値。
         api_key: provider 用 API key。空文字や None は `MissingApiKeyError`。
         config: provider 固有の追加設定 (OpenRouter の referer / app_name 等)。
+        http_client: provider object に注入する `httpx.AsyncClient`。
+            ADR 0023 Phase 1.8 (Issue #46) で transport retry 付き client を渡す経路。
+            `None` の場合は PydanticAI が default client (`create_async_http_client`) を生成する。
 
     Returns:
         Agent に渡せる PydanticAI Model object。
@@ -163,21 +169,21 @@ def build_pydantic_model(
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.openai import OpenAIProvider
 
-        provider = OpenAIProvider(api_key=api_key)
+        provider = OpenAIProvider(api_key=api_key, http_client=http_client)
         return OpenAIChatModel(model_name=ref.provider_model_id, provider=provider)
 
     if ref.provider == "anthropic":
         from pydantic_ai.models.anthropic import AnthropicModel
         from pydantic_ai.providers.anthropic import AnthropicProvider
 
-        anthropic_provider = AnthropicProvider(api_key=api_key)
+        anthropic_provider = AnthropicProvider(api_key=api_key, http_client=http_client)
         return AnthropicModel(model_name=ref.provider_model_id, provider=anthropic_provider)
 
     if ref.provider == "google":
         from pydantic_ai.models.google import GoogleModel
         from pydantic_ai.providers.google import GoogleProvider
 
-        google_provider = GoogleProvider(api_key=api_key)
+        google_provider = GoogleProvider(api_key=api_key, http_client=http_client)
         return GoogleModel(model_name=ref.provider_model_id, provider=google_provider)
 
     if ref.provider == "openrouter":
@@ -187,6 +193,7 @@ def build_pydantic_model(
         provider_kwargs: dict[str, Any] = {
             "api_key": api_key,
             "base_url": "https://openrouter.ai/api/v1",
+            "http_client": http_client,
         }
         if config:
             headers: dict[str, str] = {}

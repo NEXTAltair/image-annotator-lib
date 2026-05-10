@@ -209,6 +209,7 @@ estimated_size_gb = 1.5
 - 画像入力は `core/image_preprocess.preprocess_images_to_binary()` で `BinaryContent` 化
 - Structured output は `await agent.run([prompt_text, binary_content])` の sequence 形式
 - `Agent.output_type` は `core/output_normalization.py:normalize_annotation_output` (callable) — PydanticAI が tool として LLM に公開し、関数の docstring が tool description として使われる。`AnnotationSchema` 直指定ではなく callable 経路を採る (Issue #47: validation 前正規化を集約)
+- HTTP/API transient failure retry は `core/http_retry.py:build_retry_http_client()` で生成した `httpx.AsyncClient` を `build_pydantic_model(..., http_client=client)` 経由で provider object に注入する。AsyncClient は推論呼び出しごとに新規生成して `await client.aclose()` で破棄する (Issue #46: ADR 0023 Phase 1.8)
 
 ### WebAPI Inference Architecture (ADR 0023 Phase 1)
 
@@ -221,7 +222,8 @@ estimated_size_gb = 1.5
 > [#42 (refusal 例外階層)](https://github.com/NEXTAltair/image-annotator-lib/issues/42) /
 > [#41 (litellm_model_id rename)](https://github.com/NEXTAltair/image-annotator-lib/issues/41) /
 > [#45 (function_calling 主条件)](https://github.com/NEXTAltair/image-annotator-lib/issues/45) /
-> [#47 (output normalization)](https://github.com/NEXTAltair/image-annotator-lib/issues/47)
+> [#47 (output normalization)](https://github.com/NEXTAltair/image-annotator-lib/issues/47) /
+> [#46 (HTTP transport retry)](https://github.com/NEXTAltair/image-annotator-lib/issues/46)
 
 **責務分離:**
 
@@ -229,6 +231,7 @@ estimated_size_gb = 1.5
 |---|---|
 | WebAPI モデル discovery / capability metadata | LiteLLM 同梱 DB (runtime call、TOML キャッシュなし) |
 | 推論実行 / multimodal input / structured output / output retry | PydanticAI native provider/model |
+| HTTP/API transient failure retry (transport 層) | `core/http_retry.py` (Phase 1.8 / Issue #46) |
 | LiteLLM ID と PydanticAI 実行 descriptor の mapping | `core/model_id.py` |
 | 軽微正規化 (validation 前 / Issue #47) | `core/output_normalization.py` |
 | Schema → Result 変換 (validation 後) | `core/result_adapter.py` |
@@ -252,6 +255,7 @@ estimated_size_gb = 1.5
    - PydanticAI: `await agent.run([prompt_text, binary_content])` の sequence 形式
    - `Agent.output_type` には `core/output_normalization.py:normalize_annotation_output` (callable) を渡す (Issue #47)
    - `output_retries=1` で **output normalization / schema validation failure を 1 回再生成** (`ModelRetry` 経由)
+   - `core/http_retry.build_retry_http_client()` で `httpx.AsyncClient` を毎回新規生成し `try/finally` で `aclose()` (Issue #46)
 
 3. **`core/output_normalization.py`** — PydanticAI output function による軽微正規化 (Issue #47)
    - `normalize_annotation_output(tags, captions, score) -> AnnotationSchema`
@@ -263,12 +267,19 @@ estimated_size_gb = 1.5
    - `to_annotation_result(schema_output, phash, error)`: 検証済み `AnnotationSchema` → `AnnotationResult` 変換
    - 最終防衛 trim/drop empty のみ残す (主経路は `core/output_normalization.py` 側)
 
-5. **`core/webapi_annotator.py`** — `BaseAnnotator` 継承の汎用 wrapper
+5. **`core/http_retry.py`** — HTTP transport retry policy (Phase 1.8 / Issue #46)
+   - `build_retry_transport()` / `build_retry_http_client()`: PydanticAI `AsyncTenacityTransport` を組み込んだ async transport / client を返す
+   - `RETRYABLE_HTTP_STATUSES = {408, 409, 429, 500, 502, 503, 504}` + 主要 network 例外 (`httpx.TimeoutException` 階層 = `ConnectTimeout` / `ReadTimeout` / `WriteTimeout` / `PoolTimeout` / `httpx.ConnectError` / `httpx.RemoteProtocolError`) を retry
+   - `HTTP_RETRY_MAX_ATTEMPTS = 3` (initial + 2 retries) / `HTTP_RETRY_MAX_WAIT_SECONDS = 60.0` (provider token-bucket window 想定、ADR 0023 Phase 1.8 補遺で根拠を明記)
+   - `Retry-After` ヘッダを `wait_retry_after(max_wait=60)` で尊重 (cap-only、halt-on-exceed は Phase 2)
+   - model fallback / LiteLLM Router retry は採用しない (ADR 0023 line 313-314)
+
+6. **`core/webapi_annotator.py`** — `BaseAnnotator` 継承の汎用 wrapper
    - registry 登録 WebAPI モデル経由でインスタンス化される (Issue #45 で direct LiteLLM ID dispatch 経路は廃止)
    - `BaseAnnotator.__init__` の `config_registry` 依存を回避するため最小限の field 設定
    - `__enter__` / `__exit__` は no-op
 
-6. **`core/api_model_discovery.py`** — LiteLLM 同梱 DB の runtime query
+7. **`core/api_model_discovery.py`** — LiteLLM 同梱 DB の runtime query
    - `discover_available_vision_models()` → `{"models": [...], "metadata": {...}}`
    - `get_available_models()` / `list_all_models()` / `is_model_deprecated()` を helper として公開
    - 旧 `available_api_models.toml` キャッシュ / TTL refresh / OpenRouter fallback は廃止
