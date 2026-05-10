@@ -66,6 +66,15 @@ _RETRYABLE_NETWORK_EXCEPTIONS: tuple[type[BaseException], ...] = (
 )
 
 
+HTTP_CLIENT_TIMEOUT = httpx.Timeout(
+    timeout=120.0,
+    connect=10.0,
+    read=120.0,
+    write=30.0,
+    pool=10.0,
+)
+
+
 def _validate_response_for_retry(response: httpx.Response) -> None:
     """Retryable な status code に対してのみ ``HTTPStatusError`` を raise する。
 
@@ -104,8 +113,10 @@ def build_retry_http_client() -> httpx.AsyncClient:
     Agent / Provider / Model キャッシュなし方針 (ADR 0023 Agent ライフサイクル)
     に合わせ、AsyncClient も推論呼び出しごとに新規生成・破棄する。
     """
-    return httpx.AsyncClient(transport=build_retry_transport())
-
+    return httpx.AsyncClient(
+        transport=build_retry_transport(),
+        timeout=HTTP_CLIENT_TIMEOUT,
+    )
 
 __all__ = [
     "HTTP_RETRY_MAX_ATTEMPTS",
