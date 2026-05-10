@@ -109,3 +109,34 @@ class TestFormatLitellmMetadata:
     def test_invalid_model_id_returns_none(self):
         """`provider/model` 形式でない ID は None を返す。"""
         assert _format_litellm_metadata("invalid_id_no_slash", {}) is None
+
+    def test_openrouter_nested_keeps_full_id(self):
+        """Issue #51: openrouter/<inner>/<model> は model_name_short が完全 ID と一致する。
+
+        旧実装は `split("/", 1)[1]` で `openrouter/` prefix を剥がし `z-ai/glm-4.7` を
+        返していたため、推論時に `_BUILDER_DISPATCH` 未知 prefix で UnknownProviderError が
+        発生していた。修正後は LiteLLM オリジナルキーをそのまま保持する。
+        """
+        info = {"supports_vision": True, "supports_function_calling": True, "mode": "chat"}
+        metadata = _format_litellm_metadata("openrouter/z-ai/glm-4.7", info)
+        assert metadata is not None
+        assert metadata["model_name_short"] == "openrouter/z-ai/glm-4.7"
+        assert metadata["display_name"] == "openrouter/z-ai/glm-4.7"
+        assert metadata["provider"] == "Openrouter"
+
+    def test_openrouter_openai_keeps_full_id(self):
+        """Issue #51: openrouter/openai/<model> も同様に prefix を保持する。"""
+        info = {"supports_vision": True, "supports_function_calling": True, "mode": "chat"}
+        metadata = _format_litellm_metadata("openrouter/openai/gpt-4.1", info)
+        assert metadata is not None
+        assert metadata["model_name_short"] == "openrouter/openai/gpt-4.1"
+        assert metadata["display_name"] == "openrouter/openai/gpt-4.1"
+
+    def test_direct_provider_id_uses_full_id(self):
+        """Issue #51: openai/<model> 直接形式も model_name_short = 完全 ID。"""
+        info = {"supports_vision": True, "supports_function_calling": True, "mode": "chat"}
+        metadata = _format_litellm_metadata("openai/gpt-4o", info)
+        assert metadata is not None
+        assert metadata["model_name_short"] == "openai/gpt-4o"
+        assert metadata["display_name"] == "openai/gpt-4o"
+        assert metadata["provider"] == "OpenAI"

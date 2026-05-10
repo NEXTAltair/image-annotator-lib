@@ -46,6 +46,9 @@ class TestResolveModelRef:
             ("google/gemini-2.5-pro", "google", "gemini-2.5-pro"),
             ("gemini/gemini-2.5-flash", "google", "gemini-2.5-flash"),  # alias
             ("openrouter/google/gemini-2.5-pro", "openrouter", "google/gemini-2.5-pro"),
+            # Issue #51: 未知 inner provider の OpenRouter 経路も openrouter builder に dispatch される
+            ("openrouter/z-ai/glm-4.7", "openrouter", "z-ai/glm-4.7"),
+            ("openrouter/qwen/qwen2-vl-72b-instruct", "openrouter", "qwen/qwen2-vl-72b-instruct"),
         ],
     )
     def test_resolves_supported_provider(
