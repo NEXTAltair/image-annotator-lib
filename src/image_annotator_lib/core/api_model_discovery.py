@@ -55,18 +55,24 @@ def _is_litellm_model_annotation_compatible(info: dict[str, Any]) -> bool:
 def _format_litellm_metadata(model_id: str, info: dict[str, Any]) -> dict[str, Any] | None:
     """LiteLLM の `get_model_info()` 結果を共通 metadata 形式に整形する。
 
+    Issue #51 (ADR 0023 Phase 1.9): `model_name_short` は LiteLLM 同梱 DB のオリジナルキー
+    と同一の完全 ID を保持する。旧実装は `split("/", 1)[1]` で provider prefix を剥がしていた
+    ため、`openrouter/<inner>/<model>` (例: `openrouter/z-ai/glm-4.7`) で prefix 欠落形が
+    registry / CLI / DB に伝播し、推論時に `_BUILDER_DISPATCH` 未知 prefix で
+    `UnknownProviderError` が発生していた。
+
     Returns:
         フォーマット済 dict。`provider/model` 形式でない model_id は None。
     """
     if "/" not in model_id:
         return None
 
-    provider_raw, provider_model_id = model_id.split("/", 1)
+    provider_raw, _ = model_id.split("/", 1)
     provider = "OpenAI" if provider_raw == "openai" else provider_raw.capitalize()
 
     return {
         "provider": provider,
-        "model_name_short": provider_model_id,
+        "model_name_short": model_id,
         "display_name": model_id,
         "mode": info.get("mode", "chat"),
         "max_tokens": info.get("max_tokens"),
