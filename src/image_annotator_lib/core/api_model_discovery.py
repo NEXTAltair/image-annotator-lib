@@ -24,15 +24,47 @@ from .utils import logger
 
 _SUPPORTED_LITELLM_MODES: frozenset[str] = frozenset({"chat", "responses"})
 
+# ADR 0023 Phase 1.10 (Issue #52): LiteLLM 同梱 DB は Anthropic 直接モデルを `claude-*` の
+# bare 名で格納するため、`anthropic/` プレフィックスを補完して `_BUILDER_DISPATCH` 対象に乗せる。
+# スコープ拡張時はこの tuple に prefix を追加すれば `_canonicalize_litellm_id()` 経路で対応可能。
+_ANTHROPIC_BARE_PREFIXES: tuple[str, ...] = ("claude-",)
+
+
+def _canonicalize_litellm_id(model_id: str) -> str | None:
+    """LiteLLM 同梱 DB のキーを `provider/model` 形式に正規化する (ADR 0023 Phase 1.10)。
+
+    LiteLLM 同梱 DB は Anthropic 直接モデルを `claude-opus-4-6` のような bare 名で
+    格納している。`is_allowed_provider()` の `/` チェックで全除外されると Anthropic
+    直接プロバイダー経路が registry に登録されないため、`anthropic/<bare>` 形式に補完する。
+
+    Args:
+        model_id: LiteLLM 同梱 DB のキー (slash 入り or bare)。
+
+    Returns:
+        正規化後の `provider/model` 形式 ID。スコープ外の bare 名 (`claude-` 以外で
+        始まる、または slash を含まないが `_ANTHROPIC_BARE_PREFIXES` に該当しない形式)
+        は None。
+    """
+    if "/" in model_id:
+        return model_id
+    if model_id.startswith(_ANTHROPIC_BARE_PREFIXES):
+        return f"anthropic/{model_id}"
+    return None
+
 
 def is_allowed_provider(model_id: str) -> bool:
     """model_id の provider prefix が `SUPPORTED_PROVIDERS` に含まれるか判定する。
 
     `core/model_id.py` の dispatch table を SSoT とし、本ファイル独自の allowlist は持たない。
+
+    ADR 0023 Phase 1.10 (Issue #52): bare `claude-*` (LiteLLM JSON で `/` 無しで格納される
+    Anthropic 直接モデル) は `_canonicalize_litellm_id()` で `anthropic/<bare>` に補完して
+    判定する。
     """
-    if "/" not in model_id:
+    canonical = _canonicalize_litellm_id(model_id)
+    if canonical is None:
         return False
-    provider = model_id.split("/", 1)[0]
+    provider = canonical.split("/", 1)[0]
     return provider in SUPPORTED_PROVIDERS
 
 
@@ -61,19 +93,25 @@ def _format_litellm_metadata(model_id: str, info: dict[str, Any]) -> dict[str, A
     registry / CLI / DB に伝播し、推論時に `_BUILDER_DISPATCH` 未知 prefix で
     `UnknownProviderError` が発生していた。
 
+    Issue #52 (ADR 0023 Phase 1.10): bare `claude-*` 形式 (LiteLLM JSON で Anthropic 直接
+    モデルが格納される形式) は `_canonicalize_litellm_id()` で `anthropic/<bare>` に正規化
+    した値を `model_name_short` / `display_name` に設定する。
+
     Returns:
-        フォーマット済 dict。`provider/model` 形式でない model_id は None。
+        フォーマット済 dict。`_canonicalize_litellm_id()` がスコープ外と判定した model_id
+        (`/` 無しかつ `claude-` で始まらない形式) は None。
     """
-    if "/" not in model_id:
+    canonical = _canonicalize_litellm_id(model_id)
+    if canonical is None:
         return None
 
-    provider_raw, _ = model_id.split("/", 1)
+    provider_raw, _ = canonical.split("/", 1)
     provider = "OpenAI" if provider_raw == "openai" else provider_raw.capitalize()
 
     return {
         "provider": provider,
-        "model_name_short": model_id,
-        "display_name": model_id,
+        "model_name_short": canonical,
+        "display_name": canonical,
         "mode": info.get("mode", "chat"),
         "max_tokens": info.get("max_tokens"),
         "max_input_tokens": info.get("max_input_tokens"),
@@ -101,7 +139,10 @@ def _collect_models(
         exclude_deprecated: True なら `deprecation_date` が設定されている entry を除外。
 
     Returns:
-        `litellm_model_id -> metadata` のマッピング。
+        `<正規化後 litellm_model_id> -> metadata` のマッピング。Issue #52 (ADR 0023
+        Phase 1.10) 以降、bare `claude-*` は `anthropic/claude-*` に正規化された
+        キーで格納される。slash 入り ID はそのまま LiteLLM オリジナルキーがキーとなる
+        (Issue #51 / Phase 1.9)。
     """
     metadata: dict[str, dict[str, Any]] = {}
     for model_id in litellm.model_cost.keys():
@@ -120,7 +161,9 @@ def _collect_models(
             continue
         formatted = _format_litellm_metadata(model_id, info)
         if formatted:
-            metadata[model_id] = formatted
+            # ADR 0023 Phase 1.10 (Issue #52): dict キーは正規化後 ID で統一。
+            # registry / CLI / LoRAIro DB 列に伝播する `model_name_short` と一致させる。
+            metadata[formatted["model_name_short"]] = formatted
     return metadata
 
 
