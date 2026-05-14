@@ -14,6 +14,7 @@ import pytest
 import torch
 from PIL import Image
 
+from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
 from image_annotator_lib.model_class.tagger_transformers import BLIP2Tagger, BLIPTagger, GITTagger
 
 
@@ -670,9 +671,15 @@ def test_toriigate_tagger_format_with_assistant_prefix(
             assert call_args[1]["skip_special_tokens"] is True
 
             # Verify "Assistant: " prefix stripped
+            # _format_predictions returns list[UnifiedAnnotationResult] (captioner なので captions field に格納)
             assert len(result) == 1
-            assert result[0] == "A photo of a cat sitting on a table"
-            assert "Assistant: " not in result[0]
+            assert isinstance(result[0], UnifiedAnnotationResult)
+            assert result[0].model_name == "test_toriigate"
+            assert TaskCapability.CAPTIONS in result[0].capabilities
+            assert result[0].captions == ["A photo of a cat sitting on a table"]
+            assert "Assistant: " not in result[0].captions[0]
+            assert result[0].framework == "transformers"
+            assert result[0].error is None
 
     # Test case 2: Without "Assistant: " prefix
     mock_processor.batch_decode.return_value = ["Simple caption text"]
@@ -689,4 +696,7 @@ def test_toriigate_tagger_format_with_assistant_prefix(
 
             # Verify text returned as-is when no prefix
             assert len(result) == 1
-            assert result[0] == "Simple caption text"
+            assert isinstance(result[0], UnifiedAnnotationResult)
+            assert result[0].captions == ["Simple caption text"]
+            assert result[0].framework == "transformers"
+            assert result[0].error is None
