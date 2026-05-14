@@ -24,44 +24,61 @@ from .utils import logger
 
 _SUPPORTED_LITELLM_MODES: frozenset[str] = frozenset({"chat", "responses"})
 
-# ADR 0023 Phase 1.10 (Issue #52): LiteLLM 同梱 DB は Anthropic 直接モデルを `claude-*` の
-# bare 名で格納するため、`anthropic/` プレフィックスを補完して `_BUILDER_DISPATCH` 対象に乗せる。
-# スコープ拡張時はこの tuple に prefix を追加すれば `_canonicalize_litellm_id()` 経路で対応可能。
-_ANTHROPIC_BARE_PREFIXES: tuple[str, ...] = ("claude-",)
 
+def _canonicalize_litellm_id(
+    model_id: str,
+    info: dict[str, Any] | None = None,
+) -> str | None:
+    """LiteLLM 同梱 DB のキーを `provider/model` 形式に正規化する (Issue #60)。
 
-def _canonicalize_litellm_id(model_id: str) -> str | None:
-    """LiteLLM 同梱 DB のキーを `provider/model` 形式に正規化する (ADR 0023 Phase 1.10)。
+    LiteLLM 同梱 DB の各 entry が持つ ``litellm_provider`` field を SSoT として
+    provider を判定する。bare ID については ``litellm_provider`` が
+    ``SUPPORTED_PROVIDERS`` に含まれる場合のみ ``provider/<bare>`` に補完する。
+    slash 入り ID はそのまま返す (LiteLLM 側で既に正規化済前提)。
 
-    LiteLLM 同梱 DB は Anthropic 直接モデルを `claude-opus-4-6` のような bare 名で
-    格納している。`is_allowed_provider()` の `/` チェックで全除外されると Anthropic
-    直接プロバイダー経路が registry に登録されないため、`anthropic/<bare>` 形式に補完する。
+    旧実装 (Issue #52, ADR 0023 Phase 1.10) は ``_ANTHROPIC_BARE_PREFIXES = ("claude-",)``
+    で Anthropic bare 名のみハードコード補完していたため、OpenAI (gpt-4o, gpt-5.2, o3, ...)
+    や Gemini (gemini-1.5-pro 等) の bare 名が ``None`` で除外される問題があった
+    (LoRAIro#253 連動)。LiteLLM ``litellm_provider`` field 経由で provider を判定する
+    ことで新モデル名規則に追従不要・新 provider 追加は ``_BUILDER_DISPATCH`` 更新 1 行で
+    完了する構造になる。
 
     Args:
-        model_id: LiteLLM 同梱 DB のキー (slash 入り or bare)。
+        model_id: LiteLLM ``model_cost`` のキー (slash 入り or bare)。
+        info: ``litellm.model_cost[model_id]`` の dict (任意)。None なら関数内で
+            lookup する。``_collect_models`` ループ内のように既に取得済の場合は
+            渡すと重複 lookup を避けられる。
 
     Returns:
-        正規化後の `provider/model` 形式 ID。スコープ外の bare 名 (`claude-` 以外で
-        始まる、または slash を含まないが `_ANTHROPIC_BARE_PREFIXES` に該当しない形式)
-        は None。
+        正規化後の ``provider/model`` 形式 ID。``litellm_provider`` が
+        ``SUPPORTED_PROVIDERS`` に含まれない bare ID、LiteLLM DB に存在しない bare ID、
+        または ``litellm_provider`` field 欠落の bare ID は None。
     """
     if "/" in model_id:
         return model_id
-    if model_id.startswith(_ANTHROPIC_BARE_PREFIXES):
-        return f"anthropic/{model_id}"
-    return None
+    if info is None:
+        info = litellm.model_cost.get(model_id)
+    if info is None:
+        return None
+    provider = info.get("litellm_provider")
+    if not provider or provider not in SUPPORTED_PROVIDERS:
+        return None
+    return f"{provider}/{model_id}"
 
 
-def is_allowed_provider(model_id: str) -> bool:
-    """model_id の provider prefix が `SUPPORTED_PROVIDERS` に含まれるか判定する。
+def is_allowed_provider(model_id: str, info: dict[str, Any] | None = None) -> bool:
+    """model_id の provider が ``SUPPORTED_PROVIDERS`` に含まれるか判定する。
 
-    `core/model_id.py` の dispatch table を SSoT とし、本ファイル独自の allowlist は持たない。
+    ``core/model_id.py`` の dispatch table を SSoT とし、本ファイル独自の allowlist は持たない。
 
-    ADR 0023 Phase 1.10 (Issue #52): bare `claude-*` (LiteLLM JSON で `/` 無しで格納される
-    Anthropic 直接モデル) は `_canonicalize_litellm_id()` で `anthropic/<bare>` に補完して
-    判定する。
+    Issue #60: bare ID は LiteLLM 同梱 DB の ``litellm_provider`` field を介して
+    provider を判定する (``_canonicalize_litellm_id()`` 経由)。
+
+    Args:
+        model_id: LiteLLM ``model_cost`` のキー (slash 入り or bare)。
+        info: ``litellm.model_cost[model_id]`` の dict (任意)。重複 lookup 回避用。
     """
-    canonical = _canonicalize_litellm_id(model_id)
+    canonical = _canonicalize_litellm_id(model_id, info=info)
     if canonical is None:
         return False
     provider = canonical.split("/", 1)[0]
@@ -97,11 +114,16 @@ def _format_litellm_metadata(model_id: str, info: dict[str, Any]) -> dict[str, A
     モデルが格納される形式) は `_canonicalize_litellm_id()` で `anthropic/<bare>` に正規化
     した値を `model_name_short` / `display_name` に設定する。
 
+    Issue #60: `_canonicalize_litellm_id()` の正規化規則を LiteLLM ``litellm_provider``
+    field SSoT 方式に置換 (claude- ハードコードから移行)。bare ID は OpenAI / Anthropic /
+    Gemini を含む ``SUPPORTED_PROVIDERS`` 全ての ``provider/<bare>`` に正規化される。
+
     Returns:
         フォーマット済 dict。`_canonicalize_litellm_id()` がスコープ外と判定した model_id
-        (`/` 無しかつ `claude-` で始まらない形式) は None。
+        (LiteLLM ``litellm_provider`` が ``SUPPORTED_PROVIDERS`` 外、または bare ID で
+        LiteLLM DB に該当 entry が無い) は None。
     """
-    canonical = _canonicalize_litellm_id(model_id)
+    canonical = _canonicalize_litellm_id(model_id, info=info)
     if canonical is None:
         return None
 
@@ -139,14 +161,16 @@ def _collect_models(
         exclude_deprecated: True なら `deprecation_date` が設定されている entry を除外。
 
     Returns:
-        `<正規化後 litellm_model_id> -> metadata` のマッピング。Issue #52 (ADR 0023
-        Phase 1.10) 以降、bare `claude-*` は `anthropic/claude-*` に正規化された
-        キーで格納される。slash 入り ID はそのまま LiteLLM オリジナルキーがキーとなる
-        (Issue #51 / Phase 1.9)。
+        `<正規化後 litellm_model_id> -> metadata` のマッピング。Issue #60 以降、
+        bare ID は LiteLLM ``litellm_provider`` field SSoT 方式で
+        ``<provider>/<bare>`` に正規化されたキーで格納される。slash 入り ID は
+        そのまま LiteLLM オリジナルキーがキーとなる (Issue #51 / Phase 1.9)。
     """
     metadata: dict[str, dict[str, Any]] = {}
-    for model_id in litellm.model_cost.keys():
-        if not is_allowed_provider(model_id):
+    for model_id, info_cost in litellm.model_cost.items():
+        # Issue #60: model_cost の raw info を is_allowed_provider に渡し、
+        # 重複 lookup を避ける (内部で litellm_provider field を参照する)。
+        if not is_allowed_provider(model_id, info=info_cost):
             continue
         try:
             info = litellm.get_model_info(model_id)
@@ -161,7 +185,7 @@ def _collect_models(
             continue
         formatted = _format_litellm_metadata(model_id, info)
         if formatted:
-            # ADR 0023 Phase 1.10 (Issue #52): dict キーは正規化後 ID で統一。
+            # Issue #60: dict キーは正規化後 ID で統一。
             # registry / CLI / LoRAIro DB 列に伝播する `model_name_short` と一致させる。
             metadata[formatted["model_name_short"]] = formatted
     return metadata
