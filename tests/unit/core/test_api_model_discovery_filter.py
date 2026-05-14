@@ -144,8 +144,17 @@ class TestFormatLitellmMetadata:
         assert metadata["provider"] == "OpenAI"
 
     def test_claude_bare_canonicalized(self):
-        """Issue #52: bare `claude-*` は `anthropic/<bare>` に正規化される。"""
-        info = {"supports_vision": True, "supports_function_calling": True, "mode": "chat"}
+        """Issue #52 / #60: bare ``claude-*`` は ``anthropic/<bare>`` に正規化される。
+
+        Issue #60 以降は ``info['litellm_provider']`` を SSoT として参照するため、
+        テストでは ``litellm_provider`` を明示して LiteLLM DB 依存を排除する。
+        """
+        info = {
+            "supports_vision": True,
+            "supports_function_calling": True,
+            "mode": "chat",
+            "litellm_provider": "anthropic",
+        }
         metadata = _format_litellm_metadata("claude-opus-4-6", info)
         assert metadata is not None
         assert metadata["model_name_short"] == "anthropic/claude-opus-4-6"
@@ -153,19 +162,51 @@ class TestFormatLitellmMetadata:
         assert metadata["provider"] == "Anthropic"
 
     def test_claude_bare_with_date_suffix_canonicalized(self):
-        """Issue #52: 日付サフィックス付きの bare `claude-*` も同様に正規化される。"""
-        info = {"supports_vision": True, "supports_function_calling": True, "mode": "chat"}
+        """Issue #52 / #60: 日付サフィックス付き bare ``claude-*`` も正規化される。"""
+        info = {
+            "supports_vision": True,
+            "supports_function_calling": True,
+            "mode": "chat",
+            "litellm_provider": "anthropic",
+        }
         metadata = _format_litellm_metadata("claude-3-5-sonnet-20241022", info)
         assert metadata is not None
         assert metadata["model_name_short"] == "anthropic/claude-3-5-sonnet-20241022"
         assert metadata["provider"] == "Anthropic"
 
-    def test_non_claude_bare_returns_none(self):
-        """Issue #52: claude- 以外の bare 名 (gpt-4o 等) は除外維持。"""
-        info = {"supports_vision": True, "supports_function_calling": True, "mode": "chat"}
-        assert _format_litellm_metadata("gpt-4o", info) is None
-        # Bedrock 形式 `anthropic.claude-*` も `claude-` で始まらないので除外
+    def test_openai_bare_canonicalized(self):
+        """Issue #60: bare ``gpt-4o`` 等は ``openai/<bare>`` に正規化される。
+
+        旧実装 (Issue #52) は ``claude-*`` のみ補完していたが、本 PR で LiteLLM
+        ``litellm_provider`` field SSoT 方式に切り替え、OpenAI bare 名も対応した。
+        """
+        info = {
+            "supports_vision": True,
+            "supports_function_calling": True,
+            "mode": "chat",
+            "litellm_provider": "openai",
+        }
+        metadata = _format_litellm_metadata("gpt-4o", info)
+        assert metadata is not None
+        assert metadata["model_name_short"] == "openai/gpt-4o"
+        assert metadata["display_name"] == "openai/gpt-4o"
+        assert metadata["provider"] == "OpenAI"
+
+    def test_unsupported_litellm_provider_bare_returns_none(self):
+        """Issue #60: ``SUPPORTED_PROVIDERS`` 外の litellm_provider (bedrock 等) は None。
+
+        ``_BUILDER_DISPATCH`` に builder が無い provider は除外する。
+        """
+        info = {
+            "supports_vision": True,
+            "supports_function_calling": True,
+            "mode": "chat",
+            "litellm_provider": "bedrock_converse",
+        }
         assert _format_litellm_metadata("anthropic.claude-3-5-sonnet", info) is None
+        # litellm_provider field 欠落も None
+        info_no_provider = {"supports_vision": True, "supports_function_calling": True, "mode": "chat"}
+        assert _format_litellm_metadata("any-bare-id", info_no_provider) is None
 
 
 @pytest.mark.unit
@@ -180,20 +221,55 @@ class TestCanonicalizeLitellmId:
         )
         assert _canonicalize_litellm_id("openrouter/z-ai/glm-4.7") == "openrouter/z-ai/glm-4.7"
 
-    def test_claude_bare_normalized(self):
-        """bare `claude-*` は `anthropic/<bare>` に補完される。"""
-        assert _canonicalize_litellm_id("claude-opus-4-6") == "anthropic/claude-opus-4-6"
-        assert _canonicalize_litellm_id("claude-3-5-sonnet-20241022") == (
+    def test_anthropic_bare_normalized_via_info(self):
+        """Issue #60: bare ``claude-*`` は ``info['litellm_provider']='anthropic'`` で正規化される。
+
+        本テストは LiteLLM upstream DB 状態に依存しないよう info 引数で明示する。
+        """
+        info = {"litellm_provider": "anthropic"}
+        assert _canonicalize_litellm_id("claude-opus-4-6", info=info) == "anthropic/claude-opus-4-6"
+        assert _canonicalize_litellm_id("claude-3-5-sonnet-20241022", info=info) == (
             "anthropic/claude-3-5-sonnet-20241022"
         )
-        assert _canonicalize_litellm_id("claude-haiku-4-5") == "anthropic/claude-haiku-4-5"
 
-    def test_non_claude_bare_returns_none(self):
-        """`claude-` 以外の bare 名は対応外として None。"""
-        assert _canonicalize_litellm_id("gpt-4o") is None
-        # Bedrock 形式: ドット区切りで `claude-` で始まらない
-        assert _canonicalize_litellm_id("anthropic.claude-3-5-sonnet") is None
-        assert _canonicalize_litellm_id("invalid_id_no_slash") is None
+    def test_openai_bare_normalized_via_info(self):
+        """Issue #60: bare ``gpt-*`` / ``o*`` 系 OpenAI モデルは ``openai/<bare>`` に補完される。"""
+        info = {"litellm_provider": "openai"}
+        assert _canonicalize_litellm_id("gpt-4o", info=info) == "openai/gpt-4o"
+        assert _canonicalize_litellm_id("o3", info=info) == "openai/o3"
+
+    def test_gemini_bare_normalized_via_info(self):
+        """Issue #60: bare ``gemini-*`` モデルは ``gemini/<bare>`` に補完される。
+
+        ``_BUILDER_DISPATCH`` には ``gemini`` も ``google`` も登録済 (alias)。
+        """
+        info = {"litellm_provider": "gemini"}
+        assert _canonicalize_litellm_id("gemini-1.5-flash", info=info) == "gemini/gemini-1.5-flash"
+
+    def test_unsupported_litellm_provider_returns_none(self):
+        """Issue #60: ``SUPPORTED_PROVIDERS`` 外の litellm_provider は None。
+
+        ``_BUILDER_DISPATCH`` に builder が無い provider (bedrock 系等) は除外。
+        """
+        info_bedrock = {"litellm_provider": "bedrock_converse"}
+        assert _canonicalize_litellm_id("anthropic.claude-3-5-sonnet", info=info_bedrock) is None
+        info_vertex = {"litellm_provider": "vertex_ai-language-models"}
+        assert _canonicalize_litellm_id("any-bare-id", info=info_vertex) is None
+
+    def test_missing_litellm_provider_returns_none(self):
+        """Issue #60: info に ``litellm_provider`` field が無い場合は None。"""
+        info_empty = {"supports_vision": True}
+        assert _canonicalize_litellm_id("any-bare-id", info=info_empty) is None
+        # 空文字や None も None
+        info_blank = {"litellm_provider": ""}
+        assert _canonicalize_litellm_id("any-bare-id", info=info_blank) is None
+        info_none = {"litellm_provider": None}
+        assert _canonicalize_litellm_id("any-bare-id", info=info_none) is None
+
+    def test_unknown_bare_id_returns_none_via_db(self):
+        """Issue #60: LiteLLM DB に存在しない bare ID は info=None でも None。"""
+        # info を渡さなければ litellm.model_cost を lookup、存在しなければ None
+        assert _canonicalize_litellm_id("definitely_not_a_real_litellm_model_id_xyz") is None
 
     def test_empty_string_returns_none(self):
         """空文字も None。"""
@@ -209,11 +285,20 @@ class TestIsAllowedProviderBareName:
         assert is_allowed_provider("claude-opus-4-6") is True
         assert is_allowed_provider("claude-haiku-4-5") is True
 
-    def test_non_claude_bare_rejected(self):
-        """claude- 以外の bare 名は除外維持。"""
-        assert is_allowed_provider("gpt-4o") is False
-        # Bedrock 形式の bare 名 (claude- で始まらない) は除外
+    def test_openai_bare_allowed(self):
+        """Issue #60: OpenAI bare 名 (gpt-4o 等) も SUPPORTED_PROVIDERS 経由で通過。
+
+        旧実装 (Issue #52) では ``claude-*`` のみ補完していたため False だった。
+        """
+        assert is_allowed_provider("gpt-4o") is True
+
+    def test_unsupported_provider_bare_rejected(self):
+        """Issue #60: ``SUPPORTED_PROVIDERS`` 外の litellm_provider (bedrock 等) は除外。"""
+        # `anthropic.claude-3-5-sonnet` は LiteLLM DB に `bedrock_converse` で存在するが
+        # `_BUILDER_DISPATCH` に builder 無し → 除外
         assert is_allowed_provider("anthropic.claude-3-5-sonnet") is False
+        # LiteLLM DB に存在しない bare ID も除外
+        assert is_allowed_provider("invalid_id_no_slash") is False
 
     def test_slash_id_unchanged(self):
         """slash 入り ID の判定は Phase 1.9 と変わらず。"""
