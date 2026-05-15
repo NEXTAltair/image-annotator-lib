@@ -1,10 +1,16 @@
 """CLIP モデルをベースとする Scorer 用の基底クラス。"""
 
-from abc import abstractmethod
-from typing import Any, Self, cast
+from __future__ import annotations
 
-import torch
+from abc import abstractmethod
+from typing import TYPE_CHECKING, Any, Self, cast
+
 from PIL import Image
+
+# Issue #59: module-level `import torch` は CUDA driver 不在 + triton 在り環境で
+# SIGSEGV を引き起こす。型ヒントは TYPE_CHECKING 内、runtime 利用箇所は関数内 import に分離する。
+if TYPE_CHECKING:
+    import torch
 
 # --- ローカルインポート ---
 from ...exceptions.errors import ModelLoadError, OutOfMemoryError
@@ -96,6 +102,8 @@ class ClipBaseAnnotator(BaseAnnotator):
 
     def _run_inference(self, processed: dict[str, torch.Tensor]) -> torch.Tensor:
         """CLIP モデルで画像特徴量を抽出し、分類器ヘッドでスコアを計算します。"""
+        import torch
+
         if (
             not self.components
             or "clip_model" not in self.components

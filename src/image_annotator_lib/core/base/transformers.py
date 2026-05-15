@@ -1,10 +1,16 @@
 """Transformers ライブラリを使用するモデル用の基底クラス。"""
 
-from typing import Any, cast
+from __future__ import annotations
 
-import torch
+from typing import TYPE_CHECKING, Any, cast
+
 from PIL import Image
-from transformers.models.clip import CLIPProcessor
+
+# Issue #59: module-level `import torch` / `from transformers.models.clip import CLIPProcessor` は
+# transformers が torch を eager に load するため CUDA driver 不在 + triton 在り環境で SIGSEGV を
+# 引き起こす。型ヒントは TYPE_CHECKING 内、runtime 利用箇所は関数内 import に分離する。
+if TYPE_CHECKING:
+    import torch
 
 # --- ローカルインポート ---
 from ...exceptions.errors import ConfigurationError, ModelLoadError, OutOfMemoryError
@@ -36,7 +42,7 @@ class TransformersBaseAnnotator(BaseAnnotator):
         # model_path の型を保証 (LocalMLModelConfig では str を期待)
         self.model_path = str(self.model_path) if isinstance(self.model_path, str) else ""
 
-    def __enter__(self) -> "TransformersBaseAnnotator":
+    def __enter__(self) -> TransformersBaseAnnotator:
         """
         モデルの状態に基づいて、必要な場合のみロードまたは復元
         メモリ不足エラーをハンドリングし、VRAM使用量をログに出力
@@ -121,6 +127,8 @@ class TransformersBaseAnnotator(BaseAnnotator):
 
     def _run_inference(self, processed: list[dict[str, torch.Tensor]]) -> list[torch.Tensor]:
         """前処理済みバッチで推論を実行します (Transformers用)。"""
+        import torch
+
         if not self.components or "model" not in self.components or self.components["model"] is None:
             raise RuntimeError("Transformer モデルがロードされていません。")
         model: Any = self.components["model"]
@@ -167,7 +175,9 @@ class TransformersBaseAnnotator(BaseAnnotator):
         Returns:
             list[UnifiedAnnotationResult]: 統一フォーマットのアノテーション結果リスト
         """
-        # 関数レベルでインポート（循環インポート回避）
+        # 関数レベルでインポート (循環インポート回避 + Issue #59 torch eager load 回避)
+        from transformers.models.clip import CLIPProcessor
+
         from ..types import TaskCapability, UnifiedAnnotationResult
         from ..utils import get_model_capabilities
 

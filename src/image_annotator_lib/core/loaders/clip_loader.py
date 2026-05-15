@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from transformers.models.clip import CLIPModel, CLIPProcessor
 
 from ...exceptions.errors import ModelLoadError
-from ..classifier import Classifier
 
 
 class CLIPLoader(LoaderBase):
@@ -94,6 +93,8 @@ class CLIPLoader(LoaderBase):
     ) -> nn.Module:
         """分類器ヘッドモジュールを作成し、重みをロードしてデバイスに移動する。"""
         import torch.nn as nn
+
+        from ..classifier import Classifier
 
         activation_map: dict[str, type[nn.Module]] = {
             "ReLU": nn.ReLU,

@@ -1,7 +1,13 @@
-from typing import Any
+from __future__ import annotations
 
-import torch
+from typing import TYPE_CHECKING, Any
+
 from PIL import Image
+
+# Issue #59: module-level `import torch` は CUDA driver 不在 + triton 在り環境で
+# SIGSEGV を引き起こす。型ヒントは TYPE_CHECKING 内、runtime 利用箇所は関数内 import に分離する。
+if TYPE_CHECKING:
+    import torch
 
 from ..core.base import TransformersBaseAnnotator
 from ..core.types import UnifiedAnnotationResult
@@ -59,6 +65,8 @@ class ToriiGateTagger(TransformersBaseAnnotator):
 
     def _run_inference(self, processed_images: list[dict[str, Any]]) -> list[torch.Tensor]:
         """モデル推論を実行します。生成されたIDを返します。"""
+        import torch
+
         results = []
         # generateメソッドの一般的な引数やモデルのforwardメソッドの引数を想定
         KNOWN_ARGS = {
@@ -94,9 +102,9 @@ class ToriiGateTagger(TransformersBaseAnnotator):
         capabilities = get_model_capabilities(self.model_name)
         results: list[UnifiedAnnotationResult] = []
         for token_ids in token_ids_list:
-            generated_text = self.components["processor"].batch_decode(
-                token_ids, skip_special_tokens=True
-            )[0]
+            generated_text = self.components["processor"].batch_decode(token_ids, skip_special_tokens=True)[
+                0
+            ]
             if "Assistant: " in generated_text:
                 caption = generated_text.split("Assistant: ")[1]
             else:
