@@ -1,5 +1,5 @@
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from PIL import Image
@@ -67,8 +67,15 @@ def test_preprocess_images_calls_processor():
 
 # --- _run_inference ---
 @pytest.mark.standard
-@patch("image_annotator_lib.core.base.transformers.torch")
-def test_run_inference_generate_and_logits(mock_torch):
+def test_run_inference_generate_and_logits(monkeypatch):
+    # Issue #59: torch を module-level から関数内 lazy import に移動したため、
+    # @patch("...transformers.torch") では module attribute を取得できない。
+    # sys.modules に MagicMock を注入し、関数内 `import torch` がそれを返すようにする。
+    import sys
+
+    mock_torch = MagicMock()
+    monkeypatch.setitem(sys.modules, "torch", mock_torch)
+
     # torch.tensorのモック
     mock_tensor = MagicMock()
     mock_torch.tensor.return_value = mock_tensor
