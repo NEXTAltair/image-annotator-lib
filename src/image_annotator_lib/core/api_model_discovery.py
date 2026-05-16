@@ -173,7 +173,8 @@ def _collect_models(
         if not is_allowed_provider(model_id, info=info_cost):
             continue
         try:
-            info = litellm.get_model_info(model_id)
+            provider = info_cost.get("litellm_provider")
+            info = litellm.get_model_info(model_id, custom_llm_provider=provider)
         except Exception:
             # LiteLLM 側で部分的に metadata が欠ける entry はスキップする。
             continue
@@ -230,7 +231,9 @@ def is_model_deprecated(model_id: str) -> bool:
     if not is_allowed_provider(model_id):
         return False
     try:
-        info = litellm.get_model_info(model_id)
+        info_cost = litellm.model_cost.get(model_id) or {}
+        provider = info_cost.get("litellm_provider")
+        info = litellm.get_model_info(model_id, custom_llm_provider=provider)
     except Exception:
         return False
     if info is None:

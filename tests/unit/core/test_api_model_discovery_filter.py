@@ -10,13 +10,17 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from image_annotator_lib.core.api_model_discovery import (
     _canonicalize_litellm_id,
+    _collect_models,
     _format_litellm_metadata,
     _is_litellm_model_annotation_compatible,
     is_allowed_provider,
+    is_model_deprecated,
 )
 
 
@@ -307,3 +311,77 @@ class TestIsAllowedProviderBareName:
         assert is_allowed_provider("openrouter/z-ai/glm-4.7") is True
         # SUPPORTED_PROVIDERS 外はそのまま除外 (vertex_ai は dispatch 未対応)
         assert is_allowed_provider("vertex_ai/claude-opus-4-6") is False
+
+
+@pytest.mark.unit
+class TestCollectModelsPassesProviderToGetModelInfo:
+    """Issue #265: _collect_models() が get_model_info() に custom_llm_provider を渡すこと。
+
+    LiteLLM の provider 推論 (get_llm_provider_logic.py:505) が失敗すると
+    「Provider List: https://docs.litellm.ai/docs/providers」が print() される。
+    litellm.model_cost の各 entry は既に litellm_provider を持つため、
+    get_model_info() には custom_llm_provider を明示して provider 推論経路に入らない。
+    """
+
+    _COMPAT_INFO: dict = {
+        "litellm_provider": "openai",
+        "supports_vision": True,
+        "supports_function_calling": True,
+        "mode": "chat",
+        "max_tokens": 4096,
+        "max_input_tokens": 128000,
+        "max_output_tokens": 4096,
+        "input_cost_per_token": 0.000005,
+        "output_cost_per_token": 0.000015,
+    }
+
+    def test_collect_models_passes_custom_llm_provider(self):
+        """_collect_models() は get_model_info() に custom_llm_provider=provider を渡す。"""
+        mock_cost = {"ft:o4-mini-2025-04-16": self._COMPAT_INFO}
+        mock_info = MagicMock(return_value=dict(self._COMPAT_INFO))
+
+        with patch("image_annotator_lib.core.api_model_discovery.litellm") as mock_litellm:
+            mock_litellm.model_cost = mock_cost
+            mock_litellm.get_model_info = mock_info
+            _collect_models(require_compatible=False, exclude_deprecated=False)
+
+        mock_info.assert_called_once_with("ft:o4-mini-2025-04-16", custom_llm_provider="openai")
+
+    def test_collect_models_gemini_bare_passes_provider(self):
+        """bare gemini-* ID も custom_llm_provider='gemini' を渡す (issue #265 再現モデル)。"""
+        info = dict(self._COMPAT_INFO)
+        info["litellm_provider"] = "gemini"
+        mock_cost = {"gemini-2.0-flash-exp-image-generation": info}
+        mock_info = MagicMock(return_value=info)
+
+        with patch("image_annotator_lib.core.api_model_discovery.litellm") as mock_litellm:
+            mock_litellm.model_cost = mock_cost
+            mock_litellm.get_model_info = mock_info
+            _collect_models(require_compatible=False, exclude_deprecated=False)
+
+        mock_info.assert_called_once_with(
+            "gemini-2.0-flash-exp-image-generation", custom_llm_provider="gemini"
+        )
+
+
+@pytest.mark.unit
+class TestIsModelDeprecatedPassesProviderToGetModelInfo:
+    """Issue #265: is_model_deprecated() が get_model_info() に custom_llm_provider を渡すこと。"""
+
+    def test_is_model_deprecated_passes_custom_llm_provider(self):
+        """is_model_deprecated() は get_model_info() に custom_llm_provider=provider を渡す。"""
+        info = {
+            "litellm_provider": "openai",
+            "supports_vision": True,
+            "supports_function_calling": True,
+            "mode": "chat",
+            "deprecation_date": None,
+        }
+        mock_info = MagicMock(return_value=info)
+
+        with patch("image_annotator_lib.core.api_model_discovery.litellm") as mock_litellm:
+            mock_litellm.model_cost = {"ft:o4-mini-2025-04-16": info}
+            mock_litellm.get_model_info = mock_info
+            is_model_deprecated("ft:o4-mini-2025-04-16")
+
+        mock_info.assert_called_once_with("ft:o4-mini-2025-04-16", custom_llm_provider="openai")
