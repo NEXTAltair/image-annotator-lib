@@ -35,7 +35,7 @@ dependencies = [
     "Pillow>=10.0.0",
     "toml",
     "tensorflow>=2.19.0;platform_system!='Darwin'", # Use newer version from scorer
-    "transformers>=4.27.4",
+    "transformers>=4.50.0",
     "tf-keras>=2.19.0",
     "accelerate>=0.26.0",
     "diffusers>=0.24.0",
