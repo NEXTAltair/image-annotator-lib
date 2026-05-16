@@ -30,7 +30,7 @@ def mock_transformers_loader(mock_model_instance):
     """Mock Transformers model loader."""
     # Mock the actual transformers imports used in _TransformersLoader
     with (
-        patch("transformers.models.auto.modeling_auto.AutoModelForVision2Seq") as mock_auto_model,
+        patch("transformers.models.auto.modeling_auto.AutoModelForImageTextToText") as mock_auto_model,
         patch("transformers.models.auto.processing_auto.AutoProcessor") as mock_auto_processor,
     ):
         # Configure mocks

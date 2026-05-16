@@ -1,6 +1,6 @@
 """Hugging Face Transformers モデルローダー。
 
-AutoModelForVision2Seq と Pipeline の2つのローダーを提供する。
+AutoModelForImageTextToText と Pipeline の2つのローダーを提供する。
 
 Dependencies:
     - transformers: Hugging Face Transformers ライブラリ (遅延import)
@@ -24,18 +24,18 @@ if __name__ != "__main__":
 
 
 class TransformersLoader(LoaderBase):
-    """Hugging Face Transformers モデル (AutoModelForVision2Seq) のローダー。"""
+    """Hugging Face Transformers モデル (AutoModelForImageTextToText) のローダー。"""
 
     def _calculate_specific_size(self, model_path: str, **kwargs: Any) -> float:
         """CPU 上でモデルを一時ロードしてサイズを計算する。"""
         import torch.nn
-        from transformers.models.auto.modeling_auto import AutoModelForVision2Seq
+        from transformers.models.auto.modeling_auto import AutoModelForImageTextToText
 
         logger.debug(f"一時ロードによる Transformer サイズ計算開始: {model_path}")
         calculated_size_mb = 0.0
         temp_model = None
         try:
-            temp_model = AutoModelForVision2Seq.from_pretrained(model_path).to("cpu")
+            temp_model = AutoModelForImageTextToText.from_pretrained(model_path).to("cpu")
             if isinstance(temp_model, torch.nn.Module):
                 calculated_size_mb = LoaderBase._calculate_transformer_size_mb(temp_model)
         except Exception as e:
@@ -50,11 +50,11 @@ class TransformersLoader(LoaderBase):
     @override
     def _load_components_internal(self, model_path: str, **kwargs: Any) -> TransformersComponents:
         """モデルとプロセッサをロードする。"""
-        from transformers.models.auto.modeling_auto import AutoModelForVision2Seq
+        from transformers.models.auto.modeling_auto import AutoModelForImageTextToText
         from transformers.models.auto.processing_auto import AutoProcessor
 
         processor = AutoProcessor.from_pretrained(model_path)
-        model = AutoModelForVision2Seq.from_pretrained(model_path).to(self.device)
+        model = AutoModelForImageTextToText.from_pretrained(model_path).to(self.device)
         return {"model": model, "processor": processor}
 
 
