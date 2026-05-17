@@ -91,16 +91,33 @@ score-derived tag は `UnifiedAnnotationResult.tags` に入れない。
 
 初期実装では、score key は配布元・実装元の意味を保つ。
 
-| Model | `scores` keys | Scale |
-|---|---|---|
-| `aesthetic_shadow_v1` | `hq`, `lq` | pipeline の分類 probability |
-| `aesthetic_shadow_v2` | `hq`, `lq` | pipeline の分類 probability |
-| `cafe_aesthetic` | `aesthetic` | pipeline の `aesthetic` probability |
-| `ImprovedAesthetic` | `aesthetic` | CLIP+MLP raw prediction; expected 0-10 系 |
-| `WaifuAesthetic` | `aesthetic` | CLIP+MLP raw prediction; expected 0-1 系 |
+| Model | `scores` keys | Scale | Canonical source for key/scale |
+|---|---|---|---|
+| `aesthetic_shadow_v1` | `hq`, `lq` | 0-1 binary classification probability (`hq + lq = 1`) | `config.json` の `id2label = {"0": "hq", "1": "lq"}` (model card 本文には未記載) |
+| `aesthetic_shadow_v2` | `hq`, `lq` | 0-1 binary classification probability (`hq + lq = 1`) | `config.json` の `id2label = {"0": "hq", "1": "lq"}`。Model card は `hq` probability に対する 4-tier 閾値 (`very aesthetic >= 0.71` 等) を併記 |
+| `cafe_aesthetic` | `aesthetic` | 0-1 image-classification probability (`aesthetic + not_aesthetic = 1` のうち `aesthetic` のみ抽出) | Model card label list (`aesthetic` / `not_aesthetic`) |
+| `ImprovedAesthetic` | `aesthetic` | **1-10 系** CLIP+MLP linearMSE 回帰出力 | LAION-Aesthetics 公式 blog: 訓練データ (SAC / LAION-Logos / AVA) が `1 to 10` MOS rating であり、公開 subset の閾値も `>= 4.5 / 5 / 6` で記述されている |
+| `WaifuAesthetic` | `aesthetic` | **0-1 系** CLIP+MLP 回帰出力 | `waifu-diffusion/aesthetic` README: `"a 0 to 1 score, where the lowest score means... low aesthetic rating and a high score means... high aesthetic rating"` (verbatim) |
 
 score scale の正規化はこの ADR では行わない。異なる model の score を同一尺度として扱う
 必要が出た場合は、別 ADR で正規化 contract を定義する。
+
+### Canonical source 確認の重要性
+
+score key 名や scale は、必ずしも model card 本文に書かれていない。例えば `aesthetic_shadow_v1/v2`
+の `hq` / `lq` ラベルは model card には記載がなく、`config.json` の `id2label` で初めて
+正式定義されていることを確認できる。同様に `ImprovedAesthetic` の 1-10 scale は GitHub README
+には書かれておらず、LAION 公式 blog の訓練データ説明と公開 subset 閾値 (`>= 5` 等) からのみ
+確認できる。
+
+scorer 追加時 / 既存 scorer の挙動を疑う際は、以下の優先順位で canonical source を確認する:
+
+1. `config.json` の `id2label` / `label2id` (HuggingFace image-classification model)
+2. Model card 本文の labels / threshold 記述
+3. 公式 blog / 訓練データセットの scoring scale 記述
+4. 配布元 README の usage 例 (`Prediction: 0.999...` のような出力例)
+
+Model card 単独では不足する場合があるため、`config.json` と訓練データ仕様を併読する。
 
 ## Rationale
 
