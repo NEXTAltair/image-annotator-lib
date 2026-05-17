@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 # Lazy imports for heavy ML libraries (imported only during type checking)
 if TYPE_CHECKING:
@@ -202,11 +202,12 @@ from enum import Enum
 
 
 class TaskCapability(str, Enum):
-    """サポートするタスク能力(3つに限定)"""
+    """サポートするタスク能力(ADR 0002: SCORE_LABELS 追加)。"""
 
     TAGS = "tags"
     CAPTIONS = "captions"
     SCORES = "scores"
+    SCORE_LABELS = "score_labels"
 
 
 class UnifiedAnnotationResult(BaseModel):
@@ -224,6 +225,9 @@ class UnifiedAnnotationResult(BaseModel):
     tags: list[str] | None = None
     captions: list[str] | None = None
     scores: dict[str, float] | None = None
+    # ADR 0002: scorer 由来の categorical label (例: "very aesthetic", "aesthetic")。
+    # content tag (WDTagger 等) と field レベルで分離。
+    score_labels: list[str] | None = None
 
     # メタデータ(Optional)
     provider_name: str | None = None
@@ -258,6 +262,19 @@ class UnifiedAnnotationResult(BaseModel):
             capabilities = info.data.get("capabilities", set())
             if TaskCapability.SCORES not in capabilities:
                 raise ValueError(f"scores provided but SCORES not in capabilities: {capabilities}")
+        return v
+
+    @field_validator("score_labels")
+    @classmethod
+    def validate_score_labels_capability(
+        cls, v: list[str] | None, info: ValidationInfo
+    ) -> list[str] | None:
+        if v is not None:
+            capabilities = info.data.get("capabilities", set())
+            if TaskCapability.SCORE_LABELS not in capabilities:
+                raise ValueError(
+                    f"score_labels provided but SCORE_LABELS not in capabilities: {capabilities}"
+                )
         return v
 
     @model_validator(mode="after")
