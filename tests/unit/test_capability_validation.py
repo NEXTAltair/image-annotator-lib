@@ -16,12 +16,14 @@ class TestTaskCapability:
         assert TaskCapability.TAGS == "tags"
         assert TaskCapability.CAPTIONS == "captions"
         assert TaskCapability.SCORES == "scores"
+        assert TaskCapability.SCORE_LABELS == "score_labels"
 
     def test_task_capability_creation(self):
         """Test TaskCapability creation from strings"""
         assert TaskCapability("tags") == TaskCapability.TAGS
         assert TaskCapability("captions") == TaskCapability.CAPTIONS
         assert TaskCapability("scores") == TaskCapability.SCORES
+        assert TaskCapability("score_labels") == TaskCapability.SCORE_LABELS
 
     def test_invalid_capability(self):
         """Test that invalid capability values raise errors"""
@@ -95,6 +97,54 @@ class TestUnifiedAnnotationResult:
             UnifiedAnnotationResult(
                 model_name="test-tagger", capabilities={TaskCapability.TAGS}, scores={"invalid": 0.5}
             )
+
+    def test_valid_score_labels_capability(self):
+        """Test valid score_labels with SCORES + SCORE_LABELS capabilities (ADR 0002)."""
+        result = UnifiedAnnotationResult(
+            model_name="cafe_aesthetic",
+            capabilities={TaskCapability.SCORES, TaskCapability.SCORE_LABELS},
+            scores={"aesthetic": 0.67, "not_aesthetic": 0.33},
+            score_labels=["aesthetic"],
+        )
+        assert result.scores == {"aesthetic": 0.67, "not_aesthetic": 0.33}
+        assert result.score_labels == ["aesthetic"]
+        assert result.tags is None
+        assert result.captions is None
+
+    def test_invalid_score_labels_without_capability(self):
+        """Test that score_labels without SCORE_LABELS capability raises ValidationError (ADR 0002)."""
+        with pytest.raises(
+            ValidationError, match="score_labels provided but SCORE_LABELS not in capabilities"
+        ):
+            UnifiedAnnotationResult(
+                model_name="test-scorer",
+                capabilities={TaskCapability.SCORES},
+                scores={"aesthetic": 0.5},
+                score_labels=["aesthetic"],
+            )
+
+    def test_score_only_scorer_invariants(self):
+        """ADR 0002 運用ルール: 純 regression scorer は score_labels is None / tags is None。"""
+        result = UnifiedAnnotationResult(
+            model_name="ImprovedAesthetic",
+            capabilities={TaskCapability.SCORES},
+            scores={"aesthetic": 7.5},
+        )
+        assert result.scores is not None
+        assert result.tags is None
+        assert result.score_labels is None
+
+    def test_canonical_label_scorer_invariants(self):
+        """ADR 0002 運用ルール: canonical label scorer は score_labels is not None / tags is None。"""
+        result = UnifiedAnnotationResult(
+            model_name="aesthetic_shadow_v2",
+            capabilities={TaskCapability.SCORES, TaskCapability.SCORE_LABELS},
+            scores={"hq": 0.85, "lq": 0.15},
+            score_labels=["very aesthetic"],
+        )
+        assert result.scores is not None
+        assert result.score_labels is not None
+        assert result.tags is None
 
     def test_empty_capabilities_error(self):
         """Test that empty capabilities raises ValidationError"""

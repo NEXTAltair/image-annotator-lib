@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, Self, cast
 
 from PIL import Image
@@ -16,7 +15,7 @@ if TYPE_CHECKING:
 from ...exceptions.errors import ModelLoadError, OutOfMemoryError
 from ..config import config_registry
 from ..model_factory import ModelLoad
-from ..types import CLIPComponents, ScorerAnnotationResult, TaskCapability, UnifiedAnnotationResult
+from ..types import CLIPComponents, TaskCapability, UnifiedAnnotationResult
 from ..utils import logger
 from .annotator import BaseAnnotator
 
@@ -182,17 +181,3 @@ class ClipBaseAnnotator(BaseAnnotator):
                         framework="pytorch",
                     )
                 ]
-
-    @abstractmethod
-    def _get_score_tag(self, score: float) -> str:
-        """スコア値に基づいてスコアタグ文字列を生成します (サブクラスで実装)。"""
-        raise NotImplementedError("サブクラスは _get_score_tag を実装する必要があります。")
-
-    def _generate_tags(self, formatted_output: ScorerAnnotationResult) -> list[str]:
-        """新バリデーションスキーマからタグを生成（Scorerはタグではなくスコアがメイン）"""
-        if isinstance(formatted_output, ScorerAnnotationResult) and formatted_output.score_values:
-            # スコアラーの場合、主要データは数値スコアなのでタグ生成は基本的に空
-            # ただし、スコアベースのタグ（例：'high_quality', 'low_quality'）が必要な場合は
-            # サブクラスでオーバーライドする
-            return []
-        return []
