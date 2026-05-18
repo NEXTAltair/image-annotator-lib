@@ -129,10 +129,16 @@ class ProviderManager:
                     # ADR 0023 Phase 1.8 (Issue #46): transport retry 枯渇時は
                     # tenacity が httpx 例外を reraise する (RetryConfig(reraise=True))。
                     # 既存の str(exc) 文字列伝搬経路でそのまま LoRAIro 側に流れる。
-                    logger.error(
+                    #
+                    # Issue #69 / LoRAIro #275: `logger.error(message, exc_info=True)` は
+                    # loguru 内部で `message.format(*args, **kwargs)` を呼ぶため、f-string
+                    # 結果に str(exc) 由来の `{'type': ...}` dict 表現が含まれると
+                    # placeholder と誤認識され `KeyError("'type'")` が leak する。
+                    # `.opt(exception=exc).error(message)` パターンに変更して loguru の
+                    # message 再フォーマットを回避する。
+                    logger.opt(exception=exc).error(
                         f"WebAPI 推論失敗: model={model_name}, "
-                        f"litellm_model_id={litellm_model_id}, error={exc}",
-                        exc_info=True,
+                        f"litellm_model_id={litellm_model_id}, error={exc}"
                     )
                     results[phash] = to_annotation_result(None, phash, error=str(exc))
             return results
