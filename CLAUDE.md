@@ -20,26 +20,33 @@ uv add --dev package-name
 
 ### Testing
 
-**IMPORTANT: NEVER run `uv` commands from this local package directory.**
-**ALWAYS execute from the project root (`/workspaces/LoRAIro/`).**
+**LoRAIro ADR 0024**: pytest セッション境界 = package 境界。iam-lib test は package directory (`cd local_packages/image-annotator-lib` または iam-lib repo root) から `uv run pytest` で実行する。
 
 ```bash
-# From project root ONLY:
-uv run pytest local_packages/image-annotator-lib/tests/
+# 推奨: Makefile target 経由 (LoRAIro 側 `make test-iam-lib` も同パターン)
+make test          # = uv run pytest -n auto
+make test-unit     # = uv run pytest -m unit -n auto
+make test-integration
+make test-webapi
 
-# Run specific test categories
-uv run pytest -m unit local_packages/image-annotator-lib/tests/
-uv run pytest -m integration local_packages/image-annotator-lib/tests/
-uv run pytest -m webapi local_packages/image-annotator-lib/tests/
+# 直接実行:
+uv run pytest
+uv run pytest -m unit
+uv run pytest -m integration
+uv run pytest -m webapi
 
-# Run single test file
-uv run pytest local_packages/image-annotator-lib/tests/unit/core/test_config.py
+# 単一ファイル
+uv run pytest tests/unit/core/test_config.py
 
 # Run with coverage (use coverage run to avoid torch reload issues)
-uv run coverage run -m pytest local_packages/image-annotator-lib/tests/
+uv run coverage run -m pytest
 uv run coverage report -m
 uv run coverage xml  # For CI integration
 ```
+
+#### LoRAIro 経由での実行
+
+LoRAIro repo として開発する場合、`make test-iam-lib` (LoRAIro Makefile) が `cd local_packages/image-annotator-lib && uv run pytest` 相当を実行する。LoRAIro #291 merge 後は `UV_PROJECT_ENVIRONMENT=/workspaces/LoRAIro/.venv uv run --no-sync pytest` で root `.venv` を共有する形に切替わる予定。
 
 ### Code Quality
 ```bash
