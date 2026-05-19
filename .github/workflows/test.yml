@@ -11,16 +11,12 @@ jobs:
     name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Python 3.14 は experimental (upstream dep の 3.14 wheel 待ち、
-    # 例: onnxruntime は cp312/cp313 のみ)。tracker として CI に含めるが
-    # 失敗は許容 (continue-on-error)。安定後 experimental を外す。
-    continue-on-error: ${{ matrix.experimental == true }}
+    # Python 3.14 は upstream dep (torch 2.12 / tensorflow 2.21 / onnxruntime 1.23)
+    # が cp314 wheel を提供するまで棚上げ。torch + tensorflow が 3.14 対応した時点で
+    # matrix に再追加 + pyproject の upper bound を緩める。
     strategy:
       matrix:
         python-version: ["3.12", "3.13"]
-        include:
-          - python-version: "3.14"
-            experimental: true
       fail-fast: false
     env:
       HF_HUB_OFFLINE: "1"
