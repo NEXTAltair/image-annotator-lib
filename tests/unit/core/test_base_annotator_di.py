@@ -296,15 +296,6 @@ class TestConfigOverrideScenarios:
         assert annotator.model_path == "/direct/path"
         assert annotator._config.device == "cuda"  # Issue #35: device 判定はサブクラスへ移譲
 
-    @pytest.mark.skip(
-        reason="Issue #35: device 判定 (CUDA 不可時 CPU フォールバック) は ML 系 base class "
-        "(Transformers / ONNX / TF / CLIP / Pipeline) の責務に移譲された。BaseAnnotator "
-        "直系の ConcreteTestAnnotator では fallback は発生しない。fallback test は ML 系 "
-        "base class の専用 test ファイルで再実装する (別 issue)。"
-    )
-    def test_config_device_fallback_to_cpu(self, managed_config_registry, mock_cuda_unavailable):
-        """Test device fallback to CPU when CUDA unavailable."""
-
 
 class TestConfigValidationEdgeCases:
     """Edge cases for config validation."""

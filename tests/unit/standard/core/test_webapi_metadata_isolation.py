@@ -3,10 +3,15 @@
 Issue #6 の応急処置で導入された `config_registry.set_system_value()` での逆流注入を
 撤廃し、`_WEBAPI_MODEL_METADATA` を SSoT として確立した状態を保証する。
 
-ADR 0023 Phase 1 (Issue #35): 旧 `load_available_api_models` 経由のテスト群は
-`discover_available_vision_models` への置換に伴い broken になった。本ファイルは
-ファイルレベル `pytestmark = pytest.mark.skip` で一時保留し、新仕様での再構築は
-別 issue で行う。
+Issue #269 で現仕様 (ADR 0023 Phase 1 / #45 / Phase 1.x) に合わせ再構築した:
+
+- 旧 `load_available_api_models` モックは `discover_available_vision_models` モックへ
+  置換 (`_register_webapi_models_from_discovery` は内部で discovery を呼ぶ)。
+- WebAPI モデル登録の主条件は `supports_response_schema` → `supports_vision` +
+  `supports_function_calling` (#45)。
+- 削除済みの `PydanticAIWebAPIAnnotator` / `PydanticAIWebAPIWrapper` を参照していた
+  test は、SSoT 優先 (`_WEBAPI_MODEL_METADATA` が user TOML を override する) の検証へ
+  読み替えた。registry 登録クラスは `WebApiAnnotator` に統合済み。
 """
 
 from unittest.mock import patch
@@ -14,74 +19,54 @@ from unittest.mock import patch
 import pytest
 
 from image_annotator_lib.core import registry
-from image_annotator_lib.core.base.annotator import BaseAnnotator
+from image_annotator_lib.core.api_model_discovery import _is_litellm_model_annotation_compatible
 from image_annotator_lib.core.config import get_config_registry
 from image_annotator_lib.core.registry import (
     _register_webapi_models_from_discovery,
     get_webapi_metadata,
 )
 
-pytestmark = pytest.mark.skip(
-    reason="ADR 0023 Phase 1 (Issue #35): load_available_api_models が削除されたため "
-    "本ファイルの test 群は dead。新仕様 (discover_available_vision_models) での "
-    "再構築は別 issue で実施。"
-)
+# `_register_webapi_models_from_discovery` は関数内で
+# `from .api_model_discovery import discover_available_vision_models` する。
+# patch は定義元モジュールを対象にする。
+_DISCOVERY_PATCH_TARGET = "image_annotator_lib.core.api_model_discovery.discover_available_vision_models"
 
 
-class _DummyPydanticAIWebAPIAnnotator(BaseAnnotator):
-    """`_try_register_model` の `issubclass(BaseAnnotator)` チェックを通過するためのダミー実装。"""
+def _model_info(model_short: str, provider: str) -> dict:
+    """`discover_available_vision_models()` の metadata エントリ相当を生成する。
 
-    def __init__(self, model_name: str):
-        self.model_name = model_name
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return None
-
-    def _preprocess_images(self, images):
-        return images
-
-    def _run_inference(self, processed):
-        return processed
-
-    def _format_predictions(self, raw_outputs):
-        return raw_outputs
-
-    def _generate_tags(self, formatted_output):
-        return []
-
-
-# テスト用 WebAPI モデル discovery レスポンス。
-# `_register_webapi_models_from_discovery` が `load_available_api_models()` から
-# 受け取る形式。
-_DISCOVERY_PAYLOAD = {
-    "google/gemini-2.5-pro": {
-        "provider": "google",
-        "model_name_short": "Gemini 2.5 Pro",
-        "mode": "chat",
-        "max_input_tokens": 1048576,
-        "max_output_tokens": 8192,
-        "supports_vision": True,
-        "supports_response_schema": True,
-        "supports_function_calling": True,
-        "supports_tool_choice": True,
-        "deprecated_on": None,
-    },
-    "openai/gpt-4o": {
-        "provider": "openai",
-        "model_name_short": "GPT-4o",
+    `_format_litellm_metadata` の出力形式 (Issue #51 以降、`model_name_short` は
+    `provider/model` 形式の完全 ID) に合わせる。
+    """
+    return {
+        "provider": provider,
+        "model_name_short": model_short,
+        "display_name": model_short,
         "mode": "chat",
         "max_input_tokens": 128000,
         "max_output_tokens": 16384,
+        "max_tokens": 16384,
         "supports_vision": True,
-        "supports_response_schema": True,
         "supports_function_calling": True,
         "supports_tool_choice": True,
-        "deprecated_on": None,
-    },
-}
+        "supports_parallel_function_calling": False,
+        "input_cost_per_token": None,
+        "output_cost_per_token": None,
+        "deprecation_date": None,
+    }
+
+
+def _discovery_result(*model_shorts: tuple[str, str]) -> dict:
+    """`discover_available_vision_models()` の戻り値形式を生成する。"""
+    metadata = {short: _model_info(short, provider) for short, provider in model_shorts}
+    return {"models": list(metadata.keys()), "metadata": metadata}
+
+
+# テスト用 WebAPI モデル discovery レスポンス。
+_DISCOVERY_RESULT = _discovery_result(
+    ("google/gemini-2.5-pro", "Google"),
+    ("openai/gpt-4o", "OpenAI"),
+)
 
 
 @pytest.fixture
@@ -96,77 +81,50 @@ def isolated_registry():
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.core.registry._gather_available_classes")
-@patch("image_annotator_lib.core.registry.load_available_api_models")
-def test_set_system_value_not_called_after_registration(
-    mock_load_api_models,
-    mock_gather_classes,
-    isolated_registry,
-):
+def test_set_system_value_not_called_after_registration(isolated_registry):
     """SSoT 化の核: `config_registry.set_system_value()` が一度も呼ばれない。
 
     Issue #6 応急処置時に導入された逆流注入経路が完全撤廃されていることを保証する。
     """
-    mock_load_api_models.return_value = _DISCOVERY_PAYLOAD
-    mock_gather_classes.return_value = {"PydanticAIWebAPIAnnotator": _DummyPydanticAIWebAPIAnnotator}
-
     real_registry = get_config_registry()
-    with patch.object(real_registry, "set_system_value") as mock_set_system_value:
-        _register_webapi_models_from_discovery()
+    with patch(_DISCOVERY_PATCH_TARGET, return_value=_DISCOVERY_RESULT):
+        with patch.object(real_registry, "set_system_value") as mock_set_system_value:
+            _register_webapi_models_from_discovery()
 
-        mock_set_system_value.assert_not_called()
+            mock_set_system_value.assert_not_called()
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.core.registry._gather_available_classes")
-@patch("image_annotator_lib.core.registry.load_available_api_models")
-def test_config_registry_does_not_contain_webapi_after_registration(
-    mock_load_api_models,
-    mock_gather_classes,
-    isolated_registry,
-):
-    """登録後、`config_registry.get(<webapi-model>, "api_model_id")` が None を返す。
+def test_config_registry_does_not_contain_webapi_after_registration(isolated_registry):
+    """登録後、`config_registry.get(<webapi-model>, ...)` が None を返す。
 
     set_system_value が呼ばれないため、config_registry の内部 dict に WebAPI
     モデルのレコードが作られない (逆流ゼロ)。
     """
-    mock_load_api_models.return_value = _DISCOVERY_PAYLOAD
-    mock_gather_classes.return_value = {"PydanticAIWebAPIAnnotator": _DummyPydanticAIWebAPIAnnotator}
-
-    # `_merged_config_data` を空の状態から初期化して測定の独立性を担保する。
     real_registry = get_config_registry()
     with patch.object(real_registry, "_merged_config_data", {}):
-        _register_webapi_models_from_discovery()
+        with patch(_DISCOVERY_PATCH_TARGET, return_value=_DISCOVERY_RESULT):
+            _register_webapi_models_from_discovery()
 
-        assert real_registry.get("Gemini 2.5 Pro", "api_model_id") is None
-        assert real_registry.get("GPT-4o", "api_model_id") is None
+            assert real_registry.get("openai/gpt-4o", "litellm_model_id") is None
+            assert real_registry.get("google/gemini-2.5-pro", "litellm_model_id") is None
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.core.registry._gather_available_classes")
-@patch("image_annotator_lib.core.registry.load_available_api_models")
-def test_get_webapi_metadata_returns_full_metadata(
-    mock_load_api_models,
-    mock_gather_classes,
-    isolated_registry,
-):
+def test_get_webapi_metadata_returns_full_metadata(isolated_registry):
     """登録後、`get_webapi_metadata(model_name)` が完全な metadata 辞書を返す。"""
-    mock_load_api_models.return_value = _DISCOVERY_PAYLOAD
-    mock_gather_classes.return_value = {"PydanticAIWebAPIAnnotator": _DummyPydanticAIWebAPIAnnotator}
+    with patch(_DISCOVERY_PATCH_TARGET, return_value=_DISCOVERY_RESULT):
+        _register_webapi_models_from_discovery()
 
-    _register_webapi_models_from_discovery()
-
-    metadata = get_webapi_metadata("Gemini 2.5 Pro")
+    metadata = get_webapi_metadata("google/gemini-2.5-pro")
     assert metadata is not None
-    assert metadata["api_model_id"] == "google/gemini-2.5-pro"
+    assert metadata["litellm_model_id"] == "google/gemini-2.5-pro"
     assert metadata["model_name_on_provider"] == "google/gemini-2.5-pro"
     assert metadata["provider"] == "google"
     assert metadata["supports_vision"] is True
-    assert metadata["supports_response_schema"] is True
-    assert metadata["max_input_tokens"] == 1048576
-    assert metadata["max_output_tokens"] == 8192
-    assert metadata["class"] == "PydanticAIWebAPIAnnotator"
+    assert metadata["supports_function_calling"] is True
     assert metadata["type"] == "webapi"
+    assert metadata["class"] == "WebApiAnnotator"
 
 
 @pytest.mark.unit
@@ -177,162 +135,119 @@ def test_get_webapi_metadata_returns_none_for_unregistered():
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.core.registry._gather_available_classes")
-@patch("image_annotator_lib.core.registry.load_available_api_models")
-def test_register_webapi_models_requires_response_schema(
-    mock_load_api_models,
-    mock_gather_classes,
-    isolated_registry,
-):
-    """Vision 対応でも structured output 非対応モデルは登録されない。"""
-    mock_load_api_models.return_value = {
-        "openai/gpt-4o": {
-            "provider": "openai",
-            "model_name_short": "GPT-4o",
-            "mode": "chat",
-            "supports_vision": True,
-            "supports_response_schema": True,
-            "deprecated_on": None,
-        },
-        "openai/gpt-4-turbo-vision-preview": {
-            "provider": "openai",
-            "model_name_short": "GPT-4 Turbo Vision",
-            "mode": "chat",
-            "supports_vision": True,
-            "supports_response_schema": False,
-            "deprecated_on": None,
-        },
-    }
-    mock_gather_classes.return_value = {"PydanticAIWebAPIAnnotator": _DummyPydanticAIWebAPIAnnotator}
+def test_annotation_compatibility_requires_vision_and_function_calling():
+    """WebAPI モデル登録の主条件は `supports_vision` + `supports_function_calling` (#45)。
 
-    _register_webapi_models_from_discovery()
+    旧 test (`..._requires_response_schema`) は `supports_response_schema` を判定条件に
+    していたが、ADR 0023 Phase 1 (#45) で structured output は PydanticAI default Tool
+    Output で得る方針に変わり、`supports_function_calling` が主条件に統一された。
+    判定は `discover_available_vision_models` 内の `_is_litellm_model_annotation_compatible`
+    が担う。
+    """
+    compatible = {"mode": "chat", "supports_vision": True, "supports_function_calling": True}
+    assert _is_litellm_model_annotation_compatible(compatible) is True
 
-    assert get_webapi_metadata("GPT-4o") is not None
-    assert get_webapi_metadata("GPT-4 Turbo Vision") is None
+    # vision 対応でも function_calling 非対応なら除外される
+    no_function_calling = {"mode": "chat", "supports_vision": True, "supports_function_calling": False}
+    assert _is_litellm_model_annotation_compatible(no_function_calling) is False
+
+    # function_calling 対応でも vision 非対応なら除外される
+    no_vision = {"mode": "chat", "supports_vision": False, "supports_function_calling": True}
+    assert _is_litellm_model_annotation_compatible(no_vision) is False
+
+    # response_schema は判定に使われない (対応有無で結果が変わらない)
+    assert (
+        _is_litellm_model_annotation_compatible({**compatible, "supports_response_schema": False}) is True
+    )
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.core.registry._gather_available_classes")
-@patch("image_annotator_lib.core.registry.load_available_api_models")
-def test_base_annotator_loads_webapi_config_via_metadata_fallback(
-    mock_load_api_models,
-    mock_gather_classes,
-    isolated_registry,
-):
-    """`BaseAnnotator._load_config_from_registry` が `_WEBAPI_MODEL_METADATA` をフォールバックで読む。
+def test_webapi_config_resolvable_only_via_metadata_ssot(isolated_registry):
+    """WebAPI モデルの設定は `_WEBAPI_MODEL_METADATA` (SSoT) 経由でのみ解決される。
 
-    config_registry に api_model_id が登録されていなくても、SSoT (`_WEBAPI_MODEL_METADATA`)
-    から WebAPIModelConfig を構築できることを保証する (Issue #23 の動作核)。
+    旧 `PydanticAIWebAPIAnnotator` test (`...falls_back_to_discovery_metadata...`) の
+    意図を読み替え。`BaseAnnotator._load_config_from_registry` は `get_webapi_metadata`
+    を最優先で参照する。登録後、WebAPI モデルは `get_webapi_metadata` で解決でき、かつ
+    `config_registry` 側には一切レコードが作られない (SSoT 一元化 + 逆流ゼロ)。
     """
-    mock_load_api_models.return_value = _DISCOVERY_PAYLOAD
-    mock_gather_classes.return_value = {"PydanticAIWebAPIAnnotator": _DummyPydanticAIWebAPIAnnotator}
-
     real_registry = get_config_registry()
     with patch.object(real_registry, "_merged_config_data", {}):
+        with patch(_DISCOVERY_PATCH_TARGET, return_value=_DISCOVERY_RESULT):
+            _register_webapi_models_from_discovery()
+
+        # SSoT 経由では解決できる
+        metadata = get_webapi_metadata("openai/gpt-4o")
+        assert metadata is not None
+        assert metadata["model_name_on_provider"] == "openai/gpt-4o"
+        # config_registry 側には WebAPI モデルのレコードが無い
+        assert real_registry.get_all_config().get("openai/gpt-4o") is None
+
+
+@pytest.mark.unit
+def test_webapi_metadata_ssot_unaffected_by_conflicting_user_toml(isolated_registry):
+    """同名 user TOML エントリは `_WEBAPI_MODEL_METADATA` を汚染しない。
+
+    旧 `PydanticAIWebAPIAnnotator` test (`...ignores_user_toml_api_model_id`) の意図を
+    読み替え。`_register_webapi_models_from_discovery` は discovery 結果のみから
+    `_WEBAPI_MODEL_METADATA` を構築し、config_registry / user TOML を入力に使わない。
+    矛盾する同名 user TOML があっても SSoT は discovery 由来の値を保持する。
+    """
+    real_registry = get_config_registry()
+    user_overrides = {
+        "openai/gpt-4o": {
+            "model_name_on_provider": "user-toml-wrong-id",
+            "class": "WebApiAnnotator",
+        }
+    }
+    with patch.object(real_registry, "_merged_config_data", user_overrides):
+        with patch(_DISCOVERY_PATCH_TARGET, return_value=_DISCOVERY_RESULT):
+            _register_webapi_models_from_discovery()
+
+        metadata = get_webapi_metadata("openai/gpt-4o")
+        assert metadata is not None
+        # user TOML の "user-toml-wrong-id" ではなく discovery SSoT の値
+        assert metadata["litellm_model_id"] == "openai/gpt-4o"
+        assert metadata["model_name_on_provider"] == "openai/gpt-4o"
+
+
+@pytest.mark.unit
+def test_register_webapi_models_keys_metadata_by_model_name_short(isolated_registry):
+    """`_WEBAPI_MODEL_METADATA` は `model_name_short` をキーに `litellm_model_id` を保持する。
+
+    旧 `PydanticAIWebAPIAnnotator` test (`...falls_back_to_discovery_metadata...`) の意図を
+    読み替え。discovery が SSoT であることを、キー = `model_name_short` (完全 ID) /
+    値の `litellm_model_id` が discovery 由来であることで検証する。
+    """
+    with patch(_DISCOVERY_PATCH_TARGET, return_value=_DISCOVERY_RESULT):
         _register_webapi_models_from_discovery()
 
-        # config_registry には api_model_id が無い状態 (SSoT 化の効果)
-        assert real_registry.get("GPT-4o", "api_model_id") is None
-
-        # それでも `BaseAnnotator._load_config_from_registry` が SSoT フォールバック経由で成功する。
-        # `_DummyPydanticAIWebAPIAnnotator.__init__` は `super().__init__` を呼ばないため、
-        # `_load_config_from_registry` を後から直接呼んで経路を検証する。
-        dummy = _DummyPydanticAIWebAPIAnnotator("GPT-4o")
-        config = dummy._load_config_from_registry("GPT-4o")
-        assert config.api_model_id == "openai/gpt-4o"
-        assert config.class_name == "PydanticAIWebAPIAnnotator"
-
-
-# ============================================================================
-# User TOML WebAPI 定義廃止テスト (Issue #25 完全 SSoT 化)
-# ============================================================================
+    # discovery の全モデルが model_name_short をキーに登録される
+    assert set(registry._WEBAPI_MODEL_METADATA.keys()) == {
+        "openai/gpt-4o",
+        "google/gemini-2.5-pro",
+    }
+    for model_short in ("openai/gpt-4o", "google/gemini-2.5-pro"):
+        metadata = get_webapi_metadata(model_short)
+        assert metadata is not None
+        assert metadata["litellm_model_id"] == model_short
 
 
 @pytest.mark.unit
-def test_pydantic_ai_annotator_ignores_user_toml_api_model_id():
-    """`PydanticAIWebAPIAnnotator` は user TOML の api_model_id を採用しない。"""
-    from image_annotator_lib.core.base.pydantic_ai_annotator import PydanticAIWebAPIAnnotator
+def test_registered_webapi_model_resolves_to_webapi_annotator(isolated_registry):
+    """登録済み WebAPI モデルは `WebApiAnnotator` クラスへ解決される。
 
-    real_registry = get_config_registry()
-    user_overrides = {
-        "GPT-4o": {
-            "api_model_id": "gpt-4o-mini-test",
-            "class": "PydanticAIWebAPIAnnotator",
-            "model_name_on_provider": "gpt-4o-mini-test",
-        }
-    }
-    discovery_metadata = {
-        "GPT-4o": {
-            "api_model_id": "gpt-4o-2024-08-06",
-            "model_name_on_provider": "gpt-4o-2024-08-06",
-            "provider": "openai",
-            "max_output_tokens": 1800,
-            "supports_vision": True,
-            "supports_response_schema": True,
-            "type": "webapi",
-            "class": "PydanticAIWebAPIAnnotator",
-        }
-    }
+    旧 `PydanticAIWebAPIWrapper` test の意図を読み替え。ADR 0023 Phase 1 で WebAPI
+    系の入口は `WebApiAnnotator` 1 種に統合された。`_register_webapi_models_from_discovery`
+    がモデルクラス registry に `WebApiAnnotator` を登録し、metadata の `class` も
+    `WebApiAnnotator` であることを検証する。
+    """
+    from image_annotator_lib.core.webapi_annotator import WebApiAnnotator
 
-    with patch.object(real_registry, "_merged_config_data", user_overrides):
-        with patch.object(registry, "_WEBAPI_MODEL_METADATA", discovery_metadata):
-            annotator = PydanticAIWebAPIAnnotator("GPT-4o")
-            assert annotator.config.model_id == "gpt-4o-2024-08-06"
+    with patch(_DISCOVERY_PATCH_TARGET, return_value=_DISCOVERY_RESULT):
+        _register_webapi_models_from_discovery()
 
-
-@pytest.mark.unit
-def test_pydantic_ai_annotator_falls_back_to_discovery_metadata_when_no_user_config():
-    """user TOML に api_model_id が無い場合、discovery metadata から取得する。"""
-    from image_annotator_lib.core.base.pydantic_ai_annotator import PydanticAIWebAPIAnnotator
-
-    real_registry = get_config_registry()
-    discovery_metadata = {
-        "GPT-4o": {
-            "api_model_id": "gpt-4o-2024-08-06",
-            "model_name_on_provider": "gpt-4o-2024-08-06",
-            "provider": "openai",
-            "max_output_tokens": 1800,
-            "supports_vision": True,
-            "supports_response_schema": True,
-            "type": "webapi",
-            "class": "PydanticAIWebAPIAnnotator",
-        }
-    }
-
-    with patch.object(real_registry, "_merged_config_data", {}):
-        with patch.object(registry, "_WEBAPI_MODEL_METADATA", discovery_metadata):
-            annotator = PydanticAIWebAPIAnnotator("GPT-4o")
-            assert annotator.config.model_id == "gpt-4o-2024-08-06"
-
-
-@pytest.mark.unit
-def test_pydantic_ai_webapi_wrapper_ignores_user_toml_api_model_id():
-    """`PydanticAIWebAPIWrapper.__enter__` も SSoT の api_model_id だけを採用する。"""
-    from image_annotator_lib.core.annotation_runner import PydanticAIWebAPIWrapper
-
-    real_registry = get_config_registry()
-    user_overrides = {
-        "Claude 3.5 Sonnet": {
-            "api_model_id": "claude-3-5-sonnet-test-override",
-            "class": "PydanticAIWebAPIAnnotator",
-            "model_name_on_provider": "claude-3-5-sonnet-test-override",
-        }
-    }
-    discovery_metadata = {
-        "Claude 3.5 Sonnet": {
-            "api_model_id": "anthropic/claude-3-5-sonnet-latest",
-            "model_name_on_provider": "anthropic/claude-3-5-sonnet-latest",
-            "provider": "anthropic",
-            "max_output_tokens": 1800,
-            "supports_vision": True,
-            "supports_response_schema": True,
-            "type": "webapi",
-            "class": "PydanticAIWebAPIAnnotator",
-        }
-    }
-
-    with patch.object(real_registry, "_merged_config_data", user_overrides):
-        with patch.object(registry, "_WEBAPI_MODEL_METADATA", discovery_metadata):
-            wrapper = PydanticAIWebAPIWrapper("Claude 3.5 Sonnet", _DummyPydanticAIWebAPIAnnotator)
-            with wrapper:
-                assert wrapper._api_model_id == "anthropic/claude-3-5-sonnet-latest"
+    for model_short in ("openai/gpt-4o", "google/gemini-2.5-pro"):
+        assert registry._MODEL_CLASS_OBJ_REGISTRY.get(model_short) is WebApiAnnotator
+        metadata = get_webapi_metadata(model_short)
+        assert metadata is not None
+        assert metadata["class"] == "WebApiAnnotator"

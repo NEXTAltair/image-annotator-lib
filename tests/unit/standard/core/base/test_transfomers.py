@@ -162,3 +162,47 @@ def test_format_predictions_no_processor():
     mock_tensor = MagicMock()
     with pytest.raises(Exception):
         annotator._format_predictions([mock_tensor])
+
+
+# --- device フォールバック (Issue #269 / #35) ---
+
+
+class _DeviceFallbackProbe(TransformersBaseAnnotator):
+    """device フォールバック検証用サブクラス。
+
+    `DummyTransformersAnnotator` と異なり `self.device` を上書きしないため、
+    `TransformersBaseAnnotator.__init__` が `determine_effective_device` で確定した
+    実効 device をそのまま観測できる。
+    """
+
+
+@pytest.mark.standard
+def test_transformers_base_falls_back_to_cpu_when_cuda_unavailable(mock_cuda_unavailable):
+    """ML 系 base class は __init__ 時に CUDA 不可なら CPU へフォールバックする。
+
+    Issue #35 で device 判定は `BaseAnnotator` から ML 系 base class
+    (`TransformersBaseAnnotator` 等) の責務へ移譲された。本 test は Issue #269 で
+    `test_base_annotator_di.py` の空 skip スタブ (`test_config_device_fallback_to_cpu`)
+    を ML 系 base class のテストとして再実装したもの。設定値 "cuda" は保持しつつ、
+    `__init__` 内の `determine_effective_device` 呼び出しで実効 device が "cpu" へ
+    フォールバックされる配線を検証する。
+    """
+    from image_annotator_lib.core.config import config_registry
+
+    # config はインメモリの `_merged_config_data` へ直接注入する。
+    # `add_default_setting` はシステム設定ファイル (config/annotator_config.toml) へ
+    # 永続化してしまうため、テストでは使わない。
+    config_registry._merged_config_data["cuda-fallback-model"] = {
+        "model_path": "/path/to/model",
+        "device": "cuda",
+        "class": "_DeviceFallbackProbe",
+    }
+    try:
+        annotator = _DeviceFallbackProbe("cuda-fallback-model")
+
+        # 設定値は "cuda" のまま保持される
+        assert annotator._config.device == "cuda"
+        # 実効 device は CUDA 不可のため "cpu" へフォールバックされる
+        assert annotator.device == "cpu"
+    finally:
+        config_registry._merged_config_data.pop("cuda-fallback-model", None)

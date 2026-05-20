@@ -109,7 +109,8 @@ exclude = [
 
 ignore = [
     "E501",   # Line too long (handled by formatter)
-    "RUF002", # カタカナの `ノ` でなにか言われるのを回避
+    "RUF002", # docstring 内のカタカナ `ノ` 等 ambiguous unicode 警告を回避
+    "RUF003", # comment 内のカタカナ `ノ` / 全角括弧等 ambiguous unicode 警告を回避
 ]
 fixable = ["ALL"]
 

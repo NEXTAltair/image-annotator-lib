@@ -7,7 +7,7 @@ import pytest
 from PIL import Image
 
 from image_annotator_lib.core.base.annotator import BaseAnnotator
-from image_annotator_lib.core.types import UnifiedAnnotationResult
+from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
 from image_annotator_lib.exceptions.errors import OutOfMemoryError
 
 
@@ -46,10 +46,11 @@ class MockAnnotator(BaseAnnotator):
     """テスト用の BaseAnnotator 実装。
 
     Note:
-        Phase 1 (ADR 0023) で `_format_predictions` は `UnifiedAnnotationResult` を返す
-        ように仕様変更されたが、本 Mock は旧仕様 (str list) のまま残されている
-        (PR #38 で更新漏れ)。`test_predict_*` 系 test は `pytest.mark.skip` で
-        一旦保留し、別 issue で再構築する。
+        ADR 0023 Phase 1 で `_format_predictions` は `UnifiedAnnotationResult` の
+        list を返す契約に統一された (`_build_results` が型違反を `TypeError` で弾く)。
+        `_generate_tags` は `BaseAnnotator` の pipeline から外れた (onnx / tensorflow の
+        tagger サブクラス専用ヘルパーに降格) ため本 Mock では実装しない。
+        本 Mock と `test_predict_*` 系 test は Issue #269 で現契約に合わせ再構築した。
     """
 
     def __init__(self, model_name: str):
@@ -70,19 +71,16 @@ class MockAnnotator(BaseAnnotator):
     def _run_inference(self, processed: Any) -> Any:
         return [f"inference_{item}" for item in processed]
 
-    def _format_predictions(self, raw_outputs: Any) -> Any:
-        return [f"formatted_{item}" for item in raw_outputs]
-
-    def _generate_tags(self, formatted_output: Any) -> list[str]:
-        return [f"tag1_{formatted_output}", f"tag2_{formatted_output}"]
-
-
-_PHASE1_PREDICT_TEST_SKIP_REASON = (
-    "Phase 1 (ADR 0023) で _format_predictions の戻り値型が UnifiedAnnotationResult "
-    "に変更されたため、旧仕様の MockAnnotator (str list を返す) を使う本 test 群は "
-    "broken。Phase 1 漏れの dead test として Issue #35 では skip し、別 issue で "
-    "再構築する。"
-)
+    def _format_predictions(self, raw_outputs: Any) -> list[UnifiedAnnotationResult]:
+        """推論結果を `UnifiedAnnotationResult` の list へ整形する (現契約)。"""
+        return [
+            UnifiedAnnotationResult(
+                model_name=self.model_name,
+                capabilities={TaskCapability.TAGS},
+                tags=[f"tag1_{item}", f"tag2_{item}"],
+            )
+            for item in raw_outputs
+        ]
 
 
 class TestBaseAnnotator:
@@ -208,9 +206,12 @@ class TestBaseAnnotator:
 
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
-    @pytest.mark.skip(reason=_PHASE1_PREDICT_TEST_SKIP_REASON)
     def test_predict_success_single_image(self, mock_logger):
-        """単一画像での予測成功テスト"""
+        """単一画像での予測成功テスト。
+
+        `predict()` は `_format_predictions` が返す `UnifiedAnnotationResult` を
+        そのまま結果として返す (ADR 0023 Phase 1 契約)。
+        """
         with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
             setup_mock_config_registry(
                 mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
@@ -223,14 +224,13 @@ class TestBaseAnnotator:
             assert len(result) == 1
             assert isinstance(result[0], UnifiedAnnotationResult)
             assert result[0].tags == [
-                "tag1_formatted_inference_processed_0",
-                "tag2_formatted_inference_processed_0",
+                "tag1_inference_processed_0",
+                "tag2_inference_processed_0",
             ]
             assert result[0].error is None
 
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
-    @pytest.mark.skip(reason=_PHASE1_PREDICT_TEST_SKIP_REASON)
     def test_predict_success_multiple_images(self, mock_logger):
         """複数画像での予測成功テスト"""
         with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
@@ -246,16 +246,15 @@ class TestBaseAnnotator:
             for i, res in enumerate(result):
                 assert isinstance(res, UnifiedAnnotationResult)
                 assert res.tags == [
-                    f"tag1_formatted_inference_processed_{i}",
-                    f"tag2_formatted_inference_processed_{i}",
+                    f"tag1_inference_processed_{i}",
+                    f"tag2_inference_processed_{i}",
                 ]
                 assert res.error is None
 
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
-    @pytest.mark.skip(reason=_PHASE1_PREDICT_TEST_SKIP_REASON)
     def test_predict_with_provided_phash(self, mock_logger):
-        """事前計算されたハッシュでの予測テスト (phashはapi.pyレベルで処理)"""
+        """事前計算されたハッシュを渡しても結果は正常に返る (phash は api.py で処理)。"""
         with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
             setup_mock_config_registry(
                 mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
@@ -273,25 +272,31 @@ class TestBaseAnnotator:
 
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
-    @pytest.mark.skip(reason=_PHASE1_PREDICT_TEST_SKIP_REASON)
-    def test_predict_tag_generation_error(self, mock_logger):
-        """タグ生成エラーのテスト"""
+    def test_predict_format_predictions_error(self, mock_logger):
+        """`_format_predictions` が例外を投げた場合のエラーハンドリングテスト。
+
+        Note:
+            旧 test (`test_predict_tag_generation_error`) は `_generate_tags` の例外を
+            検証していたが、ADR 0023 Phase 1 で `_generate_tags` は `BaseAnnotator` の
+            pipeline から外れた。整形段階 (`_format_predictions`) の例外を検証する
+            test として再定義した (Issue #269)。preprocess 段階の例外を検証する
+            `test_predict_unexpected_error` とは例外発生段階で差別化される。
+        """
         with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
             setup_mock_config_registry(
                 mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
             )
             annotator = MockAnnotator("test_model")
-            annotator._generate_tags = Mock(side_effect=Exception("Tag generation failed"))
+            annotator._format_predictions = Mock(side_effect=RuntimeError("Format failed"))
 
             image = cast(Image.Image, Mock(spec=Image.Image))
-            phash_list = ["test_hash"]
 
-            result = annotator.predict([image], phash_list)
+            result = annotator.predict([image])
 
             assert len(result) == 1
             assert isinstance(result[0], UnifiedAnnotationResult)
             error_msg = result[0].error
-            assert error_msg is not None and "タグ生成エラー" in error_msg
+            assert error_msg is not None and "予期せぬエラー" in error_msg
             mock_logger.exception.assert_called_once()
 
     @pytest.mark.standard
@@ -318,9 +323,8 @@ class TestBaseAnnotator:
 
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
-    @pytest.mark.skip(reason=_PHASE1_PREDICT_TEST_SKIP_REASON)
     def test_predict_unexpected_error(self, mock_logger):
-        """予期せぬエラーのテスト"""
+        """予期せぬエラーのテスト (preprocess 段階で RuntimeError)。"""
         with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
             setup_mock_config_registry(
                 mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
@@ -342,31 +346,39 @@ class TestBaseAnnotator:
 
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
-    @pytest.mark.skip(reason=_PHASE1_PREDICT_TEST_SKIP_REASON)
     def test_predict_single_formatted_output(self, mock_logger):
-        """単一の整形出力での予測テスト"""
+        """`_format_predictions` が単一値を返すと全画像へブロードキャストされる。
+
+        `_execute_pipeline` は `_format_predictions` の戻り値が list でない場合
+        `[output] * len(images)` でブロードキャストする。単一の
+        `UnifiedAnnotationResult` を返すケースを検証する。
+        """
         with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
             setup_mock_config_registry(
                 mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "MockAnnotator"}
             )
             annotator = MockAnnotator("test_model")
-            # _format_predictions が単一の値を返すようにモック
-            annotator._format_predictions = Mock(return_value="single_formatted_output")
+            single_result = UnifiedAnnotationResult(
+                model_name="test_model",
+                capabilities={TaskCapability.TAGS},
+                tags=["broadcast_tag"],
+            )
+            # _format_predictions が単一の UnifiedAnnotationResult を返すようにモック
+            annotator._format_predictions = Mock(return_value=single_result)
 
             images = [cast(Image.Image, Mock(spec=Image.Image)) for _ in range(2)]
 
-            with patch.object(annotator, "_calculate_phash", side_effect=["hash1", "hash2"]):
-                result = annotator.predict(images)
+            result = annotator.predict(images)
 
             assert len(result) == 2
             for res in result:
                 assert isinstance(res, UnifiedAnnotationResult)
-                assert res.raw_output == {"formatted_output": "single_formatted_output"}
-                assert res.tags == ["tag1_single_formatted_output", "tag2_single_formatted_output"]
+                assert res.tags == ["broadcast_tag"]
+            # 同一オブジェクトがブロードキャストされる (_execute_pipeline)
+            assert result[0] is result[1]
 
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
-    @pytest.mark.skip(reason=_PHASE1_PREDICT_TEST_SKIP_REASON)
     def test_predict_timing_logs(self, mock_logger):
         """処理時間ログのテスト"""
         with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
@@ -376,8 +388,7 @@ class TestBaseAnnotator:
             annotator = MockAnnotator("test_model")
             image = cast(Image.Image, Mock(spec=Image.Image))
 
-            with patch.object(annotator, "_calculate_phash", return_value="test_hash"):
-                annotator.predict([image])
+            annotator.predict([image])
 
             # デバッグログが3回呼ばれることを確認(前処理、推論、整形の時間)
             debug_calls = [call for call in mock_logger.debug.call_args_list if "時間:" in str(call)]
@@ -412,9 +423,6 @@ class TestBaseAnnotator:
             def _format_predictions(self, raw_outputs: Any) -> Any:
                 raise NotImplementedError()
 
-            def _generate_tags(self, formatted_output: Any) -> list[str]:
-                raise NotImplementedError()
-
         with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
             setup_mock_config_registry(
                 mock_config, {"model_path": "/path/to/model", "device": "cpu", "class": "PartialAnnotator"}
@@ -430,12 +438,8 @@ class TestBaseAnnotator:
             with pytest.raises(NotImplementedError):
                 annotator._format_predictions([])
 
-            with pytest.raises(NotImplementedError):
-                annotator._generate_tags([])
-
     @pytest.mark.standard
     @patch("image_annotator_lib.core.base.annotator.logger")
-    @pytest.mark.skip(reason=_PHASE1_PREDICT_TEST_SKIP_REASON)
     def test_predict_phash_list_shorter_than_images(self, mock_logger):
         """phash_listを渡しても結果は正常に返却されることのテスト (phashはapi.pyで処理)"""
         with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
