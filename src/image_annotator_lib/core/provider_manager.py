@@ -196,6 +196,27 @@ class ProviderManager:
             if http_client is not None:
                 await http_client.aclose()
 
+    @staticmethod
+    def _running_loop_active() -> bool:
+        """現在のスレッドで asyncio event loop が稼働中かを返す (LoRAIro #302)。
+
+        ``asyncio.get_running_loop()`` は loop が無いと ``RuntimeError`` を raise する。
+        この probe の ``RuntimeError`` を ``except`` 内に閉じ込めず bool へ変換することで、
+        後続の ``asyncio.run()`` を ``except`` ブロック **外** で実行できる。``except``
+        ブロック内で ``asyncio.run()`` を呼ぶと、その動的範囲で coroutine 内に raise
+        される素の例外 (`__cause__` 無し) の ``__context__`` に probe の
+        ``RuntimeError("no running event loop")`` が連鎖し、診断 chain
+        (``_format_exception_chain``) に偽の根本原因として混入する。
+
+        Returns:
+            event loop が稼働中なら ``True``、無ければ ``False``。
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+        return True
+
     @classmethod
     def run_inference_with_model(
         cls,
@@ -212,23 +233,24 @@ class ProviderManager:
         Running asyncio loop の中で呼ばれた場合は `InferenceError` を raise する
         (thread fallback はしない)。
         """
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(
-                cls.run_inference_with_model_async(
-                    model_name=model_name,
-                    images_list=images_list,
-                    litellm_model_id=litellm_model_id,
-                    api_keys=api_keys,
-                    config=config,
-                    _test_agent=_test_agent,
-                )
+        if cls._running_loop_active():
+            raise InferenceError(
+                "ProviderManager.run_inference_with_model() called from a running event loop. "
+                "Use run_inference_with_model_async() in async context.",
+                litellm_model_id=litellm_model_id,
             )
-        raise InferenceError(
-            "ProviderManager.run_inference_with_model() called from a running event loop. "
-            "Use run_inference_with_model_async() in async context.",
-            litellm_model_id=litellm_model_id,
+        # LoRAIro #302: asyncio.run() は except ブロック **外** で実行する。loop 検出 probe の
+        # RuntimeError を _running_loop_active() 内で消費済みのため、coroutine 内例外の
+        # __context__ に "no running event loop" が連鎖しない。
+        return asyncio.run(
+            cls.run_inference_with_model_async(
+                model_name=model_name,
+                images_list=images_list,
+                litellm_model_id=litellm_model_id,
+                api_keys=api_keys,
+                config=config,
+                _test_agent=_test_agent,
+            )
         )
 
     @classmethod
