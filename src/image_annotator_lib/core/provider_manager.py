@@ -177,13 +177,16 @@ class ProviderManager:
                     # が AnnotationResult.error から失われる。cause/context chain を
                     # 辿った診断文字列を log・result.error の双方に伝搬する。
                     error_detail = _format_exception_chain(exc)
-                    # Issue #69 / LoRAIro #275: `logger.error(message, exc_info=True)` は
-                    # loguru 内部で `message.format(*args, **kwargs)` を呼ぶため、f-string
-                    # 結果に str(exc) 由来の `{'type': ...}` dict 表現が含まれると
-                    # placeholder と誤認識され `KeyError("'type'")` が leak する。
-                    # `.opt(exception=exc).error(message)` パターンに変更して loguru の
-                    # message 再フォーマットを回避する。
-                    logger.opt(exception=exc).error(
+                    # LoRAIro #274: traceback を logger に attach しない。loguru sink の
+                    # diagnose 設定により traceback 各フレームの変数値 (api_key 等) が
+                    # 展開され、機密情報漏洩 + 過剰ノイズになる。原因は error_detail
+                    # (cause chain: 例外各層の型 + message) で十分特定できる。
+                    #
+                    # Issue #69 / LoRAIro #275: 引数なしの `logger.error(message)` は
+                    # loguru が `message.format()` を呼ばないため、message 中の str(exc)
+                    # 由来 `{'type': ...}` dict 表現を placeholder と誤認せず、
+                    # `KeyError("'type'")` も leak しない。
+                    logger.error(
                         f"WebAPI 推論失敗: model={model_name}, "
                         f"litellm_model_id={litellm_model_id}, error={error_detail}"
                     )
