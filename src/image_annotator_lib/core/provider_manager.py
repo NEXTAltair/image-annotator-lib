@@ -43,6 +43,48 @@ _OUTPUT_RETRIES = 1
 # Agent.run の user message として渡す短い指示。BASE_PROMPT は system_prompt 側で詳細を伝える。
 _USER_PROMPT_TEXT = "Analyze this image and provide annotations as specified."
 
+# LoRAIro #274: cause/context chain を辿る最大段数 (循環・過剰深さの安全弁)。
+_EXCEPTION_CHAIN_MAX_DEPTH = 5
+
+
+def _format_exception_chain(exc: BaseException, *, max_depth: int = _EXCEPTION_CHAIN_MAX_DEPTH) -> str:
+    """例外の cause/context chain を 1 行の診断文字列に整形する (LoRAIro #274)。
+
+    ``openai.APIConnectionError`` 等の SDK ラッパー例外は ``str(exc)`` が
+    ``"Connection error."`` のような短い定型文に潰れ、根本原因 (httpx の
+    ``ConnectTimeout`` / ``ConnectError`` 等) が ``AnnotationResult.error`` から
+    失われる。``__cause__`` / ``__context__`` を辿って各層の型名とメッセージを
+    連結し、原因特定に足る error 文字列を生成する。
+
+    Args:
+        exc: 整形対象の例外。
+        max_depth: 辿る chain の最大段数。
+
+    Returns:
+        ``"openai.APIConnectionError: Connection error. <- caused by httpx.ConnectError: ..."``
+        形式の 1 行文字列。chain が無ければ単層の ``"型名: message"``。
+    """
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    depth = 0
+    while current is not None and id(current) not in seen and depth < max_depth:
+        seen.add(id(current))
+        cls = type(current)
+        qualified = (
+            cls.__name__ if cls.__module__ in ("builtins", "") else f"{cls.__module__}.{cls.__name__}"
+        )
+        message = str(current).strip() or "(no message)"
+        parts.append(f"{qualified}: {message}")
+        # __cause__ (明示的 raise from) を優先。無く __context__ が suppress されて
+        # いなければ暗黙の context を辿る。
+        next_exc = current.__cause__
+        if next_exc is None and not current.__suppress_context__:
+            next_exc = current.__context__
+        current = next_exc
+        depth += 1
+    return " <- caused by ".join(parts)
+
 
 class ProviderManager:
     """LiteLLM ID ベースで PydanticAI 推論を実行するクラスメソッド集。
@@ -130,6 +172,11 @@ class ProviderManager:
                     # tenacity が httpx 例外を reraise する (RetryConfig(reraise=True))。
                     # 既存の str(exc) 文字列伝搬経路でそのまま LoRAIro 側に流れる。
                     #
+                    # LoRAIro #274: openai.APIConnectionError 等は str(exc) が
+                    # "Connection error." に潰れ、根本原因 (httpx の ConnectTimeout 等)
+                    # が AnnotationResult.error から失われる。cause/context chain を
+                    # 辿った診断文字列を log・result.error の双方に伝搬する。
+                    error_detail = _format_exception_chain(exc)
                     # Issue #69 / LoRAIro #275: `logger.error(message, exc_info=True)` は
                     # loguru 内部で `message.format(*args, **kwargs)` を呼ぶため、f-string
                     # 結果に str(exc) 由来の `{'type': ...}` dict 表現が含まれると
@@ -138,9 +185,9 @@ class ProviderManager:
                     # message 再フォーマットを回避する。
                     logger.opt(exception=exc).error(
                         f"WebAPI 推論失敗: model={model_name}, "
-                        f"litellm_model_id={litellm_model_id}, error={exc}"
+                        f"litellm_model_id={litellm_model_id}, error={error_detail}"
                     )
-                    results[phash] = to_annotation_result(None, phash, error=str(exc))
+                    results[phash] = to_annotation_result(None, phash, error=error_detail)
             return results
         finally:
             if http_client is not None:
