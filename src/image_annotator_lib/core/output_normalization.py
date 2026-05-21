@@ -19,6 +19,7 @@ ADR 0023 Issue #47: PydanticAI `Agent.output_type` に渡す callable として
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from typing import Any
 
@@ -31,6 +32,19 @@ _WEBAPI_RATING_SOURCE_SCHEME = "prompt_defined"
 _DEFAULT_REQUIRED_CAPABILITIES = frozenset(
     {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
 )
+
+# core capability -> normalizer 引数名。rating 系引数 (rating / rating_confidence /
+# ratings) は best-effort 出力のため capability に関わらず常に optional 扱い。
+_CAPABILITY_TO_PARAM: dict[TaskCapability, str] = {
+    TaskCapability.TAGS: "tags",
+    TaskCapability.CAPTIONS: "captions",
+    TaskCapability.SCORES: "score",
+}
+# normalizer (PydanticAI output tool) の引数順。
+_NORMALIZER_PARAM_ORDER = ("tags", "captions", "score", "rating", "rating_confidence", "ratings")
+# `__signature__` 属性名。literal を直接 setattr すると flake8-bugbear B010 に
+# 抵触するため定数経由で渡す。
+_SIGNATURE_ATTR = "__signature__"
 
 
 def _normalize_string_items(value: Any, *, field_name: str, split_commas: bool) -> list[str]:
@@ -95,6 +109,22 @@ def _normalize_confidence(value: Any, *, field_name: str) -> float | None:
     raise ModelRetry(f"`{field_name}` must be a number or numeric string")
 
 
+def _first_non_none(mapping: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    """`mapping` から最初に non-None 値を持つ key の値を返す。
+
+    `dict.get(key, fallback)` は key が存在し値が `None` の場合、その `None` を
+    「権威ある値」として返してしまい fallback key を拾えない。
+    ``{"raw_label": null, "label": "PG-13"}`` のような alias 混在 payload で
+    後続 alias を正しく拾うため、明示的に non-None を探索する
+    (PR #85 Codex review P2)。
+    """
+    for key in keys:
+        value = mapping.get(key)
+        if value is not None:
+            return value
+    return default
+
+
 def _normalize_rating_item(value: Any, *, confidence: Any = None) -> RatingPrediction | None:
     """Normalize one model-native WebAPI rating prediction."""
     raw_label: Any
@@ -105,8 +135,8 @@ def _normalize_rating_item(value: Any, *, confidence: Any = None) -> RatingPredi
     if isinstance(value, str):
         raw_label = value
     elif isinstance(value, dict):
-        raw_label = value.get("raw_label", value.get("label", value.get("rating")))
-        raw_confidence = value.get("confidence_score", value.get("confidence", raw_confidence))
+        raw_label = _first_non_none(value, "raw_label", "label", "rating")
+        raw_confidence = _first_non_none(value, "confidence_score", "confidence", default=raw_confidence)
     else:
         raise ModelRetry("`rating` must be a string or object")
 
@@ -127,9 +157,13 @@ def _normalize_rating_item(value: Any, *, confidence: Any = None) -> RatingPredi
 def _normalize_ratings(rating: Any, ratings: Any, rating_confidence: Any) -> list[RatingPrediction]:
     """Normalize single or list-shaped rating outputs.
 
-    呼び出し元が capability gate 済み (= RATINGS は要求されている) 前提。
-    rating が 1 件も得られなければ `ModelRetry` を上げる。RATINGS が要求されて
-    いない場合は呼び出し元が本関数を呼ばずに skip する。
+    WebAPI の rating は prompt 由来の best-effort 出力。RATINGS capability が
+    あっても rating が 1 件も得られなければ空リストを返す (`ModelRetry` は
+    上げない)。rating の欠落で tags / captions / score を含む正常な annotation
+    全体を retry / 失敗へ巻き込まないため (PR #85 Codex review P1)。
+
+    値の *形式* 不正 (非 list の ``ratings`` / 非 str・非 dict の要素) は
+    schema error として `ModelRetry` を上げ、1 回の再生成に委ねる。
     """
     normalized: list[RatingPrediction] = []
 
@@ -145,9 +179,40 @@ def _normalize_ratings(rating: Any, ratings: Any, rating_confidence: Any) -> lis
             if prediction is not None:
                 normalized.append(prediction)
 
-    if not normalized:
-        raise ModelRetry("`rating` or `ratings` is required")
     return normalized
+
+
+def _build_normalizer_signature(required_capabilities: frozenset[TaskCapability]) -> inspect.Signature:
+    """capability に応じた output tool schema 用の signature を構築する。
+
+    要求された core capability (tags / captions / score) の引数は **default を
+    持たない** = PydanticAI が生成する output tool schema 上で required field に
+    なる。rating 系引数は best-effort 出力のため常に optional。
+    全引数を keyword-only にすることで「required の後に optional」順序制約を
+    回避し、任意の capability 部分集合を表現できる (PR #85 Codex review P2)。
+    """
+    required_params = {param for cap, param in _CAPABILITY_TO_PARAM.items() if cap in required_capabilities}
+    parameters = [
+        inspect.Parameter(
+            name,
+            inspect.Parameter.KEYWORD_ONLY,
+            annotation=Any,
+            **({} if name in required_params else {"default": None}),
+        )
+        for name in _NORMALIZER_PARAM_ORDER
+    ]
+    return inspect.Signature(parameters, return_annotation=AnnotationSchema)
+
+
+def _apply_normalizer_signature(
+    func: Callable[..., AnnotationSchema], required_capabilities: frozenset[TaskCapability]
+) -> None:
+    """`func.__signature__` を capability ベースの signature で上書きする。
+
+    `__signature__` は関数の宣言済み属性ではないため、属性名を定数経由の
+    `setattr` で動的設定する (literal 属性名だと flake8-bugbear B010 に抵触)。
+    """
+    setattr(func, _SIGNATURE_ATTR, _build_normalizer_signature(required_capabilities))
 
 
 def normalize_annotation_output(
@@ -198,6 +263,12 @@ def normalize_annotation_output(
     )
 
 
+# PydanticAI が output tool schema を生成する際の signature を上書きする。
+# 関数本体は全引数に default を持つ permissive な実体だが、schema 上は core
+# field を required として申告する (PR #85 Codex review P2)。
+_apply_normalizer_signature(normalize_annotation_output, _DEFAULT_REQUIRED_CAPABILITIES)
+
+
 def _normalize_annotation_output_for_capabilities(
     *,
     tags: Any = None,
@@ -214,6 +285,9 @@ def _normalize_annotation_output_for_capabilities(
     モデルが付随的に出力した値が不正形でも `ModelRetry` を誘発せず、空 / None に
     落として無視する (PR #85 Codex review: 非要求 field の shape error で正常な
     要求 field 出力を巻き込まないため)。
+
+    rating は RATINGS capability があっても best-effort 扱い: 欠落しても
+    `ModelRetry` を上げず空リストにする (`_normalize_ratings` 参照)。
     """
     normalized_tags = (
         _normalize_string_items(tags, field_name="tags", split_commas=True)
@@ -272,6 +346,7 @@ def build_annotation_output_normalizer(
 
     normalize_output.__name__ = "normalize_annotation_output"
     normalize_output.__doc__ = normalize_annotation_output.__doc__
+    _apply_normalizer_signature(normalize_output, required_capabilities)
     return normalize_output
 
 
