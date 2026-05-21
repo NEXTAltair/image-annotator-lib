@@ -24,6 +24,8 @@ class E621Categories:
 class WDTagger(ONNXBaseAnnotator):
     """WD Tagger (ONNX版)"""
 
+    rating_source_scheme = "danbooru4"
+
     def __init__(self, model_name: str):
         """WDTagger を初期化します。"""
         super().__init__(model_name=model_name)
@@ -95,6 +97,8 @@ class WDTagger(ONNXBaseAnnotator):
 class Z3D_E621Tagger(ONNXBaseAnnotator):
     """Z3D E621 Tagger (ONNX版)"""
 
+    rating_source_scheme = "e6213"
+
     def __init__(self, model_name: str):
         """Z3D_E621Tagger を初期化します。"""
         super().__init__(model_name=model_name)
@@ -108,7 +112,7 @@ class Z3D_E621Tagger(ONNXBaseAnnotator):
             "copyright": "copyright_indexes",
             "meta": "meta_indexes",  # meta, lore も追加
             "lore": "lore_indexes",
-            # rating は別途処理
+            "rating": "rating_indexes",
         }
         # レーティングタグ
         self._rating_tags = ["explicit", "questionable", "safe"]

@@ -218,6 +218,10 @@ arbitrary policy になるため、`SCORE_LABELS` を持たせず regression の
 | 全 scorer に `score_labels` を強制する | regression モデル (`ImprovedAesthetic` / `WaifuAesthetic`) は配布元が categorical label を提供しない。lib 側で閾値を arbitrary に決めることになる |
 | `score_labels` ではなく `ratings` という field 名を使う | `ratings` は別概念 (例: NSFW rating 等) と混同しやすい。本 ADR は scorer の categorical label に特化した名前 `score_labels` を採用 |
 
+ADR 0003 で `ratings` field を rating / NSFW classifier 用に定義した。本 ADR で却下したのは
+score-derived categorical label を `ratings` と呼ぶ案であり、rating model output contract とは
+矛盾しない。
+
 ## Consequences
 
 ### 良い点
@@ -249,6 +253,7 @@ arbitrary policy になるため、`SCORE_LABELS` を持たせず regression の
 - **Issue**: NEXTAltair/image-annotator-lib#66
 - **Preliminary investigation (code-level)**: NEXTAltair/image-annotator-lib#66 issue comment (reproduction + 行番号付き code inventory + 完了条件)
 - **Runtime validation ADR**: 0001
+- **Rating output ADR**: 0003
 - **LoRAIro ADR**: NEXTAltair/LoRAIro `docs/decisions/0026-on-demand-runtime-validation-strategy.md`
 - **Implementation reference**: `https://github.com/toshiaki1729/dataset-tag-editor-standalone`
 - **Model sources**:

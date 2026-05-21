@@ -5,7 +5,7 @@ Test capability-based validation for UnifiedAnnotationResult
 import pytest
 from pydantic import ValidationError
 
-from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
+from image_annotator_lib.core.types import RatingPrediction, TaskCapability, UnifiedAnnotationResult
 
 
 class TestTaskCapability:
@@ -17,6 +17,7 @@ class TestTaskCapability:
         assert TaskCapability.CAPTIONS == "captions"
         assert TaskCapability.SCORES == "scores"
         assert TaskCapability.SCORE_LABELS == "score_labels"
+        assert TaskCapability.RATINGS == "ratings"
 
     def test_task_capability_creation(self):
         """Test TaskCapability creation from strings"""
@@ -24,6 +25,7 @@ class TestTaskCapability:
         assert TaskCapability("captions") == TaskCapability.CAPTIONS
         assert TaskCapability("scores") == TaskCapability.SCORES
         assert TaskCapability("score_labels") == TaskCapability.SCORE_LABELS
+        assert TaskCapability("ratings") == TaskCapability.RATINGS
 
     def test_invalid_capability(self):
         """Test that invalid capability values raise errors"""
@@ -121,6 +123,41 @@ class TestUnifiedAnnotationResult:
                 capabilities={TaskCapability.SCORES},
                 scores={"aesthetic": 0.5},
                 score_labels=["aesthetic"],
+            )
+
+    def test_valid_ratings_capability(self):
+        """Test valid ratings with RATINGS capability (ADR 0003)."""
+        result = UnifiedAnnotationResult(
+            model_name="wd-vit-tagger-v3",
+            capabilities={TaskCapability.TAGS, TaskCapability.RATINGS},
+            tags=["1girl"],
+            ratings=[
+                RatingPrediction(
+                    raw_label="questionable",
+                    confidence_score=0.82,
+                    source_scheme="danbooru4",
+                )
+            ],
+        )
+        assert result.ratings is not None
+        assert result.ratings[0].raw_label == "questionable"
+        assert result.ratings[0].confidence_score == 0.82
+        assert result.ratings[0].source_scheme == "danbooru4"
+
+    def test_invalid_ratings_without_capability(self):
+        """Test that ratings without RATINGS capability raises ValidationError (ADR 0003)."""
+        with pytest.raises(ValidationError, match="ratings provided but RATINGS not in capabilities"):
+            UnifiedAnnotationResult(
+                model_name="wd-vit-tagger-v3",
+                capabilities={TaskCapability.TAGS},
+                tags=["1girl"],
+                ratings=[
+                    RatingPrediction(
+                        raw_label="questionable",
+                        confidence_score=0.82,
+                        source_scheme="danbooru4",
+                    )
+                ],
             )
 
     def test_score_only_scorer_invariants(self):
