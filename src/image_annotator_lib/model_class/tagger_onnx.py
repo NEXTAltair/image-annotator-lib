@@ -1,9 +1,16 @@
 """ONNX Runtime を使用する Tagger モデルの実装。"""
 
+import json
+from pathlib import Path
+from typing import Any, ClassVar
+
+import numpy as np
 import polars as pl
+from PIL import Image
 
 from ..core.base import ONNXBaseAnnotator
 from ..core.config import config_registry
+from ..core.types import TaskCapability, UnifiedAnnotationResult
 from ..core.utils import logger
 
 
@@ -227,3 +234,126 @@ class Z3D_E621Tagger(ONNXBaseAnnotator):
         general_set = set(current_general_indexes)
         general_set.update(unclassified_indexes)
         self.general_indexes = list(general_set)
+
+
+class CamieTagger(ONNXBaseAnnotator):
+    """Camie Tagger (ONNX版)。"""
+
+    onnx_model_filename: ClassVar[str] = "model_initial.onnx"
+    onnx_metadata_filename: ClassVar[str] = "model_initial_metadata.json"
+    onnx_metadata_extension: ClassVar[str] = ".json"
+    rating_source_scheme: ClassVar[str] = "danbooru4"
+
+    def __init__(self, model_name: str):
+        """CamieTagger を初期化します。"""
+        super().__init__(model_name=model_name)
+        self._category_attr_map = {
+            "rating": "rating_indexes",
+            "general": "general_indexes",
+            "character": "character_indexes",
+        }
+        self._init_empty_indexes()
+        self.tag_threshold = config_registry.get(self.model_name, "tag_threshold", 0.325)
+        logger.info(f"Camie tag threshold set to: {self.tag_threshold}")
+
+    def _init_empty_indexes(self) -> None:
+        """初期出力対象カテゴリのインデックスリストを空で初期化します。"""
+        for attr_name in self._category_attr_map.values():
+            setattr(self, attr_name, [])
+
+    def _load_tags(self) -> None:
+        """Camie JSON metadataからタグ名と対象カテゴリのインデックスをロードします。"""
+        metadata_path = (
+            self.components.get("metadata_path") or self.components.get("csv_path")
+            if self.components
+            else None
+        )
+        if not metadata_path:
+            logger.error("Camie metadata file path is missing from ONNX components.")
+            raise FileNotFoundError("Camie metadata file path not found.")
+
+        metadata = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
+        idx_to_tag = metadata.get("idx_to_tag")
+        tag_to_category = metadata.get("tag_to_category")
+        if not isinstance(idx_to_tag, dict) or not isinstance(tag_to_category, dict):
+            raise ValueError("Camie metadata must contain idx_to_tag and tag_to_category dictionaries.")
+
+        self.all_tags = [str(idx_to_tag[str(i)]) for i in range(len(idx_to_tag))]
+        self._init_empty_indexes()
+        for index, tag_name in enumerate(self.all_tags):
+            category = tag_to_category.get(tag_name)
+            attr_name = self._category_attr_map.get(str(category))
+            if attr_name:
+                getattr(self, attr_name).append(index)
+
+        logger.info(f"Camie metadata loaded: total_tags={len(self.all_tags)}")
+
+    def _preprocess_images(self, images: list[Image.Image]) -> list[np.ndarray[Any, np.dtype[np.float32]]]:
+        """Camie公式ONNX経路に合わせ、黒padding + RGB + 0..1 NCHWで前処理します。"""
+        target_size = self.target_size or (512, 512)
+        image_size = target_size[0]
+        results = []
+        for image in images:
+            img_rgb = image.convert("RGB") if image.mode in {"RGBA", "P"} or image.mode != "RGB" else image
+            width, height = img_rgb.size
+            aspect_ratio = width / height
+            if aspect_ratio > 1:
+                new_width = image_size
+                new_height = int(new_width / aspect_ratio)
+            else:
+                new_height = image_size
+                new_width = int(new_height * aspect_ratio)
+
+            resized = img_rgb.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            padded = Image.new("RGB", (image_size, image_size), (0, 0, 0))
+            padded.paste(resized, ((image_size - new_width) // 2, (image_size - new_height) // 2))
+            array = np.asarray(padded, dtype=np.float32) / 255.0
+            input_data = np.transpose(array, (2, 0, 1))
+            results.append(np.expand_dims(input_data, axis=0).astype(np.float32))
+        return results
+
+    def _format_predictions_single(
+        self, raw_output: np.ndarray[Any, np.dtype[Any]]
+    ) -> UnifiedAnnotationResult:
+        """Camie logitsにsigmoidを適用して統一結果へ整形します。"""
+        from ..core.utils import get_model_capabilities
+
+        capabilities = get_model_capabilities(self.model_name)
+        probabilities = self._sigmoid(raw_output.astype(np.float32))
+        predictions, error = self._validate_onnx_output(probabilities, self.all_tags, capabilities)
+        if error:
+            return error
+
+        tags_with_probs = list(zip(self.all_tags, predictions, strict=True))
+        category_scores = self._classify_tags_by_category(tags_with_probs)
+        final_tags = self._filter_tags_by_threshold(category_scores, self.tag_threshold)
+        ratings = self._extract_top_rating(category_scores, capabilities)
+
+        return UnifiedAnnotationResult(
+            model_name=self.model_name,
+            capabilities=capabilities,
+            tags=final_tags if TaskCapability.TAGS in capabilities else None,
+            captions=None,
+            scores=None,
+            ratings=ratings,
+            framework="onnx",
+            raw_output={
+                "category_scores": category_scores,
+                "threshold": self.tag_threshold,
+                "total_tags_count": len(self.all_tags),
+            },
+        )
+
+    @staticmethod
+    def _sigmoid(
+        raw_output: np.ndarray[Any, np.dtype[np.float32]],
+    ) -> np.ndarray[Any, np.dtype[np.float32]]:
+        return 1.0 / (1.0 + np.exp(-raw_output))
+
+    @staticmethod
+    def _normalize_rating_label(raw_label: str) -> str:
+        """Camie rating tags are stored as rating_general; expose danbooru4 labels."""
+        normalized = ONNXBaseAnnotator._normalize_rating_label(raw_label)
+        if normalized.startswith("rating_"):
+            return normalized.removeprefix("rating_")
+        return normalized

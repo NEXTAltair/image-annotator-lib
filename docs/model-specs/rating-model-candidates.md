@@ -41,6 +41,7 @@ defined in ADR 0003; LoRAIro-specific mapping is intentionally out of scope for 
 - Files in original repo:
   - `model_initial.onnx`
   - `model_initial_metadata.json`
+- Library model id: `camie_tagger_initial`
 - Objective indicators:
   - Hugging Face likes: about 66 on the original repo when reviewed.
   - Original ONNX size: about 856 MB for `model_initial.onnx`.
