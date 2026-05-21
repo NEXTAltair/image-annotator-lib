@@ -96,7 +96,7 @@ model_variant = "mobilenetv3_sce_dist"
 class = "AnimeRatingAnnotator"
 estimated_size_gb = 0.047
 type = "tagger"
-capabilities = ["ratings"]
+capabilities = [ "ratings",]
 
 [anime_rating_caformer_s36_plus]
 model_path = "deepghs/anime_rating"
@@ -104,14 +104,14 @@ model_variant = "caformer_s36_plus"
 class = "AnimeRatingAnnotator"
 estimated_size_gb = 0.52
 type = "tagger"
-capabilities = ["ratings"]
+capabilities = [ "ratings",]
 
 [camie_tagger_initial]
 model_path = "Camais03/camie-tagger"
 class = "CamieTagger"
 estimated_size_gb = 0.856
 type = "tagger"
-capabilities = ["tags", "ratings"]
+capabilities = [ "tags", "ratings",]
 tag_threshold = 0.325
 
 [wd-convnext-tagger-v3]

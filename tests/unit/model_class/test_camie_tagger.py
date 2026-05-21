@@ -81,6 +81,9 @@ def test_camie_loads_json_metadata(camie_config: str, camie_metadata_path: Path)
     assert annotator.general_indexes == [1]
     assert annotator.character_indexes == [2]
     assert annotator.rating_indexes == [3, 4, 5, 6]
+    # ライブラリはカテゴリを削らない: year / artist も保持される
+    assert annotator.year_indexes == [0]
+    assert annotator.artist_indexes == [7]
 
 
 @pytest.mark.unit
@@ -92,13 +95,20 @@ def test_camie_formats_sigmoid_tags_and_rating(camie_config: str, camie_metadata
     result = annotator._format_predictions_single(_logits(0.95, 0.80, 0.70, 0.05, 0.85, 0.20, 0.01, 0.99))
 
     assert result.error is None
-    assert result.tags == ["1girl", "hakurei_reimu"]
+    # rating 以外の全カテゴリ (year / artist 含む) のタグを confidence 降順で出力する
+    assert result.tags == ["artist_name", "year_2024", "1girl", "hakurei_reimu"]
     assert result.ratings is not None
     assert result.ratings[0].raw_label == "sensitive"
     assert result.ratings[0].confidence_score == pytest.approx(0.85)
     assert result.ratings[0].source_scheme == "danbooru4"
-    assert "artist" not in result.raw_output["category_scores"]
-    assert "year" not in result.raw_output["category_scores"]
+    # 全カテゴリの raw スコアが category_scores に残る (情報を削らない)
+    assert set(result.raw_output["category_scores"]) == {
+        "year",
+        "general",
+        "character",
+        "artist",
+        "ratings",
+    }
 
 
 @pytest.mark.unit

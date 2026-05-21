@@ -93,6 +93,22 @@ class ONNXBaseAnnotator(BaseAnnotator):
                 logger.warning(f"インデックス {i} が範囲外です (タグ総数: {len(all_tags_list)})。")
         return category_tags
 
+    def _to_probabilities(
+        self, raw_output: np.ndarray[Any, np.dtype[Any]]
+    ) -> np.ndarray[Any, np.dtype[Any]]:
+        """ONNX生出力を確率値へ変換する。
+
+        確率を直接出力するモデル (WDTagger / Z3D 等) では恒等変換 (既定)。
+        logit を出力するモデル (CamieTagger 等) はサブクラスで sigmoid 等を適用する。
+
+        Args:
+            raw_output: ONNX推論の生出力配列。
+
+        Returns:
+            確率値の配列。
+        """
+        return raw_output
+
     def _format_predictions_single(
         self, raw_output: np.ndarray[Any, np.dtype[Any]]
     ) -> UnifiedAnnotationResult:
@@ -110,8 +126,10 @@ class ONNXBaseAnnotator(BaseAnnotator):
         all_tags_list = getattr(self, "all_tags", [])
         threshold = getattr(self, "tag_threshold", 0.35)
 
-        # バリデーション
-        predictions, error = self._validate_onnx_output(raw_output, all_tags_list, capabilities)
+        # バリデーション (生出力 → 確率変換を挟む)
+        predictions, error = self._validate_onnx_output(
+            self._to_probabilities(raw_output), all_tags_list, capabilities
+        )
         if error:
             return error
 
