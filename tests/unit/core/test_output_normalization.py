@@ -94,7 +94,9 @@ class TestNormalizeAnnotationOutput:
             {"tags": ["cat"], "captions": ["caption"]},
         ],
     )
-    def test_default_normalizer_retries_when_core_fields_are_missing(self, kwargs: dict[str, object]) -> None:
+    def test_default_normalizer_retries_when_core_fields_are_missing(
+        self, kwargs: dict[str, object]
+    ) -> None:
         with pytest.raises(ModelRetry):
             normalize_annotation_output(**kwargs)
 
@@ -112,3 +114,27 @@ class TestNormalizeAnnotationOutput:
 
         with pytest.raises(ModelRetry):
             normalizer()
+
+    def test_capability_normalizer_ignores_malformed_unrequested_core_fields(self) -> None:
+        """RATINGS のみ要求時、付随的な不正形 core field は retry を誘発しない (Codex P2)。"""
+        normalizer = build_annotation_output_normalizer({TaskCapability.RATINGS})
+
+        result = normalizer(rating="explicit", tags={"unexpected": 1}, score="not-a-number")
+
+        assert result.ratings[0].raw_label == "explicit"
+        assert result.tags == []
+        assert result.captions == []
+        assert result.score is None
+
+    def test_capability_normalizer_ignores_malformed_unrequested_rating_field(self) -> None:
+        """core capability のみ要求時、付随的な不正形 rating field は retry を誘発しない (Codex P1)。"""
+        normalizer = build_annotation_output_normalizer(
+            {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
+        )
+
+        result = normalizer(tags=["cat"], captions=["a cat"], score=0.8, ratings="explicit")
+
+        assert result.tags == ["cat"]
+        assert result.captions == ["a cat"]
+        assert result.score == 0.8
+        assert result.ratings == []

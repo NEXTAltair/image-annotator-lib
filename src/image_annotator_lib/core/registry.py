@@ -763,6 +763,11 @@ def _register_webapi_models_from_discovery() -> None:
                         model_info.get("estimated_size_gb"), model_id, "estimated_size_gb"
                     ),
                     "discontinued_at": None,
+                    # Issue #82: discovery 由来の WebAPI モデルは Vision LLM であり、
+                    # prompt 指示で tags/captions/scores に加え rating も出力できる。
+                    # `capabilities` を明示しないと `get_model_capabilities` の fallback で
+                    # RATINGS が欠落し、rating prompt / 正規化経路が production で到達不能になる。
+                    "capabilities": ["tags", "captions", "scores", "ratings"],
                     "type": "webapi",
                     "class": "WebApiAnnotator",
                 }

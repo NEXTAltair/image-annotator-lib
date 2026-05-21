@@ -33,14 +33,15 @@ _DEFAULT_REQUIRED_CAPABILITIES = frozenset(
 )
 
 
-def _normalize_string_items(
-    value: Any, *, field_name: str, split_commas: bool, required: bool
-) -> list[str]:
-    """Normalize tag/caption values allowed by ADR 0023."""
+def _normalize_string_items(value: Any, *, field_name: str, split_commas: bool) -> list[str]:
+    """Normalize tag/caption values allowed by ADR 0023.
+
+    呼び出し元が capability gate 済み (= この field は要求されている) 前提。
+    欠損 (`None`) も不正形も `ModelRetry` を上げる。要求されていない field は
+    呼び出し元が本関数を呼ばずに skip するため、不正形でも retry を誘発しない。
+    """
     if value is None:
-        if required:
-            raise ModelRetry(f"`{field_name}` is required")
-        return []
+        raise ModelRetry(f"`{field_name}` is required")
     if isinstance(value, str):
         raw_items = value.split(",") if split_commas and "," in value else [value]
     elif isinstance(value, list):
@@ -58,12 +59,14 @@ def _normalize_string_items(
     return normalized
 
 
-def _normalize_score(value: Any, *, required: bool) -> float | None:
-    """Normalize numeric score values allowed by ADR 0023."""
+def _normalize_score(value: Any) -> float:
+    """Normalize numeric score values allowed by ADR 0023.
+
+    呼び出し元が capability gate 済み (= score は要求されている) 前提。
+    欠損 (`None`) も不正形も `ModelRetry` を上げる。
+    """
     if value is None:
-        if required:
-            raise ModelRetry("`score` is required")
-        return None
+        raise ModelRetry("`score` is required")
     if isinstance(value, bool):
         raise ModelRetry("`score` must be a number")
     if isinstance(value, (int, float)):
@@ -121,28 +124,28 @@ def _normalize_rating_item(value: Any, *, confidence: Any = None) -> RatingPredi
     )
 
 
-def _normalize_ratings(
-    rating: Any, ratings: Any, rating_confidence: Any, *, required: bool
-) -> list[RatingPrediction]:
-    """Normalize single or list-shaped rating outputs."""
+def _normalize_ratings(rating: Any, ratings: Any, rating_confidence: Any) -> list[RatingPrediction]:
+    """Normalize single or list-shaped rating outputs.
+
+    呼び出し元が capability gate 済み (= RATINGS は要求されている) 前提。
+    rating が 1 件も得られなければ `ModelRetry` を上げる。RATINGS が要求されて
+    いない場合は呼び出し元が本関数を呼ばずに skip する。
+    """
     normalized: list[RatingPrediction] = []
 
     single = _normalize_rating_item(rating, confidence=rating_confidence)
     if single is not None:
         normalized.append(single)
 
-    if ratings is None:
-        if required and not normalized:
-            raise ModelRetry("`rating` or `ratings` is required")
-        return normalized
-    if not isinstance(ratings, list):
-        raise ModelRetry("`ratings` must be a list")
+    if ratings is not None:
+        if not isinstance(ratings, list):
+            raise ModelRetry("`ratings` must be a list")
+        for item in ratings:
+            prediction = _normalize_rating_item(item)
+            if prediction is not None:
+                normalized.append(prediction)
 
-    for item in ratings:
-        prediction = _normalize_rating_item(item)
-        if prediction is not None:
-            normalized.append(prediction)
-    if required and not normalized:
+    if not normalized:
         raise ModelRetry("`rating` or `ratings` is required")
     return normalized
 
@@ -205,27 +208,28 @@ def _normalize_annotation_output_for_capabilities(
     ratings: Any = None,
     required_capabilities: frozenset[TaskCapability],
 ) -> AnnotationSchema:
-    normalized_tags = _normalize_string_items(
-        tags,
-        field_name="tags",
-        split_commas=True,
-        required=TaskCapability.TAGS in required_capabilities,
+    """Normalize WebAPI output, validating only the requested capabilities.
+
+    要求された capability の field のみ正規化・検証する。要求されていない field は
+    モデルが付随的に出力した値が不正形でも `ModelRetry` を誘発せず、空 / None に
+    落として無視する (PR #85 Codex review: 非要求 field の shape error で正常な
+    要求 field 出力を巻き込まないため)。
+    """
+    normalized_tags = (
+        _normalize_string_items(tags, field_name="tags", split_commas=True)
+        if TaskCapability.TAGS in required_capabilities
+        else []
     )
-    normalized_captions = _normalize_string_items(
-        captions,
-        field_name="captions",
-        split_commas=False,
-        required=TaskCapability.CAPTIONS in required_capabilities,
+    normalized_captions = (
+        _normalize_string_items(captions, field_name="captions", split_commas=False)
+        if TaskCapability.CAPTIONS in required_capabilities
+        else []
     )
-    normalized_score = _normalize_score(
-        score,
-        required=TaskCapability.SCORES in required_capabilities,
-    )
-    normalized_ratings = _normalize_ratings(
-        rating,
-        ratings,
-        rating_confidence,
-        required=TaskCapability.RATINGS in required_capabilities,
+    normalized_score = _normalize_score(score) if TaskCapability.SCORES in required_capabilities else None
+    normalized_ratings = (
+        _normalize_ratings(rating, ratings, rating_confidence)
+        if TaskCapability.RATINGS in required_capabilities
+        else []
     )
 
     try:
