@@ -5,7 +5,7 @@ Test unified validation schema integration
 import pytest
 from pydantic import ValidationError
 
-from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
+from image_annotator_lib.core.types import RatingPrediction, TaskCapability, UnifiedAnnotationResult
 
 
 class TestUnifiedValidationSchemaIntegration:
@@ -91,6 +91,14 @@ class TestUnifiedValidationSchemaIntegration:
         with pytest.raises(ValidationError, match="scores provided but SCORES not in capabilities"):
             UnifiedAnnotationResult(
                 model_name="test-captioner", capabilities={TaskCapability.CAPTIONS}, scores={"invalid": 0.5}
+            )
+
+        # Invalid ratings without RATINGS capability
+        with pytest.raises(ValidationError, match="ratings provided but RATINGS not in capabilities"):
+            UnifiedAnnotationResult(
+                model_name="test-tagger",
+                capabilities={TaskCapability.TAGS},
+                ratings=[RatingPrediction(raw_label="explicit", confidence_score=0.9, source_scheme="e6213")],
             )
 
     def test_error_handling_with_capabilities(self):

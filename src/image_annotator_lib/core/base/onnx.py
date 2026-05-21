@@ -9,7 +9,7 @@ from PIL import Image
 # --- ローカルインポート ---
 from ...exceptions.errors import OutOfMemoryError
 from ..model_factory import ModelLoad
-from ..types import ONNXComponents, TaskCapability, UnifiedAnnotationResult
+from ..types import ONNXComponents, RatingPrediction, TaskCapability, UnifiedAnnotationResult
 from ..utils import logger
 from .annotator import BaseAnnotator
 
@@ -111,12 +111,15 @@ class ONNXBaseAnnotator(BaseAnnotator):
         # 閾値フィルタリング
         final_tags = self._filter_tags_by_threshold(category_scores, threshold)
 
+        ratings = self._extract_top_rating(category_scores, capabilities)
+
         return UnifiedAnnotationResult(
             model_name=self.model_name,
             capabilities=capabilities,
             tags=final_tags if TaskCapability.TAGS in capabilities else None,
             captions=None,
             scores=None,
+            ratings=ratings,
             framework="onnx",
             raw_output={
                 "predictions": predictions.tolist(),
@@ -216,6 +219,34 @@ class ONNXBaseAnnotator(BaseAnnotator):
 
         return category_scores
 
+    def _extract_top_rating(
+        self, category_scores: dict[str, dict[str, float]], capabilities: set[TaskCapability]
+    ) -> list[RatingPrediction] | None:
+        """Extract top-1 model-native rating prediction from category scores."""
+        if TaskCapability.RATINGS not in capabilities:
+            return None
+
+        rating_scores = category_scores.get("ratings")
+        if not rating_scores:
+            return None
+
+        raw_label, confidence = max(rating_scores.items(), key=lambda item: item[1])
+        source_scheme = getattr(self, "rating_source_scheme", "unknown")
+        return [
+            RatingPrediction(
+                raw_label=self._normalize_rating_label(raw_label),
+                confidence_score=float(confidence),
+                source_scheme=source_scheme,
+            )
+        ]
+
+    @staticmethod
+    def _normalize_rating_label(raw_label: str) -> str:
+        """Normalize adapter-local rating label spelling without consumer mapping."""
+        if ":" in raw_label:
+            raw_label = raw_label.split(":", 1)[1]
+        return raw_label.strip().lower().replace(" ", "_")
+
     @staticmethod
     def _filter_tags_by_threshold(
         category_scores: dict[str, dict[str, float]], threshold: float
@@ -230,7 +261,9 @@ class ONNXBaseAnnotator(BaseAnnotator):
             信頼度降順のタグ名リスト。
         """
         filtered_tags = []
-        for _category, tag_dict in category_scores.items():
+        for category, tag_dict in category_scores.items():
+            if category in {"rating", "ratings"}:
+                continue
             for tag, confidence in tag_dict.items():
                 if confidence >= threshold:
                     filtered_tags.append((tag, confidence))

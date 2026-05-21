@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from image_annotator_lib.core.types import TaskCapability
 from image_annotator_lib.model_class.tagger_onnx import WDTagger, Z3D_E621Tagger
 
 
@@ -77,7 +78,7 @@ def mock_csv_file(tmp_path):
 solo,0
 smile,0
 long_hair,0
-rating:safe,9
+rating:general,9
 rating:questionable,9
 rating:explicit,9
 character_name,4
@@ -116,10 +117,8 @@ def mock_capabilities():
 
     This avoids Pydantic validation issues with capabilities in config.
     """
-    from image_annotator_lib.core.types import TaskCapability
-
     with patch("image_annotator_lib.core.utils.get_model_capabilities") as mock:
-        mock.return_value = {TaskCapability.TAGS}
+        mock.return_value = {TaskCapability.TAGS, TaskCapability.RATINGS}
         yield mock
 
 
@@ -234,7 +233,8 @@ def test_onnx_tagger_inference(
             predictions[0, 0] = 0.95  # 1girl (general, above threshold)
             predictions[0, 1] = 0.85  # solo (general, above threshold)
             predictions[0, 2] = 0.30  # smile (general, below threshold 0.5)
-            predictions[0, 4] = 0.75  # rating:safe (rating)
+            predictions[0, 4] = 0.75  # rating:general (rating)
+            predictions[0, 5] = 0.82  # rating:questionable (rating)
             mock_onnx_session.run.return_value = [predictions]
 
             tagger = WDTagger(mock_wdtagger_config)
@@ -256,6 +256,13 @@ def test_onnx_tagger_inference(
                 result = formatted[0]
                 assert result.tags is not None
                 assert len(result.tags) >= 2  # At least 1girl and solo (above threshold)
+                assert "general" not in result.tags
+                assert "questionable" not in result.tags
+                assert result.ratings is not None
+                assert len(result.ratings) == 1
+                assert result.ratings[0].raw_label == "questionable"
+                assert result.ratings[0].confidence_score == pytest.approx(0.82)
+                assert result.ratings[0].source_scheme == "danbooru4"
                 assert result.framework == "onnx"
                 assert result.raw_output is not None
 
@@ -403,7 +410,7 @@ artist_name,1
 copyright_name,3
 character_name,4
 meta_tag,5
-rating:safe,9
+rating:general,9
 rating:questionable,9
 rating:explicit,9
 """
@@ -424,13 +431,13 @@ rating:explicit,9
                 assert len(tagger.all_tags) == 9
                 assert "general_tag_1" in tagger.all_tags
                 assert "character_name" in tagger.all_tags
-                assert "rating:safe" in tagger.all_tags
+                assert "rating:general" in tagger.all_tags
 
                 # Verify category indexes
                 assert 0 in tagger.general_indexes  # general_tag_1
                 assert 1 in tagger.general_indexes  # general_tag_2
                 assert 4 in tagger.character_indexes  # character_name
-                assert 6 in tagger.rating_indexes  # rating:safe
+                assert 6 in tagger.rating_indexes  # rating:general
 
 
 @pytest.mark.unit
@@ -581,7 +588,7 @@ def test_onnx_tagger_category_score_extraction(
                             0.75,  # general tag 2
                             0.65,  # general tag 3
                             0.55,  # general tag 4
-                            0.80,  # rating:safe (index 4 in CSV)
+                            0.80,  # rating:general (index 4 in CSV)
                             0.15,  # rating:questionable
                             0.05,  # rating:explicit
                             0.70,  # character_name
@@ -601,6 +608,11 @@ def test_onnx_tagger_category_score_extraction(
                 result = formatted[0]
                 assert result.tags is not None
                 assert result.raw_output is not None
+                assert result.ratings is not None
+                assert result.ratings[0].raw_label == "general"
+                assert result.ratings[0].confidence_score == pytest.approx(0.80)
+                assert result.ratings[0].source_scheme == "danbooru4"
+                assert "general" not in result.tags
                 assert result.framework == "onnx"
 
 
@@ -650,6 +662,7 @@ def test_z3d_e621_tagger_initialization(managed_config_registry, mock_onnx_sessi
                     "copyright",
                     "meta",
                     "lore",
+                    "rating",
                 }
                 assert set(tagger._category_attr_map.keys()) == expected_categories
 
@@ -659,3 +672,63 @@ def test_z3d_e621_tagger_initialization(managed_config_registry, mock_onnx_sessi
                 assert hasattr(tagger, "all_tags")
                 assert hasattr(tagger, "rating_indexes")
                 assert hasattr(tagger, "general_indexes")
+
+
+@pytest.mark.unit
+def test_z3d_e621_tagger_extracts_e621_rating(
+    managed_config_registry, mock_onnx_session, tmp_path, test_image
+):
+    """Test Z3D_E621Tagger emits model-native e621 rating separately from content tags."""
+    csv_path = tmp_path / "z3d_tags.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "name,category",
+                "tail,0",
+                "solo,0",
+                "safe,9",
+                "questionable,9",
+                "explicit,9",
+            ]
+        )
+    )
+    config = {
+        "class": "Z3D_E621Tagger",
+        "model_path": "/fake/model.onnx",
+        "device": "cpu",
+        "estimated_size_gb": 1.0,
+        "type": "tagger",
+        "capabilities": ["tags", "ratings"],
+    }
+    managed_config_registry.set("test_z3d_rating", config)
+
+    with patch("onnxruntime.InferenceSession", return_value=mock_onnx_session):
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load:
+            mock_load.return_value = {
+                "session": mock_onnx_session,
+                "csv_path": str(csv_path),
+                "model_path": "/fake/model.onnx",
+            }
+
+            predictions = np.array([[0.91, 0.88, 0.10, 0.20, 0.93]], dtype=np.float32)
+            mock_onnx_session.run.return_value = [predictions]
+
+            tagger = Z3D_E621Tagger("test_z3d_rating")
+
+            with tagger:
+                processed = tagger._preprocess_images([test_image])
+                raw_outputs = tagger._run_inference(processed)
+                formatted = tagger._format_predictions(raw_outputs)
+
+                result = formatted[0]
+                assert result.tags is not None
+                assert "tail" in result.tags
+                assert "solo" in result.tags
+                assert "explicit" not in result.tags
+                assert result.ratings is not None
+                assert len(result.ratings) == 1
+                assert result.ratings[0].raw_label == "explicit"
+                assert result.ratings[0].confidence_score == pytest.approx(0.93)
+                assert result.ratings[0].source_scheme == "e6213"
+                assert result.raw_output is not None
+                assert result.raw_output["category_scores"]["ratings"]["explicit"] == pytest.approx(0.93)

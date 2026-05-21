@@ -208,6 +208,18 @@ class TaskCapability(str, Enum):
     CAPTIONS = "captions"
     SCORES = "scores"
     SCORE_LABELS = "score_labels"
+    RATINGS = "ratings"
+
+
+class RatingPrediction(BaseModel):
+    """Model-native rating prediction.
+
+    LoRAIro などの consumer 固有 rating へは変換せず、モデルの label scheme を保持する。
+    """
+
+    raw_label: str
+    confidence_score: float | None = None
+    source_scheme: str
 
 
 class UnifiedAnnotationResult(BaseModel):
@@ -228,6 +240,8 @@ class UnifiedAnnotationResult(BaseModel):
     # ADR 0002: scorer 由来の categorical label (例: "very aesthetic", "aesthetic")。
     # content tag (WDTagger 等) と field レベルで分離。
     score_labels: list[str] | None = None
+    # ADR 0003: rating / NSFW classifier 由来の model-native rating。
+    ratings: list[RatingPrediction] | None = None
 
     # メタデータ(Optional)
     provider_name: str | None = None
@@ -275,6 +289,17 @@ class UnifiedAnnotationResult(BaseModel):
                 raise ValueError(
                     f"score_labels provided but SCORE_LABELS not in capabilities: {capabilities}"
                 )
+        return v
+
+    @field_validator("ratings")
+    @classmethod
+    def validate_ratings_capability(
+        cls, v: list[RatingPrediction] | None, info: ValidationInfo
+    ) -> list[RatingPrediction] | None:
+        if v is not None:
+            capabilities = info.data.get("capabilities", set())
+            if TaskCapability.RATINGS not in capabilities:
+                raise ValueError(f"ratings provided but RATINGS not in capabilities: {capabilities}")
         return v
 
     @model_validator(mode="after")
