@@ -177,6 +177,7 @@ WDTagger 系のように category probability を持つモデルでは、full di
 ## Related
 
 - ADR 0002: Score Model Output Contract
+- Model specs: `docs/model-specs/rating-model-candidates.md`
 - NEXTAltair/image-annotator-lib#79
 - NEXTAltair/image-annotator-lib#80
 - NEXTAltair/image-annotator-lib#81
