@@ -19,19 +19,27 @@ ADR 0023 Issue #47: PydanticAI `Agent.output_type` に渡す callable として
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from pydantic import ValidationError
 from pydantic_ai import ModelRetry
 
-from .types import AnnotationSchema, RatingPrediction
+from .types import AnnotationSchema, RatingPrediction, TaskCapability
 
 _WEBAPI_RATING_SOURCE_SCHEME = "prompt_defined"
+_DEFAULT_REQUIRED_CAPABILITIES = frozenset(
+    {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
+)
 
 
-def _normalize_string_items(value: Any, *, field_name: str, split_commas: bool) -> list[str]:
+def _normalize_string_items(
+    value: Any, *, field_name: str, split_commas: bool, required: bool
+) -> list[str]:
     """Normalize tag/caption values allowed by ADR 0023."""
     if value is None:
+        if required:
+            raise ModelRetry(f"`{field_name}` is required")
         return []
     if isinstance(value, str):
         raw_items = value.split(",") if split_commas and "," in value else [value]
@@ -50,9 +58,11 @@ def _normalize_string_items(value: Any, *, field_name: str, split_commas: bool) 
     return normalized
 
 
-def _normalize_score(value: Any) -> float | None:
+def _normalize_score(value: Any, *, required: bool) -> float | None:
     """Normalize numeric score values allowed by ADR 0023."""
     if value is None:
+        if required:
+            raise ModelRetry("`score` is required")
         return None
     if isinstance(value, bool):
         raise ModelRetry("`score` must be a number")
@@ -111,7 +121,9 @@ def _normalize_rating_item(value: Any, *, confidence: Any = None) -> RatingPredi
     )
 
 
-def _normalize_ratings(rating: Any, ratings: Any, rating_confidence: Any) -> list[RatingPrediction]:
+def _normalize_ratings(
+    rating: Any, ratings: Any, rating_confidence: Any, *, required: bool
+) -> list[RatingPrediction]:
     """Normalize single or list-shaped rating outputs."""
     normalized: list[RatingPrediction] = []
 
@@ -120,6 +132,8 @@ def _normalize_ratings(rating: Any, ratings: Any, rating_confidence: Any) -> lis
         normalized.append(single)
 
     if ratings is None:
+        if required and not normalized:
+            raise ModelRetry("`rating` or `ratings` is required")
         return normalized
     if not isinstance(ratings, list):
         raise ModelRetry("`ratings` must be a list")
@@ -128,6 +142,8 @@ def _normalize_ratings(rating: Any, ratings: Any, rating_confidence: Any) -> lis
         prediction = _normalize_rating_item(item)
         if prediction is not None:
             normalized.append(prediction)
+    if required and not normalized:
+        raise ModelRetry("`rating` or `ratings` is required")
     return normalized
 
 
@@ -168,10 +184,49 @@ def normalize_annotation_output(
     Returns:
         Validated `AnnotationSchema` with the normalized fields.
     """
-    normalized_tags = _normalize_string_items(tags, field_name="tags", split_commas=True)
-    normalized_captions = _normalize_string_items(captions, field_name="captions", split_commas=False)
-    normalized_score = _normalize_score(score)
-    normalized_ratings = _normalize_ratings(rating, ratings, rating_confidence)
+    return _normalize_annotation_output_for_capabilities(
+        tags=tags,
+        captions=captions,
+        score=score,
+        rating=rating,
+        rating_confidence=rating_confidence,
+        ratings=ratings,
+        required_capabilities=_DEFAULT_REQUIRED_CAPABILITIES,
+    )
+
+
+def _normalize_annotation_output_for_capabilities(
+    *,
+    tags: Any = None,
+    captions: Any = None,
+    score: Any = None,
+    rating: Any = None,
+    rating_confidence: Any = None,
+    ratings: Any = None,
+    required_capabilities: frozenset[TaskCapability],
+) -> AnnotationSchema:
+    normalized_tags = _normalize_string_items(
+        tags,
+        field_name="tags",
+        split_commas=True,
+        required=TaskCapability.TAGS in required_capabilities,
+    )
+    normalized_captions = _normalize_string_items(
+        captions,
+        field_name="captions",
+        split_commas=False,
+        required=TaskCapability.CAPTIONS in required_capabilities,
+    )
+    normalized_score = _normalize_score(
+        score,
+        required=TaskCapability.SCORES in required_capabilities,
+    )
+    normalized_ratings = _normalize_ratings(
+        rating,
+        ratings,
+        rating_confidence,
+        required=TaskCapability.RATINGS in required_capabilities,
+    )
 
     try:
         return AnnotationSchema(
@@ -184,4 +239,36 @@ def normalize_annotation_output(
         raise ModelRetry("annotation output does not match AnnotationSchema") from exc
 
 
-__all__ = ["normalize_annotation_output"]
+def build_annotation_output_normalizer(
+    capabilities: set[TaskCapability] | frozenset[TaskCapability] | None,
+) -> Callable[..., AnnotationSchema]:
+    """Build a WebAPI output normalizer that requires only requested capabilities."""
+    required_capabilities = (
+        frozenset(capabilities) if capabilities is not None else _DEFAULT_REQUIRED_CAPABILITIES
+    )
+
+    def normalize_output(
+        tags: Any = None,
+        captions: Any = None,
+        score: Any = None,
+        rating: Any = None,
+        rating_confidence: Any = None,
+        ratings: Any = None,
+    ) -> AnnotationSchema:
+        """Provide image annotation results."""
+        return _normalize_annotation_output_for_capabilities(
+            tags=tags,
+            captions=captions,
+            score=score,
+            rating=rating,
+            rating_confidence=rating_confidence,
+            ratings=ratings,
+            required_capabilities=required_capabilities,
+        )
+
+    normalize_output.__name__ = "normalize_annotation_output"
+    normalize_output.__doc__ = normalize_annotation_output.__doc__
+    return normalize_output
+
+
+__all__ = ["build_annotation_output_normalizer", "normalize_annotation_output"]

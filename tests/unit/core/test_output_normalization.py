@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 from pydantic_ai import ModelRetry
 
-from image_annotator_lib.core.output_normalization import normalize_annotation_output
+from image_annotator_lib.core.output_normalization import (
+    build_annotation_output_normalizer,
+    normalize_annotation_output,
+)
+from image_annotator_lib.core.types import TaskCapability
 
 
 class TestNormalizeAnnotationOutput:
@@ -40,10 +44,9 @@ class TestNormalizeAnnotationOutput:
         assert result.captions == ["caption"]
 
     def test_normalizes_single_rating_with_optional_confidence(self) -> None:
-        result = normalize_annotation_output(
-            tags=[],
-            captions=[],
-            score=None,
+        normalizer = build_annotation_output_normalizer({TaskCapability.RATINGS})
+
+        result = normalizer(
             rating="  questionable  ",
             rating_confidence="0.82",
         )
@@ -53,7 +56,9 @@ class TestNormalizeAnnotationOutput:
         assert result.ratings[0].source_scheme == "prompt_defined"
 
     def test_normalizes_rating_objects_without_canonical_mapping(self) -> None:
-        result = normalize_annotation_output(
+        normalizer = build_annotation_output_normalizer({TaskCapability.RATINGS})
+
+        result = normalizer(
             ratings=[
                 {"label": "PG-13", "confidence": 0.7},
                 {"raw_label": "mature"},
@@ -80,3 +85,30 @@ class TestNormalizeAnnotationOutput:
     ) -> None:
         with pytest.raises(ModelRetry):
             normalize_annotation_output(tags=tags, captions=captions, score=score)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"captions": ["caption"], "score": 0.5},
+            {"tags": ["cat"], "score": 0.5},
+            {"tags": ["cat"], "captions": ["caption"]},
+        ],
+    )
+    def test_default_normalizer_retries_when_core_fields_are_missing(self, kwargs: dict[str, object]) -> None:
+        with pytest.raises(ModelRetry):
+            normalize_annotation_output(**kwargs)
+
+    def test_capability_normalizer_allows_unrequested_fields_to_be_missing(self) -> None:
+        normalizer = build_annotation_output_normalizer({TaskCapability.TAGS})
+
+        result = normalizer(tags="cat")
+
+        assert result.tags == ["cat"]
+        assert result.captions == []
+        assert result.score is None
+
+    def test_capability_normalizer_retries_when_rating_is_requested_but_missing(self) -> None:
+        normalizer = build_annotation_output_normalizer({TaskCapability.RATINGS})
+
+        with pytest.raises(ModelRetry):
+            normalizer()

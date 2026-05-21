@@ -27,7 +27,7 @@ from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
 from .http_retry import build_retry_http_client
 from .image_preprocess import preprocess_images_to_binary
 from .model_id import build_pydantic_model, resolve_model_ref
-from .output_normalization import normalize_annotation_output
+from .output_normalization import build_annotation_output_normalizer
 from .result_adapter import to_annotation_result
 from .types import AnnotationResult, TaskCapability
 from .utils import calculate_phash, logger
@@ -152,7 +152,7 @@ class ProviderManager:
                 model = build_pydantic_model(ref, api_key, config, http_client=http_client)
                 agent = Agent(
                     model=model,
-                    output_type=normalize_annotation_output,
+                    output_type=build_annotation_output_normalizer(capabilities),
                     system_prompt=_build_system_prompt(capabilities),
                     output_retries=_OUTPUT_RETRIES,
                 )
