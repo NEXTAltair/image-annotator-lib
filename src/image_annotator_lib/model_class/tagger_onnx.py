@@ -46,11 +46,18 @@ class WDTagger(ONNXBaseAnnotator):
 
     def _load_tags(self) -> None:
         """タグ情報 (語彙) をロードし、カテゴリごとのインデックスを設定します。"""
-        if "csv_path" not in self.components or not self.components["csv_path"]:
-            logger.error("タグ情報ファイルパス (csv_path) が components に設定されていません。")
+        metadata_path = (
+            self.components.get("metadata_path") or self.components.get("csv_path")
+            if self.components
+            else None
+        )
+        if not metadata_path:
+            logger.error(
+                "タグ情報ファイルパス (metadata_path/csv_path) が components に設定されていません。"
+            )
             raise FileNotFoundError("タグ情報ファイルパスが見つかりません。")
 
-        csv_path = self.components["csv_path"]
+        csv_path = metadata_path
         try:
             # ラベルファイルをpolarsで読み込み
             tags_df = pl.read_csv(csv_path)
@@ -124,11 +131,18 @@ class Z3D_E621Tagger(ONNXBaseAnnotator):
 
     def _load_tags(self) -> None:
         """Z3D_E621用のタグ情報 (語彙) をロードします。"""
-        if "csv_path" not in self.components or not self.components["csv_path"]:
-            logger.error("タグ情報ファイルパス (csv_path) が components に設定されていません。")
+        metadata_path = (
+            self.components.get("metadata_path") or self.components.get("csv_path")
+            if self.components
+            else None
+        )
+        if not metadata_path:
+            logger.error(
+                "タグ情報ファイルパス (metadata_path/csv_path) が components に設定されていません。"
+            )
             raise FileNotFoundError("タグ情報ファイルパスが見つかりません。")
 
-        csv_path = self.components["csv_path"]
+        csv_path = metadata_path
         try:
             # CSVファイルの読み込みとタグ取得
             tags_df = pl.read_csv(csv_path)

@@ -26,6 +26,7 @@ __all__ = [
     "calculate_phash",
     "convert_unix_to_iso8601",
     "determine_effective_device",
+    "download_onnx_model_files",
     "download_onnx_tagger_model",
     "extract_zip",
     "get_file_path",
@@ -218,25 +219,44 @@ def load_file(path_or_url: str) -> Path:
         ) from e
 
 
-def download_onnx_tagger_model(model_repo: str) -> tuple[Path, Path]:
-    """WD-Taggerのモデルをダウンロードする"""
+def download_onnx_model_files(
+    model_repo: str,
+    model_filename: str = WD_MODEL_FILENAME,
+    metadata_filename: str | None = WD_LABEL_FILENAME,
+    metadata_extension: str | None = ".csv",
+) -> tuple[Path | None, Path]:
+    """ONNXモデルと関連metadataファイルをHugging Face Hubからダウンロードする。"""
     # リポジトリ内のファイル一覧を取得
     repo_files = huggingface_hub.list_repo_files(model_repo)
 
-    # CSVファイルを検索(最初に見つかったものを使用)
-    csv_filename = next((f for f in repo_files if f.endswith(".csv")), WD_LABEL_FILENAME)
-
-    csv_path = huggingface_hub.hf_hub_download(
-        model_repo,
-        csv_filename,
-    )
+    metadata_path: str | None = None
+    if metadata_filename:
+        resolved_metadata_filename = metadata_filename
+        if metadata_filename not in repo_files and metadata_extension:
+            resolved_metadata_filename = next(
+                (f for f in repo_files if f.endswith(metadata_extension)), metadata_filename
+            )
+        metadata_path = huggingface_hub.hf_hub_download(model_repo, resolved_metadata_filename)
 
     model_path = huggingface_hub.hf_hub_download(
         model_repo,
-        WD_MODEL_FILENAME,
+        model_filename,
     )
 
-    return Path(csv_path), Path(model_path)
+    return Path(metadata_path) if metadata_path else None, Path(model_path)
+
+
+def download_onnx_tagger_model(model_repo: str) -> tuple[Path, Path]:
+    """WD-Taggerのモデルをダウンロードする。"""
+    metadata_path, model_path = download_onnx_model_files(
+        model_repo,
+        model_filename=WD_MODEL_FILENAME,
+        metadata_filename=WD_LABEL_FILENAME,
+        metadata_extension=".csv",
+    )
+    if metadata_path is None:
+        raise FileNotFoundError(f"ONNX tagger metadata not found: {model_repo}")
+    return metadata_path, model_path
 
 
 def determine_effective_device(requested_device: str, model_name: str | None = None) -> str:

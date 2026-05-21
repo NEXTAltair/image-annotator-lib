@@ -1,7 +1,7 @@
 """ONNX Runtime を使用するモデル用の基底クラス。"""
 
 from abc import abstractmethod
-from typing import Any, Self, cast
+from typing import Any, ClassVar, Self, cast
 
 import numpy as np
 from PIL import Image
@@ -16,6 +16,10 @@ from .annotator import BaseAnnotator
 
 class ONNXBaseAnnotator(BaseAnnotator):
     """ONNX Runtime を使用するモデル用の基底クラス。"""
+
+    onnx_model_filename: ClassVar[str] = "model.onnx"
+    onnx_metadata_filename: ClassVar[str | None] = "selected_tags.csv"
+    onnx_metadata_extension: ClassVar[str | None] = ".csv"
 
     def __init__(self, model_name: str):
         super().__init__(model_name=model_name)
@@ -37,7 +41,14 @@ class ONNXBaseAnnotator(BaseAnnotator):
             if self.model_path is None:
                 raise ValueError(f"モデル '{self.model_name}' の model_path が設定されていません。")
             logger.info(f"Loading/Restoring ONNX components: model='{self.model_path}'")
-            self.components = ModelLoad.load_onnx_components(self.model_name, self.model_path, self.device)
+            self.components = ModelLoad.load_onnx_components(
+                self.model_name,
+                self.model_path,
+                self.device,
+                model_filename=self.onnx_model_filename,
+                metadata_filename=self.onnx_metadata_filename,
+                metadata_extension=self.onnx_metadata_extension,
+            )
             self._load_tags()
             self._analyze_model_input_format()
 

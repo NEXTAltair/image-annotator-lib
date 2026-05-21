@@ -164,10 +164,22 @@ class ModelLoad:
         return cast(TransformersPipelineComponents | None, result)
 
     @staticmethod
-    def load_onnx_components(model_name: str, model_path: str, device: str) -> ONNXComponents | None:
+    def load_onnx_components(
+        model_name: str,
+        model_path: str,
+        device: str,
+        model_filename: str = "model.onnx",
+        metadata_filename: str | None = "selected_tags.csv",
+        metadata_extension: str | None = ".csv",
+    ) -> ONNXComponents | None:
         """ONNX モデルコンポーネントをロードする。"""
         loader = ONNXLoader(model_name, device)
-        result = loader.load_components(model_path)
+        result = loader.load_components(
+            model_path,
+            model_filename=model_filename,
+            metadata_filename=metadata_filename,
+            metadata_extension=metadata_extension,
+        )
         return cast(ONNXComponents | None, result)
 
     @staticmethod
