@@ -107,6 +107,14 @@ estimated_size_gb = 0.047
 type = "tagger"
 capabilities = ["ratings"]
 
+[anime_rating_caformer_s36_plus]
+model_path = "deepghs/anime_rating"
+model_variant = "caformer_s36_plus"
+class = "AnimeRatingAnnotator"
+estimated_size_gb = 0.52
+type = "tagger"
+capabilities = ["ratings"]
+
 [wd-convnext-tagger-v3]
 model_path = "SmilingWolf/wd-convnext-tagger-v3"
 class = "WDTagger"

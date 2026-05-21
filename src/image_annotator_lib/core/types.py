@@ -34,6 +34,7 @@ class TransformersPipelineComponents(TypedDict):
 class ONNXComponents(TypedDict):
     session: ort.InferenceSession
     csv_path: Path
+    metadata_path: Path
 
 
 class TensorFlowComponents(TypedDict):
@@ -205,9 +206,7 @@ AnnotationResultV2 = (
     WebApiAnnotationResult | TaggerAnnotationResult | ScorerAnnotationResult | CaptionerAnnotationResult
 )
 
-
 # --- capability-based統一バリデーションスキーマ (Plan対応) ---
-
 
 class TaskCapability(str, Enum):
     """サポートするタスク能力(ADR 0002: SCORE_LABELS 追加)。"""
