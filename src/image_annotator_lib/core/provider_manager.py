@@ -29,7 +29,7 @@ from .image_preprocess import preprocess_images_to_binary
 from .model_id import build_pydantic_model, resolve_model_ref
 from .output_normalization import normalize_annotation_output
 from .result_adapter import to_annotation_result
-from .types import AnnotationResult
+from .types import AnnotationResult, TaskCapability
 from .utils import calculate_phash, logger
 
 # ADR 0023 retry policy:
@@ -45,6 +45,20 @@ _USER_PROMPT_TEXT = "Analyze this image and provide annotations as specified."
 
 # LoRAIro #274: cause/context chain を辿る最大段数 (循環・過剰深さの安全弁)。
 _EXCEPTION_CHAIN_MAX_DEPTH = 5
+
+
+def _build_system_prompt(capabilities: set[TaskCapability] | frozenset[TaskCapability] | None) -> str:
+    """Build the WebAPI system prompt for the requested task capabilities."""
+    if capabilities is None or TaskCapability.RATINGS not in capabilities:
+        return BASE_PROMPT
+
+    return (
+        BASE_PROMPT
+        + "\n\n"
+        + "Rating task: return any requested content rating as a model-native label in the "
+        + "`rating` or `ratings` output field. Do not include rating labels in `tags` or "
+        + "`score_labels`, and do not map them to LoRAIro canonical ratings."
+    )
 
 
 def _format_exception_chain(exc: BaseException, *, max_depth: int = _EXCEPTION_CHAIN_MAX_DEPTH) -> str:
@@ -103,6 +117,7 @@ class ProviderManager:
         litellm_model_id: str,
         api_keys: dict[str, str] | None = None,
         config: dict[str, Any] | None = None,
+        capabilities: set[TaskCapability] | frozenset[TaskCapability] | None = None,
         _test_agent: Agent | None = None,
     ) -> dict[str, AnnotationResult]:
         """非同期推論の中核実装。
@@ -113,6 +128,7 @@ class ProviderManager:
             litellm_model_id: LiteLLM 形式 ID (`openai/gpt-4o` 等)。
             api_keys: provider 名 (`openai` / `anthropic` / `google` / `openrouter`) 単位の API key dict。
             config: provider 固有の追加設定 (OpenRouter `referer` / `app_name` 等)。
+            capabilities: 呼び出し元 WebAPI annotator が明示したタスク能力。
             _test_agent: pytest fixture からの Agent 注入専用 (本番では None)。
 
         Returns:
@@ -137,7 +153,7 @@ class ProviderManager:
                 agent = Agent(
                     model=model,
                     output_type=normalize_annotation_output,
-                    system_prompt=BASE_PROMPT,
+                    system_prompt=_build_system_prompt(capabilities),
                     output_retries=_OUTPUT_RETRIES,
                 )
             except BaseException:
@@ -226,6 +242,7 @@ class ProviderManager:
         litellm_model_id: str,
         api_keys: dict[str, str] | None = None,
         config: dict[str, Any] | None = None,
+        capabilities: set[TaskCapability] | frozenset[TaskCapability] | None = None,
         _test_agent: Agent | None = None,
     ) -> dict[str, AnnotationResult]:
         """`run_inference_with_model_async()` の sync wrapper。
@@ -249,6 +266,7 @@ class ProviderManager:
                 litellm_model_id=litellm_model_id,
                 api_keys=api_keys,
                 config=config,
+                capabilities=capabilities,
                 _test_agent=_test_agent,
             )
         )

@@ -105,3 +105,19 @@ class TestGetModelCapabilities:
         capabilities = get_model_capabilities("gpt-4o")
 
         assert capabilities == {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
+
+    @patch("image_annotator_lib.core.registry.get_webapi_metadata")
+    def test_get_model_capabilities_webapi_respects_explicit_ratings(
+        self, mock_get_webapi_metadata
+    ):
+        """Issue #82: WebAPI metadata can explicitly request rating capability."""
+        mock_get_webapi_metadata.return_value = {
+            "api_model_id": "openai/gpt-4o",
+            "provider": "openai",
+            "type": "webapi",
+            "capabilities": ["tags", "ratings"],
+        }
+
+        capabilities = get_model_capabilities("gpt-4o-rating")
+
+        assert capabilities == {TaskCapability.TAGS, TaskCapability.RATINGS}

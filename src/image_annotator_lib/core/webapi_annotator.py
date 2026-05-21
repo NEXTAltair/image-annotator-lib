@@ -17,7 +17,7 @@ from PIL import Image
 
 from .base.annotator import BaseAnnotator
 from .provider_manager import ProviderManager
-from .types import AnnotationResult, TaskCapability, UnifiedAnnotationResult
+from .types import AnnotationResult, RatingPrediction, TaskCapability, UnifiedAnnotationResult
 from .utils import calculate_phash, logger
 
 
@@ -31,13 +31,14 @@ class WebApiAnnotator(BaseAnnotator):
     ADVERTISED_CAPABILITIES: frozenset[TaskCapability] = frozenset(
         {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
     )
-    """Phase 1 では `AnnotationSchema` (tags / captions / score) の 3 種を全申告する。"""
+    """Default WebAPI capabilities when no task-specific override is provided."""
 
     def __init__(
         self,
         litellm_model_id: str,
         api_keys: dict[str, str] | None = None,
         model_name: str | None = None,
+        capabilities: set[TaskCapability] | frozenset[TaskCapability] | list[str] | None = None,
     ) -> None:
         """`WebApiAnnotator` を初期化する。
 
@@ -47,6 +48,8 @@ class WebApiAnnotator(BaseAnnotator):
                 をキーとする API key dict。
             model_name: registry 登録済モデル名 (registry 経由の通常呼び出しで渡される)。
                 省略時は `litellm_model_id` をモデル名として扱う (テスト stub 等の特殊用途)。
+            capabilities: 明示タスク能力。`TaskCapability.RATINGS` が含まれる場合だけ
+                rating 出力を `UnifiedAnnotationResult.ratings` として公開する。
         """
         # ADR 0023 Phase 1 / Issue #35 / Issue #45:
         # - WebAPI モデルは registry 経由でのみインスタンス化される (Issue #45 で
@@ -60,10 +63,23 @@ class WebApiAnnotator(BaseAnnotator):
         self.model_name = model_name or litellm_model_id
         self.litellm_model_id = litellm_model_id
         self.api_keys = api_keys
+        self.capabilities = self._normalize_capabilities(capabilities)
         self._config = None
         self.model_path = None
         self.device = "api"
         self.components = None
+
+    @classmethod
+    def _normalize_capabilities(
+        cls, capabilities: set[TaskCapability] | frozenset[TaskCapability] | list[str] | None
+    ) -> frozenset[TaskCapability]:
+        if capabilities is None:
+            return cls.ADVERTISED_CAPABILITIES
+
+        normalized: set[TaskCapability] = set()
+        for capability in capabilities:
+            normalized.add(capability if isinstance(capability, TaskCapability) else TaskCapability(capability))
+        return frozenset(normalized) if normalized else cls.ADVERTISED_CAPABILITIES
 
     def __enter__(self) -> Self:
         return self
@@ -92,6 +108,7 @@ class WebApiAnnotator(BaseAnnotator):
             images_list=processed,
             litellm_model_id=self.litellm_model_id,
             api_keys=self.api_keys,
+            capabilities=self.capabilities,
         )
         ordered: list[AnnotationResult] = []
         for index, image in enumerate(processed):
@@ -118,7 +135,7 @@ class WebApiAnnotator(BaseAnnotator):
                 formatted.append(
                     UnifiedAnnotationResult(
                         model_name=self.model_name,
-                        capabilities=set(self.ADVERTISED_CAPABILITIES),
+                        capabilities=set(self.capabilities),
                         error=error,
                         framework="pydantic_ai",
                     )
@@ -129,25 +146,48 @@ class WebApiAnnotator(BaseAnnotator):
             raw_tags = formatted_output.get("tags") if isinstance(formatted_output, dict) else None
             raw_captions = formatted_output.get("captions") if isinstance(formatted_output, dict) else None
             raw_score = formatted_output.get("score") if isinstance(formatted_output, dict) else None
+            raw_ratings = formatted_output.get("ratings") if isinstance(formatted_output, dict) else None
 
             tags_value: list[str] | None = list(raw_tags) if raw_tags else None
             captions_value: list[str] | None = list(raw_captions) if raw_captions else None
             scores_value: dict[str, float] | None = (
                 {"overall": float(raw_score)} if raw_score is not None else None
             )
+            ratings_value = (
+                self._format_ratings(raw_ratings)
+                if TaskCapability.RATINGS in self.capabilities and raw_ratings
+                else None
+            )
 
             formatted.append(
                 UnifiedAnnotationResult(
                     model_name=self.model_name,
-                    capabilities=set(self.ADVERTISED_CAPABILITIES),
-                    tags=tags_value,
-                    captions=captions_value,
-                    scores=scores_value,
+                    capabilities=set(self.capabilities),
+                    tags=tags_value if TaskCapability.TAGS in self.capabilities else None,
+                    captions=captions_value if TaskCapability.CAPTIONS in self.capabilities else None,
+                    scores=scores_value if TaskCapability.SCORES in self.capabilities else None,
+                    ratings=ratings_value,
                     framework="pydantic_ai",
-                    raw_output={"litellm_model_id": self.litellm_model_id},
+                    raw_output={
+                        "litellm_model_id": self.litellm_model_id,
+                        "formatted_output": formatted_output,
+                    },
                 )
             )
         return formatted
+
+    @staticmethod
+    def _format_ratings(raw_ratings: Any) -> list[RatingPrediction] | None:
+        if not isinstance(raw_ratings, list):
+            return None
+
+        ratings: list[RatingPrediction] = []
+        for item in raw_ratings:
+            if isinstance(item, RatingPrediction):
+                ratings.append(item)
+            elif isinstance(item, dict):
+                ratings.append(RatingPrediction.model_validate(item))
+        return ratings or None
 
 
 __all__ = ["WebApiAnnotator"]

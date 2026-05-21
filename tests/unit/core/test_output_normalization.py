@@ -39,6 +39,31 @@ class TestNormalizeAnnotationOutput:
         assert result.tags == ["cat", "dog"]
         assert result.captions == ["caption"]
 
+    def test_normalizes_single_rating_with_optional_confidence(self) -> None:
+        result = normalize_annotation_output(
+            tags=[],
+            captions=[],
+            score=None,
+            rating="  questionable  ",
+            rating_confidence="0.82",
+        )
+
+        assert result.ratings[0].raw_label == "questionable"
+        assert result.ratings[0].confidence_score == 0.82
+        assert result.ratings[0].source_scheme == "prompt_defined"
+
+    def test_normalizes_rating_objects_without_canonical_mapping(self) -> None:
+        result = normalize_annotation_output(
+            ratings=[
+                {"label": "PG-13", "confidence": 0.7},
+                {"raw_label": "mature"},
+            ]
+        )
+
+        assert [rating.raw_label for rating in result.ratings] == ["PG-13", "mature"]
+        assert result.ratings[0].confidence_score == 0.7
+        assert result.ratings[1].confidence_score is None
+
     @pytest.mark.parametrize(
         ("tags", "captions", "score"),
         [

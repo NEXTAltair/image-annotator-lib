@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import datetime
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, Union
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
@@ -101,12 +102,24 @@ LoaderComponents = (
 )
 
 
+class RatingPrediction(BaseModel):
+    """Model-native rating prediction.
+
+    LoRAIro などの consumer 固有 rating へは変換せず、モデルの label scheme を保持する。
+    """
+
+    raw_label: str
+    confidence_score: float | None = None
+    source_scheme: str
+
+
 class AnnotationSchema(BaseModel):
     """画像アノテーションAPI共通のレスポンススキーマ"""
 
-    tags: list[str]
-    captions: list[str]
-    score: float
+    tags: list[str] = Field(default_factory=list)
+    captions: list[str] = Field(default_factory=list)
+    score: float | None = None
+    ratings: list[RatingPrediction] = Field(default_factory=list)
 
 
 # --- 新バリデーションスキーマ (Pydantic V2) ---
@@ -188,17 +201,12 @@ class CaptionerAnnotationResult(BaseAnnotationResult):
 
 
 # Union型で型安全性確保
-AnnotationResultV2 = Union[
-    WebApiAnnotationResult,
-    TaggerAnnotationResult,
-    ScorerAnnotationResult,
-    CaptionerAnnotationResult,
-]
+AnnotationResultV2 = (
+    WebApiAnnotationResult | TaggerAnnotationResult | ScorerAnnotationResult | CaptionerAnnotationResult
+)
 
 
 # --- capability-based統一バリデーションスキーマ (Plan対応) ---
-
-from enum import Enum
 
 
 class TaskCapability(str, Enum):
@@ -209,17 +217,6 @@ class TaskCapability(str, Enum):
     SCORES = "scores"
     SCORE_LABELS = "score_labels"
     RATINGS = "ratings"
-
-
-class RatingPrediction(BaseModel):
-    """Model-native rating prediction.
-
-    LoRAIro などの consumer 固有 rating へは変換せず、モデルの label scheme を保持する。
-    """
-
-    raw_label: str
-    confidence_score: float | None = None
-    source_scheme: str
 
 
 class UnifiedAnnotationResult(BaseModel):

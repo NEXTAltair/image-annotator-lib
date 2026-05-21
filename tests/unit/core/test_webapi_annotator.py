@@ -17,6 +17,7 @@ class TestWebApiAnnotatorBasics:
         assert TaskCapability.TAGS in caps
         assert TaskCapability.CAPTIONS in caps
         assert TaskCapability.SCORES in caps
+        assert TaskCapability.RATINGS not in caps
 
     def test_advertised_capabilities_is_frozenset(self) -> None:
         # registry.AnnotatorInfo.capabilities が frozenset 型を要求するため
@@ -35,6 +36,14 @@ class TestWebApiAnnotatorBasics:
         assert annotator.model_name == "my-registered-model"
         assert annotator.litellm_model_id == "openai/gpt-4o"
 
+    def test_init_accepts_explicit_rating_capability(self) -> None:
+        annotator = WebApiAnnotator(
+            litellm_model_id="openai/gpt-4o",
+            capabilities=[TaskCapability.RATINGS.value],
+        )
+
+        assert annotator.capabilities == frozenset({TaskCapability.RATINGS})
+
     def test_init_does_not_consult_config_registry(self) -> None:
         # BaseAnnotator.__init__ をスキップして config_registry に依存しないことを確認
         # (依存していると config_registry に entry の無い model_name で KeyError になるはず)
@@ -52,6 +61,78 @@ class TestWebApiAnnotatorBasics:
         with annotator as ctx:
             assert ctx is annotator
         # __exit__ で例外なく抜ける
+
+
+class TestWebApiAnnotatorRatings:
+    """Issue #82: WebAPI rating output is separate from tags and score labels."""
+
+    def test_format_predictions_emits_ratings_only_when_capability_declared(self) -> None:
+        annotator = WebApiAnnotator(
+            litellm_model_id="openai/gpt-4o",
+            capabilities={TaskCapability.TAGS, TaskCapability.RATINGS},
+        )
+
+        result = annotator._format_predictions(
+            [
+                {
+                    "phash": "abc",
+                    "tags": ["solo"],
+                    "formatted_output": {
+                        "tags": ["solo"],
+                        "captions": [],
+                        "score": None,
+                        "ratings": [
+                            {
+                                "raw_label": "questionable",
+                                "confidence_score": None,
+                                "source_scheme": "prompt_defined",
+                            }
+                        ],
+                    },
+                    "error": None,
+                }
+            ]
+        )[0]
+
+        assert result.capabilities == {TaskCapability.TAGS, TaskCapability.RATINGS}
+        assert result.tags == ["solo"]
+        assert result.score_labels is None
+        assert result.ratings is not None
+        assert result.ratings[0].raw_label == "questionable"
+        assert result.ratings[0].confidence_score is None
+        assert result.ratings[0].source_scheme == "prompt_defined"
+        assert result.raw_output is not None
+        assert result.raw_output["formatted_output"]["ratings"][0]["raw_label"] == "questionable"
+
+    def test_format_predictions_ignores_ratings_without_capability(self) -> None:
+        annotator = WebApiAnnotator(litellm_model_id="openai/gpt-4o")
+
+        result = annotator._format_predictions(
+            [
+                {
+                    "phash": "abc",
+                    "tags": ["solo"],
+                    "formatted_output": {
+                        "tags": ["solo"],
+                        "captions": [],
+                        "score": 8.0,
+                        "ratings": [
+                            {
+                                "raw_label": "explicit",
+                                "confidence_score": 0.9,
+                                "source_scheme": "prompt_defined",
+                            }
+                        ],
+                    },
+                    "error": None,
+                }
+            ]
+        )[0]
+
+        assert TaskCapability.RATINGS not in result.capabilities
+        assert result.ratings is None
+        assert result.tags == ["solo"]
+        assert result.score_labels is None
 
 
 class TestWebApiAnnotatorIssue35Regression:
