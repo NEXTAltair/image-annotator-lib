@@ -62,16 +62,41 @@ def test_real_model_runtime(model_name: str) -> None:
 
     assert len(result) == 1, f"expected 1 phash entry, got {len(result)}"
     for _phash, models in result.items():
-        assert model_name in models, (
-            f"{model_name} missing in result keys: {list(models.keys())}"
-        )
+        assert model_name in models, f"{model_name} missing in result keys: {list(models.keys())}"
         ann = models[model_name]
         assert ann.error is None, f"{model_name} returned error: {ann.error}"
-        output_present = bool(ann.tags) or bool(ann.captions) or bool(ann.scores) or bool(
-            ann.score_labels
+        output_present = (
+            bool(ann.tags)
+            or bool(ann.captions)
+            or bool(ann.scores)
+            or bool(ann.score_labels)
+            or bool(ann.ratings)
         )
         assert output_present, (
             f"{model_name}: all output fields empty "
             f"(tags={ann.tags!r}, captions={ann.captions!r}, "
-            f"scores={ann.scores!r}, score_labels={ann.score_labels!r})"
+            f"scores={ann.scores!r}, score_labels={ann.score_labels!r}, ratings={ann.ratings!r})"
         )
+
+
+@pytest.mark.downloads_and_runs_model
+def test_real_anime_rating_runtime() -> None:
+    """deepghs/anime_rating smoke test for model-native rating output."""
+    if not _RESOURCE_IMG.exists():
+        pytest.skip(f"resource image not found: {_RESOURCE_IMG}")
+
+    img = Image.open(_RESOURCE_IMG).convert("RGB")
+    model_name = "anime_rating_mobilenetv3_sce_dist"
+    result = annotate(images_list=[img], model_name_list=[model_name])
+
+    assert len(result) == 1, f"expected 1 phash entry, got {len(result)}"
+    for _phash, models in result.items():
+        ann = models[model_name]
+        assert ann.error is None, f"{model_name} returned error: {ann.error}"
+        assert ann.tags is None
+        assert ann.ratings is not None and len(ann.ratings) == 1
+        rating = ann.ratings[0]
+        assert rating.raw_label in {"safe", "r15", "r18"}
+        assert rating.source_scheme == "sankaku3"
+        assert rating.confidence_score is not None
+        assert 0.0 <= rating.confidence_score <= 1.0

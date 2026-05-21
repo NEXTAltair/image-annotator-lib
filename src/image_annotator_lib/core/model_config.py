@@ -81,6 +81,7 @@ class LocalMLModelConfig(BaseModelConfig):
     final_activation_type: str | None = Field(default=None, description="最終層活性化関数(一部モデルのみ)")
     batch_size: int = Field(default=1, gt=0, description="バッチサイズ")
     gpu_memory_limit_gb: float | None = Field(default=None, gt=0, description="GPU メモリ上限 (GB)")
+    model_variant: str | None = Field(default=None, description="同一リポジトリ内のモデルvariant名")
 
     @field_validator("model_path")
     @classmethod

@@ -90,6 +90,14 @@ class = "WDTagger"
 estimated_size_gb = 0.529
 type = "tagger"
 
+[anime_rating_mobilenetv3_sce_dist]
+model_path = "deepghs/anime_rating"
+model_variant = "mobilenetv3_sce_dist"
+class = "AnimeRatingAnnotator"
+estimated_size_gb = 0.047
+type = "tagger"
+capabilities = ["ratings"]
+
 [wd-convnext-tagger-v3]
 model_path = "SmilingWolf/wd-convnext-tagger-v3"
 class = "WDTagger"
