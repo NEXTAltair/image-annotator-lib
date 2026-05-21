@@ -7,6 +7,7 @@ image-annotator-lib の重要な設計判断を記録するドキュメント群
 | [0001](0001-runtime-validation-test-lanes.md) | Runtime Validation Test Lanes | 2026-05-17 | Accepted |
 | [0002](0002-score-model-output-contract.md) | Score Model Output Contract | 2026-05-17 | Accepted |
 | [0003](0003-rating-model-output-contract.md) | Rating Model Output Contract | 2026-05-21 | Accepted |
+| [0004](0004-onnx-tagger-loader-and-model-selection.md) | ONNX Tagger Loader and Model Selection | 2026-05-21 | Accepted |
 
 ## ADR テンプレート
 
