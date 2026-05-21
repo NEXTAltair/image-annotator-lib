@@ -125,6 +125,31 @@ def test_get_webapi_metadata_returns_full_metadata(isolated_registry):
     assert metadata["supports_function_calling"] is True
     assert metadata["type"] == "webapi"
     assert metadata["class"] == "WebApiAnnotator"
+    # Issue #82: discovery metadata は rating を含む全 capability を明示する。
+    assert metadata["capabilities"] == ["tags", "captions", "scores", "ratings"]
+
+
+@pytest.mark.unit
+def test_discovered_webapi_model_advertises_rating_capability(isolated_registry):
+    """Issue #82: discovery 登録モデルは `get_model_capabilities` で RATINGS を含む。
+
+    discovery metadata が `capabilities` を明示しないと fallback で RATINGS が
+    欠落し、rating prompt / 正規化経路が `annotate()` から到達不能になる
+    (PR #85 Codex review P1)。
+    """
+    from image_annotator_lib.core.types import TaskCapability
+    from image_annotator_lib.core.utils import get_model_capabilities
+
+    with patch(_DISCOVERY_PATCH_TARGET, return_value=_DISCOVERY_RESULT):
+        _register_webapi_models_from_discovery()
+
+    caps = get_model_capabilities("google/gemini-2.5-pro")
+    assert caps == {
+        TaskCapability.TAGS,
+        TaskCapability.CAPTIONS,
+        TaskCapability.SCORES,
+        TaskCapability.RATINGS,
+    }
 
 
 @pytest.mark.unit

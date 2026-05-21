@@ -30,7 +30,7 @@ from .registry import (
     initialize_registry,
 )
 from .types import PHashAnnotationResults, UnifiedAnnotationResult
-from .utils import calculate_phash, logger
+from .utils import calculate_phash, get_model_capabilities, logger
 from .webapi_annotator import WebApiAnnotator
 
 _MODEL_INSTANCE_REGISTRY: dict[str, Any] = {}
@@ -100,6 +100,7 @@ def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None 
                 litellm_model_id=litellm_model_id,
                 api_keys=api_keys,
                 model_name=actual_model_name,
+                capabilities=get_model_capabilities(actual_model_name),
             )
 
         # registry 登録 ローカル ML モデル: 直接インスタンス化

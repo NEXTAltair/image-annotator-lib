@@ -38,4 +38,5 @@ def test_provider_manager_returns_normalized_annotation_result() -> None:
         "tags": ["cat", "dog"],
         "captions": ["a cat outside"],
         "score": 0.82,
+        "ratings": [],
     }

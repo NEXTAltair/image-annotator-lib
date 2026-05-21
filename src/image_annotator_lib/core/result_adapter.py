@@ -49,6 +49,7 @@ def to_annotation_result(
         "tags": normalized_tags,
         "captions": normalized_captions,
         "score": schema_output.score,
+        "ratings": [rating.model_dump() for rating in schema_output.ratings],
     }
 
     return AnnotationResult(

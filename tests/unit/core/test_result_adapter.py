@@ -21,6 +21,7 @@ class TestToAnnotationResult:
         assert formatted["tags"] == ["1girl", "blue eyes"]
         assert formatted["captions"] == ["a girl"]
         assert formatted["score"] == 8.5
+        assert formatted["ratings"] == []
 
     def test_error_path(self) -> None:
         result = to_annotation_result(None, phash="abc123", error="auth failure")
@@ -58,3 +59,31 @@ class TestToAnnotationResult:
         formatted = result["formatted_output"]
         assert isinstance(formatted, dict)
         assert formatted["score"] == 7.25
+
+    def test_ratings_passed_through_separately(self) -> None:
+        from image_annotator_lib.core.types import RatingPrediction
+
+        schema = AnnotationSchema(
+            tags=["solo"],
+            captions=[],
+            score=None,
+            ratings=[
+                RatingPrediction(
+                    raw_label="questionable",
+                    confidence_score=None,
+                    source_scheme="prompt_defined",
+                )
+            ],
+        )
+        result = to_annotation_result(schema, phash="abc")
+
+        assert result["tags"] == ["solo"]
+        formatted = result["formatted_output"]
+        assert isinstance(formatted, dict)
+        assert formatted["ratings"] == [
+            {
+                "raw_label": "questionable",
+                "confidence_score": None,
+                "source_scheme": "prompt_defined",
+            }
+        ]

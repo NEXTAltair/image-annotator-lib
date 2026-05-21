@@ -320,8 +320,19 @@ def get_model_capabilities(model_name: str) -> set[Any]:
     from .registry import get_webapi_metadata
     from .types import TaskCapability
 
-    # 1. WebAPI モデルは Vision LLM として tags/captions/scores 全対応
-    if get_webapi_metadata(model_name) is not None:
+    # 1. WebAPI モデルは metadata に明示 capabilities があればそれを尊重し、
+    #    未指定なら Vision LLM として tags/captions/scores 全対応にフォールバックする。
+    webapi_metadata = get_webapi_metadata(model_name)
+    if webapi_metadata is not None:
+        capabilities_config = webapi_metadata.get("capabilities")
+        if capabilities_config:
+            capabilities = set()
+            for cap in capabilities_config:
+                try:
+                    capabilities.add(TaskCapability(cap))
+                except ValueError:
+                    logger.error(f"無効なcapability '{cap}' (model: {model_name})")
+            return capabilities
         return {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
 
     # 2. 設定ファイルからcapabilitiesを取得
