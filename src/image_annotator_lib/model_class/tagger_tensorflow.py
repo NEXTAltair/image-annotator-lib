@@ -1,9 +1,10 @@
 """TensorFlow を使用する Tagger モデルの実装。"""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import tensorflow as tf
 from PIL import Image
 
 from ..core.base import TensorflowBaseAnnotator
@@ -11,6 +12,9 @@ from ..core.config import config_registry
 from ..core.model_config import BaseModelConfig
 from ..core.types import TaskCapability, UnifiedAnnotationResult
 from ..core.utils import get_model_capabilities, logger
+
+if TYPE_CHECKING:
+    import tensorflow as tf
 
 
 class DeepDanbooruTagger(TensorflowBaseAnnotator):

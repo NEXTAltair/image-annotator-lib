@@ -4,11 +4,6 @@ ADR 0001 amendment 2026-05-18 で「通常 CI に `import image_annotator_lib` s
 ことが明文化された。本 test は subprocess clean import で実行し、in-process の sys.modules
 汚染 (他 test が torch を import 済み等) で false negative になることを避ける。
 
-Note:
-    現状 `tensorflow` は `initialize_registry()` 経由で DeepDanbooru 系 TF tagger class
-    の登録時に eager load される。本 smoke test ではその 1 件を許容しつつ、torch /
-    torchvision / transformers / onnxruntime の 4 module の lazy 化を regression 防止する。
-    tensorflow の lazy 化は別 Issue で追跡 (NEXTAltair/image-annotator-lib 側で起票予定)。
 """
 
 import json
@@ -17,12 +12,8 @@ import sys
 
 import pytest
 
-_HEAVY_MODULES: tuple[str, ...] = ("torch", "torchvision", "transformers", "onnxruntime")
-"""eager load を禁止する heavy native dep の module 名集合 (4 件)。
-
-tensorflow は現状 registry 初期化で eager load されるため本 set から除外し、別 Issue
-で追跡する (本 PR の scope 外)。
-"""
+_HEAVY_MODULES: tuple[str, ...] = ("torch", "torchvision", "transformers", "onnxruntime", "tensorflow")
+"""eager load を禁止する heavy native dep の module 名集合。"""
 
 _SENTINEL = "IAMLIB_SMOKE_JSON:"
 
