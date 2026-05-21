@@ -100,3 +100,26 @@ def test_real_anime_rating_runtime() -> None:
         assert rating.source_scheme == "sankaku3"
         assert rating.confidence_score is not None
         assert 0.0 <= rating.confidence_score <= 1.0
+
+
+@pytest.mark.downloads_and_runs_model
+def test_real_camie_tagger_runtime() -> None:
+    """CamieTagger heavy smoke test for tags + rating output."""
+    if not _RESOURCE_IMG.exists():
+        pytest.skip(f"resource image not found: {_RESOURCE_IMG}")
+
+    img = Image.open(_RESOURCE_IMG).convert("RGB")
+    model_name = "camie_tagger_initial"
+    result = annotate(images_list=[img], model_name_list=[model_name])
+
+    assert len(result) == 1, f"expected 1 phash entry, got {len(result)}"
+    for _phash, models in result.items():
+        ann = models[model_name]
+        assert ann.error is None, f"{model_name} returned error: {ann.error}"
+        assert ann.tags is not None
+        assert ann.ratings is not None and len(ann.ratings) == 1
+        rating = ann.ratings[0]
+        assert rating.raw_label in {"general", "sensitive", "questionable", "explicit"}
+        assert rating.source_scheme == "danbooru4"
+        assert rating.confidence_score is not None
+        assert 0.0 <= rating.confidence_score <= 1.0

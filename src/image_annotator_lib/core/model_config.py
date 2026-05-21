@@ -82,6 +82,7 @@ class LocalMLModelConfig(BaseModelConfig):
     batch_size: int = Field(default=1, gt=0, description="バッチサイズ")
     gpu_memory_limit_gb: float | None = Field(default=None, gt=0, description="GPU メモリ上限 (GB)")
     model_variant: str | None = Field(default=None, description="同一リポジトリ内のモデルvariant名")
+    tag_threshold: float | None = Field(default=None, ge=0, le=1, description="タグ出力閾値")
 
     @field_validator("model_path")
     @classmethod

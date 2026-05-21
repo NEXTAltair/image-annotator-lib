@@ -79,6 +79,14 @@ estimated_size_gb = 0.52
 type = "tagger"
 capabilities = ["ratings"]
 
+[camie_tagger_initial]
+model_path = "Camais03/camie-tagger"
+class = "CamieTagger"
+estimated_size_gb = 0.856
+type = "tagger"
+capabilities = ["tags", "ratings"]
+tag_threshold = 0.325
+
 [wd-v1-4-convnext-tagger-v2]
 model_path = "SmilingWolf/wd-v1-4-convnext-tagger-v2"
 class = "WDTagger"
