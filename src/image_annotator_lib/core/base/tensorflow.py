@@ -1,12 +1,16 @@
 """TensorFlow モデルを使用するモデル用の基底クラス。"""
 
+from __future__ import annotations
+
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
-import tensorflow as tf
 from PIL import Image
+
+if TYPE_CHECKING:
+    import tensorflow as tf
 
 # --- ローカルインポート ---
 from ...exceptions.errors import ModelLoadError, OutOfMemoryError
@@ -26,9 +30,12 @@ class TensorflowBaseAnnotator(BaseAnnotator):
         # device 判定はローカル ML 系 base class の責務 (Issue #35 で BaseAnnotator から移譲)
         from ..utils import determine_effective_device
 
+        try:
+            import tensorflow as tf
+        except ImportError as e:
+            raise ImportError("TensorFlow がインストールされていません。") from e
+
         self.device = determine_effective_device(self._config.device, self.model_name)
-        if tf is None:
-            raise ImportError("TensorFlow がインストールされていません。")
         try:
             gpus = tf.config.list_physical_devices("GPU")
             if gpus:
@@ -52,7 +59,7 @@ class TensorflowBaseAnnotator(BaseAnnotator):
         # components の型ヒントを具体的に指定
         self.components: TensorFlowComponents | None = None
 
-    def __enter__(self) -> "TensorflowBaseAnnotator":
+    def __enter__(self) -> TensorflowBaseAnnotator:
         """TensorFlow モデルコンポーネントをロードします。状態管理は ModelLoad に委譲します。"""
         logger.debug(f"Entering context for TensorFlow model '{self.model_name}'")
         try:
@@ -95,8 +102,9 @@ class TensorflowBaseAnnotator(BaseAnnotator):
                 )
                 self.components = cast(TensorFlowComponents, released_components)
                 logger.debug("TensorFlow Keras セッションクリアを試行 (必要な場合)。")
-                if tf:
-                    tf.keras.backend.clear_session()
+                import tensorflow as tf
+
+                tf.keras.backend.clear_session()
             except Exception as e:
                 logger.exception(f"TensorFlow モデル '{self.model_name}' の解放中にエラー: {e}")
             finally:
@@ -139,6 +147,8 @@ class TensorflowBaseAnnotator(BaseAnnotator):
 
     def _run_inference_tf(self, processed: np.ndarray[Any, np.dtype[Any]]) -> tf.Tensor:
         """TensorFlow モデルでバッチ推論を実行します。"""
+        import tensorflow as tf
+
         if not self.components or "model" not in self.components or self.components["model"] is None:
             raise RuntimeError("TensorFlow モデルがロードされていません。")
         tf_model = self.components["model"]
@@ -187,7 +197,14 @@ class TensorflowBaseAnnotator(BaseAnnotator):
             return {"error": {}}  # エラーを示す辞書を返す
 
         # 生出力が NumPy 配列であることを確認し、適切な次元から予測値を取得
-        if isinstance(raw_output, tf.Tensor):  # TFテンソルの場合 NumPy に変換
+        if isinstance(raw_output, np.ndarray):
+            predictions = raw_output.astype(float)
+        else:
+            import tensorflow as tf
+
+            if not isinstance(raw_output, tf.Tensor):
+                logger.error(f"予期しない予測値型: {type(raw_output).__name__}")
+                return {"error": {}}
             try:
                 # raw_output が None でないことを確認 (tf_model呼び出しがNoneを返さない想定)
                 # tf_modelの呼び出し結果がNoneになるケースは現状考えにくいが、より安全にするならNoneチェック
@@ -198,8 +215,6 @@ class TensorflowBaseAnnotator(BaseAnnotator):
             except Exception as e:
                 logger.exception(f"TF テンソルの NumPy 変換中にエラー: {e}")
                 return {"error": {}}
-        elif isinstance(raw_output, np.ndarray):
-            predictions = raw_output.astype(float)
 
         # 予測値の次元をチェック
         if predictions.ndim == 2 and predictions.shape[0] == 1:
