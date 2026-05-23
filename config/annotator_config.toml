@@ -47,48 +47,56 @@ model_path = "deepghs/idolsankaku-eva02-large-tagger-v1"
 class = "WDTagger"
 estimated_size_gb = 1.695
 type = "tagger"
+capabilities = [ "tags", "ratings",]
 
 [idolsankaku-swinv2-tagger-v1]
 model_path = "deepghs/idolsankaku-swinv2-tagger-v1"
 class = "WDTagger"
 estimated_size_gb = 0.587
 type = "tagger"
+capabilities = [ "tags", "ratings",]
 
 [Z3D-E621-Convnext]
 model_path = "toynya/Z3D-E621-Convnext"
 class = "Z3D_E621Tagger"
 estimated_size_gb = 0.544
 type = "tagger"
+capabilities = [ "tags", "ratings",]
 
 [wd-v1-4-convnext-tagger-v2]
 model_path = "SmilingWolf/wd-v1-4-convnext-tagger-v2"
 class = "WDTagger"
 estimated_size_gb = 0.542
 type = "tagger"
+capabilities = [ "tags", "ratings",]
 
 [wd-v1-4-convnextv2-tagger-v2]
 model_path = "SmilingWolf/wd-v1-4-convnextv2-tagger-v2"
 class = "WDTagger"
 estimated_size_gb = 0.543
 type = "tagger"
+capabilities = [ "tags", "ratings",]
 
 [wd-v1-4-moat-tagger-v2]
 model_path = "SmilingWolf/wd-v1-4-moat-tagger-v2"
 class = "WDTagger"
 estimated_size_gb = 0.456
 type = "tagger"
+capabilities = [ "tags", "ratings",]
 
 [wd-v1-4-swinv2-tagger-v2]
 model_path = "SmilingWolf/wd-v1-4-swinv2-tagger-v2"
 class = "WDTagger"
 estimated_size_gb = 0.636
 type = "tagger"
+capabilities = [ "tags", "ratings",]
 
 [wd-vit-tagger-v3]
 model_path = "SmilingWolf/wd-vit-tagger-v3"
 class = "WDTagger"
 estimated_size_gb = 0.529
 type = "tagger"
+capabilities = [ "tags", "ratings",]
 
 [anime_rating_mobilenetv3_sce_dist]
 model_path = "deepghs/anime_rating"
@@ -119,24 +127,28 @@ model_path = "SmilingWolf/wd-convnext-tagger-v3"
 class = "WDTagger"
 estimated_size_gb = 0.552
 type = "tagger"
+capabilities = [ "tags", "ratings",]
 
 [wd-swinv2-tagger-v3]
 model_path = "SmilingWolf/wd-swinv2-tagger-v3"
 class = "WDTagger"
 estimated_size_gb = 0.653
 type = "tagger"
+capabilities = [ "tags", "ratings",]
 
 [wd-vit-large-tagger-v3]
 model_path = "SmilingWolf/wd-vit-large-tagger-v3"
 class = "WDTagger"
 estimated_size_gb = 1.761
 type = "tagger"
+capabilities = [ "tags", "ratings",]
 
 [wd-eva02-large-tagger-v3]
 model_path = "SmilingWolf/wd-eva02-large-tagger-v3"
 class = "WDTagger"
 estimated_size_gb = 1.761
 type = "tagger"
+capabilities = [ "tags", "ratings",]
 
 [BLIPLargeCaptioning]
 model_path = "Salesforce/blip-image-captioning-large"
@@ -235,3 +247,4 @@ model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v1-20
 class = "DeepDanbooruTagger"
 estimated_size_gb = 0.66
 type = "tagger"
+

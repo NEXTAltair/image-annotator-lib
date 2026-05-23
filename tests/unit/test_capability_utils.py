@@ -107,9 +107,7 @@ class TestGetModelCapabilities:
         assert capabilities == {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
 
     @patch("image_annotator_lib.core.registry.get_webapi_metadata")
-    def test_get_model_capabilities_webapi_respects_explicit_ratings(
-        self, mock_get_webapi_metadata
-    ):
+    def test_get_model_capabilities_webapi_respects_explicit_ratings(self, mock_get_webapi_metadata):
         """Issue #82: WebAPI metadata can explicitly request rating capability."""
         mock_get_webapi_metadata.return_value = {
             "api_model_id": "openai/gpt-4o",
@@ -121,3 +119,69 @@ class TestGetModelCapabilities:
         capabilities = get_model_capabilities("gpt-4o-rating")
 
         assert capabilities == {TaskCapability.TAGS, TaskCapability.RATINGS}
+
+    @patch("image_annotator_lib.core.config.config_registry")
+    def test_type_fallback_rating_capable_wd_tagger_includes_ratings(self, mock_config_registry):
+        """LoRAIro #365: type 推論フォールバックで WDTagger は RATINGS も含める。
+
+        ユーザー側 `config/annotator_config.toml` が古く `capabilities` 未指定でも、
+        `class = "WDTagger"` であれば rating output を保持する。
+        """
+        # 1回目: capabilities=[] (未設定), 2回目: type="tagger", 3回目: class="WDTagger"
+        mock_config_registry.get.side_effect = [[], "tagger", "WDTagger"]
+
+        capabilities = get_model_capabilities("wd-vit-tagger-v3")
+
+        assert capabilities == {TaskCapability.TAGS, TaskCapability.RATINGS}
+
+    @patch("image_annotator_lib.core.config.config_registry")
+    def test_type_fallback_rating_capable_z3d_tagger_includes_ratings(self, mock_config_registry):
+        """LoRAIro #365: Z3D_E621Tagger も rating 対応として扱う。"""
+        mock_config_registry.get.side_effect = [[], "tagger", "Z3D_E621Tagger"]
+
+        capabilities = get_model_capabilities("Z3D-E621-Convnext")
+
+        assert capabilities == {TaskCapability.TAGS, TaskCapability.RATINGS}
+
+    @patch("image_annotator_lib.core.config.config_registry")
+    def test_type_fallback_rating_capable_camie_tagger_includes_ratings(self, mock_config_registry):
+        """LoRAIro #365: CamieTagger も rating 対応として扱う。"""
+        mock_config_registry.get.side_effect = [[], "tagger", "CamieTagger"]
+
+        capabilities = get_model_capabilities("camie_tagger_initial")
+
+        assert capabilities == {TaskCapability.TAGS, TaskCapability.RATINGS}
+
+    @patch("image_annotator_lib.core.config.config_registry")
+    def test_type_fallback_tags_only_tagger_excludes_ratings(self, mock_config_registry):
+        """LoRAIro #365: rating 非対応 tagger (DeepDanbooruTagger) は TAGS のみ。
+
+        DeepDanbooru モデルは rating index/source_scheme を持たないので、
+        type 推論フォールバックでも RATINGS は付かない。
+        """
+        mock_config_registry.get.side_effect = [[], "tagger", "DeepDanbooruTagger"]
+
+        capabilities = get_model_capabilities("deepdanbooru-v3-20211112-sgd-e28")
+
+        assert capabilities == {TaskCapability.TAGS}
+
+    @patch("image_annotator_lib.core.config.config_registry")
+    def test_type_fallback_tagger_without_class_field_excludes_ratings(self, mock_config_registry):
+        """class フィールド未設定の tagger は TAGS のみ (安全側にフォールバック)。"""
+        mock_config_registry.get.side_effect = [[], "tagger", ""]
+
+        capabilities = get_model_capabilities("unknown-tagger")
+
+        assert capabilities == {TaskCapability.TAGS}
+
+    @patch("image_annotator_lib.core.config.config_registry")
+    def test_explicit_capabilities_override_class_based_fallback(self, mock_config_registry):
+        """明示 capabilities が指定されていれば class ベースフォールバックは適用しない。
+
+        例: WDTagger ベースだが ratings を意図的に無効化したい場合。
+        """
+        mock_config_registry.get.return_value = ["tags"]
+
+        capabilities = get_model_capabilities("wd-vit-tagger-v3-tags-only")
+
+        assert capabilities == {TaskCapability.TAGS}

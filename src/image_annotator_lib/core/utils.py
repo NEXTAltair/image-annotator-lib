@@ -320,6 +320,66 @@ def determine_effective_device(requested_device: str, model_name: str | None = N
     return actual_device
 
 
+# LoRAIro #365: Local tagger classes that emit model-native ratings in addition to tags.
+# Used as a class-name-based fallback in `get_model_capabilities` when the user-side
+# `config/annotator_config.toml` is older than the bundled template and lacks the
+# explicit `capabilities = ["tags", "ratings"]` field. The SSoT for rating output is
+# the model class itself (presence of `rating_source_scheme` / rating index extraction),
+# so we encode that knowledge here to avoid silently dropping ratings.
+#
+# Note: rating-only annotators (e.g. AnimeRatingAnnotator) are NOT listed here —
+# they always ship with explicit `capabilities = ["ratings"]` in the system template
+# and would otherwise be misclassified as TAGS+RATINGS.
+RATING_CAPABLE_TAGGER_CLASSES: frozenset[str] = frozenset(
+    {
+        "WDTagger",
+        "Z3D_E621Tagger",
+        "CamieTagger",
+    }
+)
+
+
+def _infer_capabilities_from_type(model_name: str) -> set[Any] | None:
+    """設定ファイルの `type` フィールドから capabilities を推論する。
+
+    `type == "tagger"` の場合は `class` フィールドも参照し、rating 対応モデルなら
+    `RATINGS` capability も付与する (LoRAIro #365)。ユーザー側
+    `config/annotator_config.toml` が古く `capabilities` 未指定でも、rating output
+    を落とさないためのフォールバック。
+
+    Args:
+        model_name: モデル名
+
+    Returns:
+        推論できた場合は capability set、type 未知の場合は None。
+    """
+    from .config import config_registry
+    from .types import TaskCapability
+
+    model_type = config_registry.get(model_name, "type", "")
+    type_to_capabilities: dict[str, list[TaskCapability]] = {
+        "tagger": [TaskCapability.TAGS],
+        "scorer": [TaskCapability.SCORES],
+        "captioner": [TaskCapability.CAPTIONS],
+    }
+    inferred = type_to_capabilities.get(model_type, [])
+    if not inferred:
+        return None
+
+    # LoRAIro #365: tagger クラスが rating 出力対応なら RATINGS も足す。
+    if model_type == "tagger":
+        model_class = config_registry.get(model_name, "class", "")
+        if model_class in RATING_CAPABLE_TAGGER_CLASSES:
+            inferred = [*inferred, TaskCapability.RATINGS]
+            logger.debug(
+                f"モデル '{model_name}' (class={model_class}) は rating 対応 tagger のため "
+                f"RATINGS capability を付与"
+            )
+
+    logger.debug(f"モデル '{model_name}' のcapabilitiesをtypeから推論: {model_type} -> {inferred}")
+    return set(inferred)
+
+
 def get_model_capabilities(model_name: str) -> set[Any]:
     """モデル名からcapabilitiesを取得する。
 
@@ -328,6 +388,8 @@ def get_model_capabilities(model_name: str) -> set[Any]:
            Vision LLM は tags/captions/scores 全タスクをサポートするため全 capability を返す。
         2. 設定ファイル (config_registry) の `capabilities` フィールドが明示されていればそれを使う。
         3. 設定ファイルの `type` フィールドから推論する (tagger/scorer/captioner)。
+           `type == "tagger"` の場合は `class` フィールドも参照し、ratings 対応モデルなら
+           `RATINGS` capability も付与する (LoRAIro #365)。
         4. 解決できなければ WARNING を出して空 set を返す。
 
     Args:
@@ -359,17 +421,10 @@ def get_model_capabilities(model_name: str) -> set[Any]:
     capabilities_config = config_registry.get(model_name, "capabilities", [])
 
     if not capabilities_config:
-        # フォールバック: type フィールドから推論
-        model_type = config_registry.get(model_name, "type", "")
-        type_to_capabilities: dict[str, list[TaskCapability]] = {
-            "tagger": [TaskCapability.TAGS],
-            "scorer": [TaskCapability.SCORES],
-            "captioner": [TaskCapability.CAPTIONS],
-        }
-        inferred = type_to_capabilities.get(model_type, [])
-        if inferred:
-            logger.debug(f"モデル '{model_name}' のcapabilitiesをtypeから推論: {model_type} -> {inferred}")
-            return set(inferred)
+        # 3. フォールバック: type フィールドから推論
+        inferred_capabilities = _infer_capabilities_from_type(model_name)
+        if inferred_capabilities is not None:
+            return inferred_capabilities
 
         logger.warning(f"モデル '{model_name}' のcapabilitiesが設定されていません")
         return set()
