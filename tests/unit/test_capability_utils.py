@@ -121,3 +121,48 @@ class TestGetModelCapabilities:
         capabilities = get_model_capabilities("gpt-4o-rating")
 
         assert capabilities == {TaskCapability.TAGS, TaskCapability.RATINGS}
+
+    @patch("image_annotator_lib.core.registry.get_webapi_metadata", return_value=None)
+    @patch("image_annotator_lib.core.config.config_registry")
+    def test_known_local_rating_tagger_keeps_ratings_when_old_config_has_no_capabilities(
+        self, mock_config_registry, _mock_get_webapi_metadata
+    ):
+        """Issue #365: old runtime config lacks capabilities for known rating taggers."""
+        mock_config_registry.get.side_effect = lambda _model, key, default=None: {
+            "capabilities": [],
+            "type": "tagger",
+        }.get(key, default)
+
+        capabilities = get_model_capabilities("wd-vit-tagger-v3")
+
+        assert capabilities == {TaskCapability.TAGS, TaskCapability.RATINGS}
+
+    @patch("image_annotator_lib.core.registry.get_webapi_metadata", return_value=None)
+    @patch("image_annotator_lib.core.config.config_registry")
+    def test_known_local_rating_only_model_keeps_ratings_when_old_config_has_no_capabilities(
+        self, mock_config_registry, _mock_get_webapi_metadata
+    ):
+        """Issue #365: ratings-only local models must not be inferred as tags-only."""
+        mock_config_registry.get.side_effect = lambda _model, key, default=None: {
+            "capabilities": [],
+            "type": "tagger",
+        }.get(key, default)
+
+        capabilities = get_model_capabilities("anime_rating_mobilenetv3_sce_dist")
+
+        assert capabilities == {TaskCapability.RATINGS}
+
+    @patch("image_annotator_lib.core.registry.get_webapi_metadata", return_value=None)
+    @patch("image_annotator_lib.core.config.config_registry")
+    def test_unknown_local_tagger_stays_tags_only_when_capabilities_missing(
+        self, mock_config_registry, _mock_get_webapi_metadata
+    ):
+        """Issue #365: do not promote unknown taggers to ratings capability."""
+        mock_config_registry.get.side_effect = lambda _model, key, default=None: {
+            "capabilities": [],
+            "type": "tagger",
+        }.get(key, default)
+
+        capabilities = get_model_capabilities("custom-tags-only-model")
+
+        assert capabilities == {TaskCapability.TAGS}

@@ -21,6 +21,28 @@ DEFAULT_TIMEOUT = 30
 WD_MODEL_FILENAME = "model.onnx"
 WD_LABEL_FILENAME = "selected_tags.csv"
 
+# Canonical capabilities for local models that existed before the runtime
+# config gained an explicit `capabilities` field. This keeps old user
+# config/annotator_config.toml files from falling back to `type = "tagger"`
+# and losing RATINGS support.
+_KNOWN_LOCAL_MODEL_CAPABILITIES: dict[str, tuple[str, ...]] = {
+    "idolsankaku-eva02-large-tagger-v1": ("tags", "ratings"),
+    "idolsankaku-swinv2-tagger-v1": ("tags", "ratings"),
+    "Z3D-E621-Convnext": ("tags", "ratings"),
+    "anime_rating_mobilenetv3_sce_dist": ("ratings",),
+    "anime_rating_caformer_s36_plus": ("ratings",),
+    "camie_tagger_initial": ("tags", "ratings"),
+    "wd-v1-4-convnext-tagger-v2": ("tags", "ratings"),
+    "wd-v1-4-convnextv2-tagger-v2": ("tags", "ratings"),
+    "wd-v1-4-moat-tagger-v2": ("tags", "ratings"),
+    "wd-v1-4-swinv2-tagger-v2": ("tags", "ratings"),
+    "wd-vit-tagger-v3": ("tags", "ratings"),
+    "wd-convnext-tagger-v3": ("tags", "ratings"),
+    "wd-swinv2-tagger-v3": ("tags", "ratings"),
+    "wd-vit-large-tagger-v3": ("tags", "ratings"),
+    "wd-eva02-large-tagger-v3": ("tags", "ratings"),
+}
+
 # Explicitly export logger and other public functions
 __all__ = [
     "calculate_phash",
@@ -359,6 +381,14 @@ def get_model_capabilities(model_name: str) -> set[Any]:
     capabilities_config = config_registry.get(model_name, "capabilities", [])
 
     if not capabilities_config:
+        known_capabilities = _KNOWN_LOCAL_MODEL_CAPABILITIES.get(model_name)
+        if known_capabilities is not None:
+            logger.debug(
+                f"モデル '{model_name}' のcapabilitiesを既知ローカルモデル定義から補完: "
+                f"{list(known_capabilities)}"
+            )
+            return {TaskCapability(cap) for cap in known_capabilities}
+
         # フォールバック: type フィールドから推論
         model_type = config_registry.get(model_name, "type", "")
         type_to_capabilities: dict[str, list[TaskCapability]] = {
