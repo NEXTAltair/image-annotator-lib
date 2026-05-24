@@ -6,6 +6,7 @@ from PIL import Image
 
 from image_annotator_lib.core.base.transformers import TransformersBaseAnnotator
 from image_annotator_lib.core.types import UnifiedAnnotationResult
+from image_annotator_lib.exceptions.errors import ConfigurationError
 
 
 @pytest.fixture(autouse=True)
@@ -20,13 +21,15 @@ def setup_dummy_model_config():
         "capabilities": ["tags", "captions"],
     }
     for key, value in config.items():
-        config_registry.add_default_setting("dummy-model", key, value)
+        config_registry.set_system_value("dummy-model", key, value)
 
     yield
 
     # Cleanup
     try:
-        config_registry._config.pop("dummy-model", None)
+        config_registry._system_config_data.pop("dummy-model", None)
+        config_registry._user_config_data.pop("dummy-model", None)
+        config_registry._merged_config_data.pop("dummy-model", None)
     except (AttributeError, KeyError):
         pass
 
@@ -140,7 +143,7 @@ def test_preprocess_images_no_processor():
     annotator = DummyTransformersAnnotator("dummy-model")
     if annotator.components is not None:
         annotator.components.pop("processor", None)
-    with pytest.raises(Exception):
+    with pytest.raises(ConfigurationError):
         annotator._preprocess_images([Image.new("RGB", (32, 32))])
 
 
@@ -150,7 +153,7 @@ def test_run_inference_no_model():
     if annotator.components is not None:
         annotator.components["model"] = None
     mock_tensor = MagicMock()
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError):
         annotator._run_inference([{"input_ids": mock_tensor}])
 
 
@@ -160,7 +163,7 @@ def test_format_predictions_no_processor():
     if annotator.components is not None:
         annotator.components["processor"] = None
     mock_tensor = MagicMock()
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError):
         annotator._format_predictions([mock_tensor])
 
 

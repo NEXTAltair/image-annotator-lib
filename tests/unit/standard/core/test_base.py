@@ -45,12 +45,16 @@ def setup_test_base_annotator_config():
         "class": "ConcreteAnnotator",
     }
     for key, value in config.items():
-        config_registry.add_default_setting(test_model_name, key, value)
+        config_registry.set_system_value(test_model_name, key, value)
 
     yield
 
     # Cleanup after test
     try:
+        system_data = getattr(config_registry, "_system_config_data", {})
+        system_data.pop(test_model_name, None)
+        user_data = getattr(config_registry, "_user_config_data", {})
+        user_data.pop(test_model_name, None)
         merged_data = getattr(config_registry, "_merged_config_data", {})
         merged_data.pop(test_model_name, None)
     except (AttributeError, KeyError):
@@ -87,7 +91,7 @@ def setup_test_transformers_config():
         "class": "TransformersBaseAnnotator",
     }
     for key, value in config.items():
-        config_registry.add_default_setting(test_model_name, key, value)
+        config_registry.set_system_value(test_model_name, key, value)
 
     yield
 
