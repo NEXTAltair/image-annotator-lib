@@ -10,6 +10,7 @@ from image_annotator_lib.core import config as config_module
 from image_annotator_lib.core.config import (
     ModelConfigRegistry,
     _load_config_from_file,
+    config_registry,
 )
 
 # Import shared fixtures
@@ -189,6 +190,18 @@ def test_save_user_config(registry, tmp_path):
     assert data["new_model"]["key"] == "value"
 
 
+@pytest.mark.fast
+def test_add_default_setting_does_not_modify_project_system_config():
+    """Regression test for Issue #95: test stubs must not persist to real config."""
+    project_system_config = Path("config/annotator_config.toml")
+    original_content = project_system_config.read_text(encoding="utf-8")
+
+    config_registry.add_default_setting("test_stub_model", "class", "TestOnlyAnnotator")
+
+    assert project_system_config.read_text(encoding="utf-8") == original_content
+    assert "test_stub_model" in config_registry._system_config_data
+
+
 # --- Tests for Standalone Functions ---
 
 
@@ -204,7 +217,7 @@ def test_load_config_from_file_errors(tmp_path):
         f.write("this is not toml")
 
     # It should re-raise the exception
-    with pytest.raises(Exception):
+    with pytest.raises(toml.TomlDecodeError):
         _load_config_from_file(bad_toml_path)
 
 

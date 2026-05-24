@@ -23,16 +23,15 @@ def setup_test_model_config():
         "capabilities": ["tags"],
     }
     for key, value in config.items():
-        config_registry.add_default_setting("test_model", key, value)
-
-    # Store original get_all_config for potential restoration
-    original_get_all_config = config_registry.get_all_config
+        config_registry.set_system_value("test_model", key, value)
 
     yield
 
     # Cleanup
     try:
-        config_registry._config.pop("test_model", None)
+        config_registry._system_config_data.pop("test_model", None)
+        config_registry._user_config_data.pop("test_model", None)
+        config_registry._merged_config_data.pop("test_model", None)
     except (AttributeError, KeyError):
         pass
 
@@ -397,7 +396,7 @@ class TestBaseAnnotator:
     @pytest.mark.standard
     def test_abstract_methods_not_implemented(self):
         """抽象メソッドが実装されていない場合のテスト"""
-        with patch("image_annotator_lib.core.base.annotator.config_registry") as mock_config:
+        with patch("image_annotator_lib.core.base.annotator.config_registry"):
             # BaseAnnotator を直接インスタンス化しようとするとエラーになることを確認
             with pytest.raises(TypeError):
                 BaseAnnotator("test_model")  # type: ignore

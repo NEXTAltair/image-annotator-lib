@@ -29,6 +29,61 @@ sys.path.insert(0, str(tests_dir))
 # from unit.fixtures.shared_fixtures import *
 
 
+def _remove_test_config_entries(config_registry) -> None:
+    """共有 config registry からテスト専用モデルを取り除く。"""
+    for config_store_name in (
+        "_system_config_data",
+        "_user_config_data",
+        "_merged_config_data",
+    ):
+        config_store = getattr(config_registry, config_store_name, {})
+        if isinstance(config_store, dict):
+            test_models = [k for k in config_store if "test" in k.lower() or k == "dummy-model"]
+            for model in test_models:
+                config_store.pop(model, None)
+
+
+@pytest.fixture(autouse=True)
+def isolate_system_config(monkeypatch, tmp_path):
+    """テスト中の system config 永続化先を一時ファイルに隔離する。"""
+    import copy
+
+    from image_annotator_lib.core import config as config_module
+    from image_annotator_lib.core.config import _load_config_from_file, config_registry
+
+    original_system_path = config_registry._system_config_path
+    original_user_path = config_registry._user_config_path
+    original_system_config = copy.deepcopy(config_registry._system_config_data)
+    original_user_config = copy.deepcopy(config_registry._user_config_data)
+    original_merged_config = copy.deepcopy(config_registry._merged_config_data)
+
+    isolated_system_path = tmp_path / "config" / "annotator_config.toml"
+    isolated_user_path = tmp_path / "config" / "user_config.toml"
+    isolated_system_path.parent.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        config_module,
+        "DEFAULT_PATHS",
+        {
+            **config_module.DEFAULT_PATHS,
+            "config_toml": isolated_system_path,
+            "user_config_toml": isolated_user_path,
+        },
+    )
+    config_registry._system_config_path = isolated_system_path
+    config_registry._user_config_path = isolated_user_path
+    _load_config_from_file.cache_clear()
+
+    yield
+
+    config_registry._system_config_path = original_system_path
+    config_registry._user_config_path = original_user_path
+    config_registry._system_config_data = original_system_config
+    config_registry._user_config_data = original_user_config
+    config_registry._merged_config_data = original_merged_config
+    _load_config_from_file.cache_clear()
+
+
 @pytest.fixture(autouse=True)
 def reset_global_state(request):
     """各テスト前後でグローバル状態をリセット"""
@@ -70,6 +125,7 @@ def reset_global_state(request):
                 test_models = [k for k in config_registry._config.keys() if "test" in k.lower()]
                 for model in test_models:
                     config_registry._config.pop(model, None)
+            _remove_test_config_entries(config_registry)
 
         except ImportError:
             # モジュールがまだロードされていない場合はスキップ
