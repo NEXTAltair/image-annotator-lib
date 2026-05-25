@@ -148,10 +148,32 @@ class ModelConfigRegistry:
         self._merged_config_data = copy.deepcopy(self._system_config_data)
         for model_name, user_model_config in self._user_config_data.items():
             if model_name in self._merged_config_data:
-                self._merged_config_data[model_name].update(copy.deepcopy(user_model_config))
+                merged_model_config = self._merged_config_data[model_name]
+                system_capabilities = merged_model_config.get("capabilities")
+                user_capabilities = user_model_config.get("capabilities")
+
+                merged_model_config.update(copy.deepcopy(user_model_config))
+                if system_capabilities is not None or user_capabilities is not None:
+                    merged_model_config["capabilities"] = self._merge_capabilities(
+                        system_capabilities,
+                        user_capabilities,
+                    )
             else:
                 self._merged_config_data[model_name] = copy.deepcopy(user_model_config)
         logger.debug("システム設定とユーザー設定をディープコピーでマージしました。")
+
+    @staticmethod
+    def _merge_capabilities(system_capabilities: Any, user_capabilities: Any) -> list[Any]:
+        """Merge capability declarations without letting user config remove system capabilities."""
+        merged: list[Any] = []
+        for capability_source in (system_capabilities, user_capabilities):
+            if capability_source is None:
+                continue
+            capabilities = capability_source if isinstance(capability_source, list) else [capability_source]
+            for capability in capabilities:
+                if capability not in merged:
+                    merged.append(copy.deepcopy(capability))
+        return merged
 
     def get(self, model_name: str, key: str, default: Any = None) -> Any | None:
         """指定されたモデルとキーに対応するマージ済みの設定値を取得します。"""
