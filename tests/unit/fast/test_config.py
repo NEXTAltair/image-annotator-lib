@@ -149,6 +149,94 @@ def test_merge_configs(registry):
 
 
 @pytest.mark.fast
+def test_merge_configs_unions_builtin_model_capabilities(registry):
+    """Built-in model capabilities are additive across system and user config."""
+    registry._system_config_data = {
+        "wd-vit-tagger-v3": {
+            "type": "tagger",
+            "class": "WDTagger",
+            "capabilities": ["tags", "ratings"],
+        }
+    }
+    registry._user_config_data = {
+        "wd-vit-tagger-v3": {
+            "device": "cuda:0",
+            "capabilities": ["tags"],
+        }
+    }
+
+    registry._merge_configs()
+
+    assert registry.get("wd-vit-tagger-v3", "capabilities") == ["tags", "ratings"]
+    assert registry.get("wd-vit-tagger-v3", "device") == "cuda:0"
+
+
+@pytest.mark.fast
+def test_merge_configs_adds_user_capabilities_without_dropping_system_capabilities(registry):
+    """User config may add capabilities, but cannot remove system-declared ones."""
+    registry._system_config_data = {"canonical-scorer": {"capabilities": ["scores"]}}
+    registry._user_config_data = {"canonical-scorer": {"capabilities": ["score_labels"]}}
+
+    registry._merge_configs()
+
+    assert registry.get("canonical-scorer", "capabilities") == ["scores", "score_labels"]
+
+
+@pytest.mark.fast
+def test_merge_configs_custom_model_uses_user_defined_capabilities(registry):
+    """Custom local models without a system entry keep user-defined capabilities."""
+    registry._system_config_data = {}
+    registry._user_config_data = {
+        "custom-rating-model": {
+            "type": "tagger",
+            "class": "CustomTagger",
+            "capabilities": ["ratings"],
+        }
+    }
+
+    registry._merge_configs()
+
+    assert registry.get("custom-rating-model", "capabilities") == ["ratings"]
+
+
+@pytest.mark.fast
+def test_merge_configs_keeps_user_override_for_non_capability_fields(registry):
+    """Only capabilities are unioned; other fields retain user override semantics."""
+    registry._system_config_data = {
+        "wd-vit-tagger-v3": {
+            "device": "cpu",
+            "model_path": "/system/model.onnx",
+            "capabilities": ["tags", "ratings"],
+        }
+    }
+    registry._user_config_data = {
+        "wd-vit-tagger-v3": {
+            "device": "cuda:0",
+            "capabilities": ["tags"],
+        }
+    }
+
+    registry._merge_configs()
+
+    assert registry.get("wd-vit-tagger-v3", "device") == "cuda:0"
+    assert registry.get("wd-vit-tagger-v3", "model_path") == "/system/model.onnx"
+    assert registry.get("wd-vit-tagger-v3", "capabilities") == ["tags", "ratings"]
+
+
+@pytest.mark.fast
+def test_merge_configs_capability_union_does_not_mutate_sources(registry):
+    """Capability union uses copied values and leaves source configs untouched."""
+    registry._system_config_data = {"model": {"capabilities": ["tags", "ratings"]}}
+    registry._user_config_data = {"model": {"capabilities": ["tags"]}}
+
+    registry._merge_configs()
+    registry._merged_config_data["model"]["capabilities"].append("scores")
+
+    assert registry._system_config_data["model"]["capabilities"] == ["tags", "ratings"]
+    assert registry._user_config_data["model"]["capabilities"] == ["tags"]
+
+
+@pytest.mark.fast
 def test_get_value(registry):
     """Test the get method for retrieving config values."""
     registry._merged_config_data = MOCK_MERGED_CONFIG
