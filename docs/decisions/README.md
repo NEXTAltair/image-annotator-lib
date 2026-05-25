@@ -8,6 +8,8 @@ image-annotator-lib の重要な設計判断を記録するドキュメント群
 | [0002](0002-score-model-output-contract.md) | Score Model Output Contract | 2026-05-17 | Accepted |
 | [0003](0003-rating-model-output-contract.md) | Rating Model Output Contract | 2026-05-21 | Accepted |
 | [0004](0004-onnx-tagger-loader-and-model-selection.md) | ONNX Tagger Loader and Model Selection | 2026-05-21 | Accepted |
+| [0005](0005-provider-batch-api-contract.md) | Provider Batch API Contract | 2026-05-25 | Accepted |
+| [0006](0006-annotation-outcome-contract.md) | Annotation Outcome Contract | 2026-05-25 | Accepted |
 
 ## ADR テンプレート
 
