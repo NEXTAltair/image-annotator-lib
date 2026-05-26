@@ -78,6 +78,6 @@ def mock_empty_config():
 
 
 # ADR 0023 Phase 1 (Issue #35, PR #40): `load_available_api_models` は廃止された。
-# WebAPI モデル一覧の mock は `image_annotator_lib.core.api_model_discovery.discover_available_vision_models`
+# WebAPI モデル一覧の mock は `image_annotator_lib.webapi.api_model_discovery.discover_available_vision_models`
 # を直接 monkeypatch するか、test fixture で `_register_webapi_models_from_discovery` を
 # 差し替える形で対応する。本 fixture (`mock_api_models_config`) は削除。
