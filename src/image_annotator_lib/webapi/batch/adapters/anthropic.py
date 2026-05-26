@@ -505,8 +505,21 @@ def _provider_item_error(result_type: str, result: Any) -> BatchItemError:
         phase=BatchErrorPhase.NORMALIZE,
         code=code,
         message=str(message),
-        retryable=result_type in {"errored", "expired"},
+        retryable=_provider_item_retryable(result_type, error),
     )
+
+
+def _provider_item_retryable(result_type: str, error: Any) -> bool:
+    if result_type == "expired":
+        return True
+    if result_type != "errored":
+        return False
+
+    error_type = str(_get(error, "type") or _get(error, "code") or "").lower()
+    if error_type in {"api_error", "server_error", "overloaded_error", "rate_limit_error"}:
+        return True
+    status_code = _get(error, "status_code")
+    return isinstance(status_code, int) and (status_code == 429 or status_code >= 500)
 
 
 def _extract_text(message: Any) -> str:

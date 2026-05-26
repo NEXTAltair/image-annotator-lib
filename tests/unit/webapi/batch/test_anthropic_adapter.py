@@ -283,8 +283,34 @@ def test_fetch_results_stream_normalizes_success_and_terminal_failures(
     assert success.annotation.tags == ["tag a"]
     assert result.items[0].error is not None
     assert result.items[0].error.code == "provider_item_error"
+    assert result.items[0].error.retryable is False
     assert result.items[2].provider_status is BatchProviderItemStatus.CANCELED
     assert result.items[3].provider_status is BatchProviderItemStatus.EXPIRED
+
+
+def test_fetch_results_marks_transient_provider_item_error_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_batches = FakeBatches(
+        results_stream=[
+            {
+                "custom_id": "img-1",
+                "result": {
+                    "type": "errored",
+                    "error": {"type": "server_error", "message": "try later"},
+                },
+            }
+        ]
+    )
+    install_fake_anthropic(monkeypatch, fake_batches)
+    handle = BatchJobHandle(
+        provider="anthropic", provider_job_id="msgbatch_123", api_keys={"anthropic": "k"}
+    )
+
+    result = AnthropicBatchAdapter().fetch_batch_results(handle)
+
+    assert result.items[0].error is not None
+    assert result.items[0].error.retryable is True
 
 
 def test_fetch_results_all_errored_terminal_batch_is_fetchable(
