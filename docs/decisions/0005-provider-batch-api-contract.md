@@ -107,10 +107,12 @@ image_annotator_lib/webapi/
 Batch は model implementation ではないため `model_class/` には置かない。また、既存の `core/` は WebAPI
 execution concern が肥大化しているため、新規 batch 実装では `core/provider_batch/` を作らない。
 
-既存の `core/webapi_annotator.py`、`core/provider_manager.py`、`core/model_id.py`、
+ADR 0005 accepted 時点では既存の `core/webapi_annotator.py`、`core/provider_manager.py`、`core/model_id.py`、
 `core/api_model_discovery.py`、`core/result_adapter.py`、`core/output_normalization.py`、
-`core/image_preprocess.py`、`core/http_retry.py` を `image_annotator_lib/webapi/` へ移す作業は別 issue とする。
-MVP batch 実装では既存 import path を無理に移動せず、新規 batch code だけを `webapi/batch/` に置く。
+`core/image_preprocess.py`、`core/http_retry.py` を別 issue で `image_annotator_lib/webapi/` へ移す方針だった。
+現在位置は `webapi/annotator.py`、`webapi/provider_manager.py`、`webapi/model_id.py`、
+`webapi/api_model_discovery.py`、`webapi/result_adapter.py`、`webapi/output_normalization.py`、
+`webapi/image_preprocess.py`、`webapi/http_retry.py` である。MVP batch 実装は引き続き `webapi/batch/` に置く。
 
 ### Submit DTO
 

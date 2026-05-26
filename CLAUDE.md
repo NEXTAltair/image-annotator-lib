@@ -77,7 +77,7 @@ The library follows a clean 3-layer architecture for annotators:
    - `core/base/tensorflow.py` - TensorflowBaseAnnotator
    - `core/base/clip.py` - ClipBaseAnnotator
    - `core/base/pipeline.py` - PipelineBaseAnnotator
-   - WebAPI base class (`WebApiBaseAnnotator`) は ADR 0023 Phase 1 で廃止された。WebAPI 系は `core/webapi_annotator.py:WebApiAnnotator` 単独に統合されている。
+   - WebAPI base class (`WebApiBaseAnnotator`) は ADR 0023 Phase 1 で廃止された。WebAPI 系は `webapi/annotator.py:WebApiAnnotator` 単独に統合されている。
 3. **Concrete model classes** - Specific implementations (WDTagger, AestheticScorer, etc.)
 
 ### Key Components
@@ -90,14 +90,14 @@ The library follows a clean 3-layer architecture for annotators:
 - `ModelLoad` (`core/model_factory.py`) - Model loading, caching, and memory management with LRU strategy
 - `ModelRegistry` (`core/registry.py`) - Maps model names to implementation classes (WebAPI モデルは `WebApiAnnotator` 直接登録)
 - `ModelConfigRegistry` (`core/config.py`) - Configuration management with system/user config separation
-- `WebApiAnnotator` (`core/webapi_annotator.py`) - 全 WebAPI プロバイダー (OpenAI / Anthropic / Google / OpenRouter) を統一処理する `BaseAnnotator` サブクラス。Agent / Provider / Model はキャッシュなし
-- `ProviderManager` (`core/provider_manager.py`) - LiteLLM ID から PydanticAI native provider/model を構築し推論実行 (ADR 0023 Phase 1 / async-first)
+- `WebApiAnnotator` (`webapi/annotator.py`) - 全 WebAPI プロバイダー (OpenAI / Anthropic / Google / OpenRouter) を統一処理する `BaseAnnotator` サブクラス。Agent / Provider / Model はキャッシュなし
+- `ProviderManager` (`webapi/provider_manager.py`) - LiteLLM ID から PydanticAI native provider/model を構築し推論実行 (ADR 0023 Phase 1 / async-first)
 
 **Model Categories:**
 - **Local ML Models**: ONNX, Transformers, TensorFlow, CLIP-based models
-- **Web API Models**: ADR 0023 Phase 1 で `WebApiAnnotator` (`core/webapi_annotator.py`) 1 種に統合。LiteLLM 同梱 DB から discovery され、provider 別ロジックは `provider_manager.py` 内に閉じる。
+- **Web API Models**: ADR 0023 Phase 1 で `WebApiAnnotator` (`webapi/annotator.py`) 1 種に統合。LiteLLM 同梱 DB から discovery され、provider 別ロジックは `webapi/provider_manager.py` 内に閉じる。
   - 旧 `model_class/annotator_webapi/{anthropic_api,google_api,openai_api_chat,openai_api_response,pydantic_ai_unified}.py` および `model_class/pydantic_ai_webapi_annotator.py` は Phase 1.x (Issue #35) で削除済み。
-  - WebAPI 推論で使う prompt は `model_class/annotator_webapi/webapi_shared.py:BASE_PROMPT` (`provider_manager.py` から参照)。
+  - WebAPI 推論で使う prompt は `model_class/annotator_webapi/webapi_shared.py:BASE_PROMPT` (`webapi/provider_manager.py` から参照)。
 - **Specialized Models**: DeepDanbooru taggers, aesthetic scorers, captioning models
 
 **Key Design Principles:**
@@ -131,17 +131,17 @@ The `ModelLoad` class implements sophisticated memory management:
 ### Web API Integration (ADR 0023 Phase 1 / Phase 1.x)
 
 **統一 WebAPI Architecture:**
-- `WebApiAnnotator` (`core/webapi_annotator.py`) — registry 登録 WebAPI モデル経由でインスタンス化される唯一の `BaseAnnotator` サブクラス (Issue #45 で direct LiteLLM ID dispatch 経路は廃止)
-- `ProviderManager` (`core/provider_manager.py`) — LiteLLM ID 解析 + PydanticAI native provider/model 構築 + 推論実行。`run_inference_with_model_async()` が中核実装、sync wrapper は running event loop 内で `InferenceError`
+- `WebApiAnnotator` (`webapi/annotator.py`) — registry 登録 WebAPI モデル経由でインスタンス化される唯一の `BaseAnnotator` サブクラス (Issue #45 で direct LiteLLM ID dispatch 経路は廃止)
+- `ProviderManager` (`webapi/provider_manager.py`) — LiteLLM ID 解析 + PydanticAI native provider/model 構築 + 推論実行。`run_inference_with_model_async()` が中核実装、sync wrapper は running event loop 内で `InferenceError`
 - Agent / Provider / Model はキャッシュしない (推論呼び出しごとに毎回新規作成)
 - `os.environ` mutate 禁止: API key は `api_keys: dict[str, str]` 経由で provider object に明示注入のみ
 - Capability 判定 (`supports_vision` + `supports_function_calling`) は discovery / registry 段階で完結 (Issue #45)。推論層は capability 前提で動作する
 
 **Implementation Pattern:**
 - 単一 base class `WebApiAnnotator` で OpenAI / Anthropic / Google / OpenRouter を統一処理
-- Structured output は PydanticAI default Tool Output で得る。`Agent.output_type` には `core/output_normalization.py:normalize_annotation_output` (callable) を渡し、軽微な drift (文字列 tags / 数値文字列 score 等) を `AnnotationSchema` (in `core/types.py`) validation の **前** に正規化する (Issue #47)
-- Provider 別差異 (`openrouter:` prefix 等) は `core/model_id.py` の `_BUILDER_DISPATCH` テーブルに集約
-- **API Model Discovery** (`core/api_model_discovery.py`) — LiteLLM 同梱 DB から runtime に WebAPI モデル一覧と capability metadata を取得 (TOML キャッシュなし)。絞り込み主条件は `supports_vision` + `supports_function_calling` (Issue #45)。`supports_response_schema` は判定に使わない
+- Structured output は PydanticAI default Tool Output で得る。`Agent.output_type` には `webapi/output_normalization.py:normalize_annotation_output` (callable) を渡し、軽微な drift (文字列 tags / 数値文字列 score 等) を `AnnotationSchema` (in `core/types.py`) validation の **前** に正規化する (Issue #47)
+- Provider 別差異 (`openrouter:` prefix 等) は `webapi/model_id.py` の `_BUILDER_DISPATCH` テーブルに集約
+- **API Model Discovery** (`webapi/api_model_discovery.py`) — LiteLLM 同梱 DB から runtime に WebAPI モデル一覧と capability metadata を取得 (TOML キャッシュなし)。絞り込み主条件は `supports_vision` + `supports_function_calling` (Issue #45)。`supports_response_schema` は判定に使わない
 - WebAPI モデル登録は `core/registry.py:_register_webapi_models_from_discovery()` が `WebApiAnnotator` を直接 registry に entry する (旧 `PydanticAIWebAPIAnnotator` 経由は Phase 1.x で廃止)
 
 ### Test Architecture
@@ -189,8 +189,8 @@ estimated_size_gb = 1.5
 
 **Adding New Models:**
 1. **ローカル ML モデル**: 適切な framework base class (`TransformersBaseAnnotator` / `ONNXBaseAnnotator` / 等) を継承して実装
-2. **WebAPI モデル**: 通常は `WebApiAnnotator` (`core/webapi_annotator.py`) で自動対応される。LiteLLM 同梱 DB に登録された vision + function_calling 対応モデルは `_register_webapi_models_from_discovery()` が起動時に自動 registry 登録する。LoRAIro 側からは `model_name_list=["openai/gpt-4o", ...]` のように **registry に登録された** LiteLLM ID slash 形式を渡せる (Issue #45: registry 未登録の任意 ID 直接呼び出しは廃止)。
-3. **新 provider 対応**: `core/model_id.py:_BUILDER_DISPATCH` テーブルに provider 別 builder を追加するだけで完結 (allowlist 編集不要)
+2. **WebAPI モデル**: 通常は `WebApiAnnotator` (`webapi/annotator.py`) で自動対応される。LiteLLM 同梱 DB に登録された vision + function_calling 対応モデルは `_register_webapi_models_from_discovery()` が起動時に自動 registry 登録する。LoRAIro 側からは `model_name_list=["openai/gpt-4o", ...]` のように **registry に登録された** LiteLLM ID slash 形式を渡せる (Issue #45: registry 未登録の任意 ID 直接呼び出しは廃止)。
+3. **新 provider 対応**: `webapi/model_id.py:_BUILDER_DISPATCH` テーブルに provider 別 builder を追加するだけで完結 (allowlist 編集不要)
 4. Add corresponding test in appropriate test directory
 
 **Code Style:**
@@ -213,10 +213,10 @@ estimated_size_gb = 1.5
 **PydanticAI-Specific Guidelines:**
 - WebAPI 推論は `provider_manager.run_inference_with_model_async()` 経由で実行 (Agent / Provider / Model はキャッシュなし、毎回新規作成)
 - API key は `api_keys: dict[str, str]` 経由で provider object に明示注入 (`os.environ` mutate 禁止)
-- 画像入力は `core/image_preprocess.preprocess_images_to_binary()` で `BinaryContent` 化
+- 画像入力は `webapi/image_preprocess.preprocess_images_to_binary()` で `BinaryContent` 化
 - Structured output は `await agent.run([prompt_text, binary_content])` の sequence 形式
-- `Agent.output_type` は `core/output_normalization.py:normalize_annotation_output` (callable) — PydanticAI が tool として LLM に公開し、関数の docstring が tool description として使われる。`AnnotationSchema` 直指定ではなく callable 経路を採る (Issue #47: validation 前正規化を集約)
-- HTTP/API transient failure retry は `core/http_retry.py:build_retry_http_client()` で生成した `httpx.AsyncClient` を `build_pydantic_model(..., http_client=client)` 経由で provider object に注入する。AsyncClient は推論呼び出しごとに新規生成して `await client.aclose()` で破棄する (Issue #46: ADR 0023 Phase 1.8)
+- `Agent.output_type` は `webapi/output_normalization.py:normalize_annotation_output` (callable) — PydanticAI が tool として LLM に公開し、関数の docstring が tool description として使われる。`AnnotationSchema` 直指定ではなく callable 経路を採る (Issue #47: validation 前正規化を集約)
+- HTTP/API transient failure retry は `webapi/http_retry.py:build_retry_http_client()` で生成した `httpx.AsyncClient` を `build_pydantic_model(..., http_client=client)` 経由で provider object に注入する。AsyncClient は推論呼び出しごとに新規生成して `await client.aclose()` で破棄する (Issue #46: ADR 0023 Phase 1.8)
 
 ### WebAPI Inference Architecture (ADR 0023 Phase 1)
 
@@ -238,55 +238,55 @@ estimated_size_gb = 1.5
 |---|---|
 | WebAPI モデル discovery / capability metadata | LiteLLM 同梱 DB (runtime call、TOML キャッシュなし) |
 | 推論実行 / multimodal input / structured output / output retry | PydanticAI native provider/model |
-| HTTP/API transient failure retry (transport 層) | `core/http_retry.py` (Phase 1.8 / Issue #46) |
-| LiteLLM ID と PydanticAI 実行 descriptor の mapping | `core/model_id.py` |
-| 軽微正規化 (validation 前 / Issue #47) | `core/output_normalization.py` |
-| Schema → Result 変換 (validation 後) | `core/result_adapter.py` |
-| PIL Image → BinaryContent 変換 | `core/image_preprocess.py` |
-| BaseAnnotator wrapping (registry 登録 WebAPI モデル) | `core/webapi_annotator.py` |
-| Agent 構築・実行 (キャッシュなし) | `core/provider_manager.py` |
+| HTTP/API transient failure retry (transport 層) | `webapi/http_retry.py` (Phase 1.8 / Issue #46) |
+| LiteLLM ID と PydanticAI 実行 descriptor の mapping | `webapi/model_id.py` |
+| 軽微正規化 (validation 前 / Issue #47) | `webapi/output_normalization.py` |
+| Schema → Result 変換 (validation 後) | `webapi/result_adapter.py` |
+| PIL Image → BinaryContent 変換 | `webapi/image_preprocess.py` |
+| BaseAnnotator wrapping (registry 登録 WebAPI モデル) | `webapi/annotator.py` |
+| Agent 構築・実行 (キャッシュなし) | `webapi/provider_manager.py` |
 
 **主要コンポーネント:**
 
-1. **`core/model_id.py`** — LiteLLM ID から `PydanticAIModelRef` への変換 + provider object 構築
+1. **`webapi/model_id.py`** — LiteLLM ID から `PydanticAIModelRef` への変換 + provider object 構築
    - `_BUILDER_DISPATCH` テーブルが `SUPPORTED_PROVIDERS` の真の source
    - Phase 1 対応: OpenAI / Anthropic / Google (Gemini alias) / OpenRouter
    - 未知 provider は `UnknownProviderError` で fail-fast
    - API key は provider object に明示注入 (`os.environ` mutate なし)
 
-2. **`core/provider_manager.py`** — 推論実行の中核
+2. **`webapi/provider_manager.py`** — 推論実行の中核
    - `run_inference_with_model_async()`: async core 実装
    - `run_inference_with_model()`: sync wrapper (running event loop 内では明示エラー)
    - 推論呼び出しごとに Agent / Provider / Model を新規作成 (キャッシュなし)
    - Capability check は不要 (Issue #45 で discovery 段階に集約済み)
    - PydanticAI: `await agent.run([prompt_text, binary_content])` の sequence 形式
-   - `Agent.output_type` には `core/output_normalization.py:normalize_annotation_output` (callable) を渡す (Issue #47)
+   - `Agent.output_type` には `webapi/output_normalization.py:normalize_annotation_output` (callable) を渡す (Issue #47)
    - `output_retries=1` で **output normalization / schema validation failure を 1 回再生成** (`ModelRetry` 経由)
-   - `core/http_retry.build_retry_http_client()` で `httpx.AsyncClient` を毎回新規生成し `try/finally` で `aclose()` (Issue #46)
+   - `webapi/http_retry.build_retry_http_client()` で `httpx.AsyncClient` を毎回新規生成し `try/finally` で `aclose()` (Issue #46)
 
-3. **`core/output_normalization.py`** — PydanticAI output function による軽微正規化 (Issue #47)
+3. **`webapi/output_normalization.py`** — PydanticAI output function による軽微正規化 (Issue #47)
    - `normalize_annotation_output(tags, captions, score) -> AnnotationSchema`
    - `tags=str` (カンマ分割) / `captions=str` / `score=numeric_string` / trim / drop empty を validation 前に補正
    - 補正不能 (None / dict / list 内非文字列 等) は `ModelRetry` を raise
    - 壊れた JSON 修復 / free text からの regex 復元 / provider 別 parser は実装しない
 
-4. **`core/result_adapter.py`** — 検証済み schema → 結果変換 (Phase 1.7 / Issue #47)
+4. **`webapi/result_adapter.py`** — 検証済み schema → 結果変換 (Phase 1.7 / Issue #47)
    - `to_annotation_result(schema_output, phash, error)`: 検証済み `AnnotationSchema` → `AnnotationResult` 変換
-   - 最終防衛 trim/drop empty のみ残す (主経路は `core/output_normalization.py` 側)
+   - 最終防衛 trim/drop empty のみ残す (主経路は `webapi/output_normalization.py` 側)
 
-5. **`core/http_retry.py`** — HTTP transport retry policy (Phase 1.8 / Issue #46)
+5. **`webapi/http_retry.py`** — HTTP transport retry policy (Phase 1.8 / Issue #46)
    - `build_retry_transport()` / `build_retry_http_client()`: PydanticAI `AsyncTenacityTransport` を組み込んだ async transport / client を返す
    - `RETRYABLE_HTTP_STATUSES = {408, 409, 429, 500, 502, 503, 504}` + 主要 network 例外 (`httpx.TimeoutException` 階層 = `ConnectTimeout` / `ReadTimeout` / `WriteTimeout` / `PoolTimeout` / `httpx.ConnectError` / `httpx.RemoteProtocolError`) を retry
    - `HTTP_RETRY_MAX_ATTEMPTS = 3` (initial + 2 retries) / `HTTP_RETRY_MAX_WAIT_SECONDS = 60.0` (provider token-bucket window 想定、ADR 0023 Phase 1.8 補遺で根拠を明記)
    - `Retry-After` ヘッダを `wait_retry_after(max_wait=60)` で尊重 (cap-only、halt-on-exceed は Phase 2)
    - model fallback / LiteLLM Router retry は採用しない (ADR 0023 line 313-314)
 
-6. **`core/webapi_annotator.py`** — `BaseAnnotator` 継承の汎用 wrapper
+6. **`webapi/annotator.py`** — `BaseAnnotator` 継承の汎用 wrapper
    - registry 登録 WebAPI モデル経由でインスタンス化される (Issue #45 で direct LiteLLM ID dispatch 経路は廃止)
    - `BaseAnnotator.__init__` の `config_registry` 依存を回避するため最小限の field 設定
    - `__enter__` / `__exit__` は no-op
 
-7. **`core/api_model_discovery.py`** — LiteLLM 同梱 DB の runtime query
+7. **`webapi/api_model_discovery.py`** — LiteLLM 同梱 DB の runtime query
    - `discover_available_vision_models()` → `{"models": [...], "metadata": {...}}`
    - `get_available_models()` / `list_all_models()` / `is_model_deprecated()` を helper として公開
    - 旧 `available_api_models.toml` キャッシュ / TTL refresh / OpenRouter fallback は廃止
