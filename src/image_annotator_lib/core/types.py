@@ -79,7 +79,7 @@ class TagConfidence(TypedDict):
 # --- Web API 関連の型定義 ---
 #
 # ADR 0023 Phase 1 (Issue #35, PR #40): 旧 `WebApiBaseAnnotator` 系の dead types は
-# 全て削除された。WebAPI 系の type は `WebApiAnnotator` (`core/webapi_annotator.py`)
+# 全て削除された。WebAPI 系の type は `WebApiAnnotator` (`webapi/annotator.py`)
 # が直接 `UnifiedAnnotationResult` を構築するため、独立した type を必要としない。
 #
 # 削除済み:

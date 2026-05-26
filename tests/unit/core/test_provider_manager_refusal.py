@@ -8,11 +8,11 @@ from typing import Any
 
 import pytest
 
-from image_annotator_lib.core.provider_manager import _classify_refusal
 from image_annotator_lib.exceptions.errors import (
     ContentPolicyRefusalError,
     SafetyRefusalError,
 )
+from image_annotator_lib.webapi.provider_manager import _classify_refusal
 
 
 @pytest.mark.unit
@@ -502,7 +502,7 @@ def test_classify_refusal_body_content_filter_precedence_when_filter_first():
 @pytest.mark.unit
 def test_classify_refusal_body_walker_collects_all_reasons():
     """`_walk_for_reasons` が複数 reason を全て収集することの直接確認。"""
-    from image_annotator_lib.core.provider_manager import _walk_for_reasons
+    from image_annotator_lib.webapi.provider_manager import _walk_for_reasons
 
     body = {
         "stop_reason": "refusal",

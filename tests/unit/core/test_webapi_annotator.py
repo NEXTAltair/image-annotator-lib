@@ -1,4 +1,4 @@
-"""ADR 0023 Phase 1: core/webapi_annotator.py の unit test."""
+"""ADR 0023 Phase 1: webapi/annotator.py の unit test."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import pytest
 
 from image_annotator_lib.core import utils
 from image_annotator_lib.core.types import TaskCapability
-from image_annotator_lib.core.webapi_annotator import WebApiAnnotator
+from image_annotator_lib.webapi.annotator import WebApiAnnotator
 
 
 class TestWebApiAnnotatorBasics:

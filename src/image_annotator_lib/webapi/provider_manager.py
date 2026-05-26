@@ -17,6 +17,8 @@ from typing import Any
 from PIL import Image
 from pydantic_ai import Agent
 
+from ..core.types import AnnotationResult, TaskCapability
+from ..core.utils import calculate_phash, logger
 from ..exceptions.errors import (
     ContentPolicyRefusalError,
     InferenceError,
@@ -24,13 +26,11 @@ from ..exceptions.errors import (
     SafetyRefusalError,
 )
 from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
-from ..webapi.http_retry import build_retry_http_client
-from ..webapi.image_preprocess import preprocess_images_to_binary
-from ..webapi.model_id import build_pydantic_model, resolve_model_ref
-from ..webapi.output_normalization import build_annotation_output_normalizer
-from ..webapi.result_adapter import to_annotation_result
-from .types import AnnotationResult, TaskCapability
-from .utils import calculate_phash, logger
+from .http_retry import build_retry_http_client
+from .image_preprocess import preprocess_images_to_binary
+from .model_id import build_pydantic_model, resolve_model_ref
+from .output_normalization import build_annotation_output_normalizer
+from .result_adapter import to_annotation_result
 
 # ADR 0023 retry policy:
 # - output normalization / schema validation failure: PydanticAI `output_retries=1` で 1 回再生成

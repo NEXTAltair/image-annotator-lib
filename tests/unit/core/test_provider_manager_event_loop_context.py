@@ -19,8 +19,8 @@ import asyncio
 import pytest
 from PIL import Image
 
-from image_annotator_lib.core.provider_manager import ProviderManager
 from image_annotator_lib.exceptions.errors import InferenceError
+from image_annotator_lib.webapi.provider_manager import ProviderManager
 
 
 class _FakeRateLimitError(Exception):

@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from image_annotator_lib.core import annotation_runner
-from image_annotator_lib.core.webapi_annotator import WebApiAnnotator
+from image_annotator_lib.webapi.annotator import WebApiAnnotator
 
 
 class _StubLocalAnnotator:

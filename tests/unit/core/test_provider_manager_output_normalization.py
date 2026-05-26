@@ -6,8 +6,8 @@ from PIL import Image
 from pydantic_ai import Agent
 from pydantic_ai.models.test import TestModel
 
-from image_annotator_lib.core.provider_manager import ProviderManager
 from image_annotator_lib.webapi.output_normalization import normalize_annotation_output
+from image_annotator_lib.webapi.provider_manager import ProviderManager
 
 
 def test_provider_manager_returns_normalized_annotation_result() -> None:
