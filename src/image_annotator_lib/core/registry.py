@@ -234,7 +234,7 @@ def _try_register_model(
 
     if model_name in registry:
         if registry[model_name] is model_cls:
-            logger.debug(f"モデル名 '{model_name}' は既に登録されています（同一クラス）。スキップします。")
+            logger.debug(f"モデル名 '{model_name}' は既に登録されています(同一クラス)。スキップします。")
             return True
         logger.warning(
             f"モデル名 '{model_name}' は既に登録されています。クラス '{model_cls.__name__}' で上書きします。"
@@ -696,7 +696,7 @@ def _register_webapi_models_from_discovery() -> None:
     """
     logger.debug("LiteLLM 同梱 DB から WebAPI モデルの直接登録を開始します...")
     try:
-        from .api_model_discovery import discover_available_vision_models
+        from ..webapi.api_model_discovery import discover_available_vision_models
         from .webapi_annotator import WebApiAnnotator
 
         result = discover_available_vision_models()

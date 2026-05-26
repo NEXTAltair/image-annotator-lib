@@ -10,11 +10,12 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from image_annotator_lib.core.api_model_discovery import (
+from image_annotator_lib.webapi.api_model_discovery import (
     _canonicalize_litellm_id,
     _collect_models,
     _format_litellm_metadata,
@@ -323,7 +324,7 @@ class TestCollectModelsPassesProviderToGetModelInfo:
     get_model_info() には custom_llm_provider を明示して provider 推論経路に入らない。
     """
 
-    _COMPAT_INFO: dict = {
+    _COMPAT_INFO: ClassVar[dict] = {
         "litellm_provider": "openai",
         "supports_vision": True,
         "supports_function_calling": True,
@@ -340,7 +341,7 @@ class TestCollectModelsPassesProviderToGetModelInfo:
         mock_cost = {"ft:o4-mini-2025-04-16": self._COMPAT_INFO}
         mock_info = MagicMock(return_value=dict(self._COMPAT_INFO))
 
-        with patch("image_annotator_lib.core.api_model_discovery.litellm") as mock_litellm:
+        with patch("image_annotator_lib.webapi.api_model_discovery.litellm") as mock_litellm:
             mock_litellm.model_cost = mock_cost
             mock_litellm.get_model_info = mock_info
             _collect_models(require_compatible=False, exclude_deprecated=False)
@@ -354,7 +355,7 @@ class TestCollectModelsPassesProviderToGetModelInfo:
         mock_cost = {"gemini-2.0-flash-exp-image-generation": info}
         mock_info = MagicMock(return_value=info)
 
-        with patch("image_annotator_lib.core.api_model_discovery.litellm") as mock_litellm:
+        with patch("image_annotator_lib.webapi.api_model_discovery.litellm") as mock_litellm:
             mock_litellm.model_cost = mock_cost
             mock_litellm.get_model_info = mock_info
             _collect_models(require_compatible=False, exclude_deprecated=False)
@@ -379,7 +380,7 @@ class TestIsModelDeprecatedPassesProviderToGetModelInfo:
         }
         mock_info = MagicMock(return_value=info)
 
-        with patch("image_annotator_lib.core.api_model_discovery.litellm") as mock_litellm:
+        with patch("image_annotator_lib.webapi.api_model_discovery.litellm") as mock_litellm:
             mock_litellm.model_cost = {"ft:o4-mini-2025-04-16": info}
             mock_litellm.get_model_info = mock_info
             is_model_deprecated("ft:o4-mini-2025-04-16")

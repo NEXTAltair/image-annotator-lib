@@ -19,17 +19,17 @@ from unittest.mock import patch
 import pytest
 
 from image_annotator_lib.core import registry
-from image_annotator_lib.core.api_model_discovery import _is_litellm_model_annotation_compatible
 from image_annotator_lib.core.config import get_config_registry
 from image_annotator_lib.core.registry import (
     _register_webapi_models_from_discovery,
     get_webapi_metadata,
 )
+from image_annotator_lib.webapi.api_model_discovery import _is_litellm_model_annotation_compatible
 
 # `_register_webapi_models_from_discovery` は関数内で
-# `from .api_model_discovery import discover_available_vision_models` する。
+# `from ..webapi.api_model_discovery import discover_available_vision_models` する。
 # patch は定義元モジュールを対象にする。
-_DISCOVERY_PATCH_TARGET = "image_annotator_lib.core.api_model_discovery.discover_available_vision_models"
+_DISCOVERY_PATCH_TARGET = "image_annotator_lib.webapi.api_model_discovery.discover_available_vision_models"
 
 
 def _model_info(model_short: str, provider: str) -> dict:

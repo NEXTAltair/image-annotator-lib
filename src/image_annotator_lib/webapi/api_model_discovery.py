@@ -19,8 +19,8 @@ os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 import litellm
 
-from ..webapi.model_id import SUPPORTED_PROVIDERS
-from .utils import logger
+from ..core.utils import logger
+from .model_id import SUPPORTED_PROVIDERS
 
 _SUPPORTED_LITELLM_MODES: frozenset[str] = frozenset({"chat", "responses"})
 

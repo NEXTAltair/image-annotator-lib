@@ -24,7 +24,7 @@ USER_CONFIG_PATH = CONFIG_DIR / "user_config.toml"
 MODEL_RUNTIME_CACHE_PATH = CONFIG_DIR / "model_runtime_cache.toml"
 
 # ADR 0023 Phase 1 (Issue #35, PR #40): `AVAILABLE_API_MODELS_CONFIG_PATH` 定数は廃止。
-# WebAPI モデル一覧は `core/api_model_discovery.py` で LiteLLM 同梱 DB から runtime
+# WebAPI モデル一覧は `webapi/api_model_discovery.py` で LiteLLM 同梱 DB から runtime
 # 取得する (TOML キャッシュなし)。
 
 DEFAULT_PATHS = {
