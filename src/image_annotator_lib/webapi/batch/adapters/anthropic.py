@@ -36,6 +36,7 @@ _MAX_LIBRARY_ITEMS = 500
 _MAX_ANTHROPIC_BODY_BYTES = 256 * 1024 * 1024
 _DEFAULT_MAX_TOKENS = 1800
 _CUSTOM_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+_SUPPORTED_PROMPT_PROFILES = frozenset({"default"})
 _CAPABILITIES = frozenset(
     {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES, TaskCapability.RATINGS}
 )
@@ -76,6 +77,14 @@ class AnthropicBatchAdapter:
                 None,
                 "too_many_items",
                 f"Batch contains {len(request.items)} items; maximum is {_MAX_LIBRARY_ITEMS}",
+                retryable=False,
+            )
+        if request.prompt_profile not in _SUPPORTED_PROMPT_PROFILES:
+            raise self._job_error(
+                BatchErrorPhase.PREPARE,
+                None,
+                "unsupported_prompt_profile",
+                f"Unsupported Anthropic batch prompt_profile: {request.prompt_profile}",
                 retryable=False,
             )
 
@@ -132,7 +141,12 @@ class AnthropicBatchAdapter:
 
     def fetch_batch_results(self, handle: BatchJobHandle) -> BatchFetchResult:
         status = self._retrieve_status(handle, phase=BatchErrorPhase.DOWNLOAD)
-        if status.status not in {BatchStatus.COMPLETED, BatchStatus.CANCELED, BatchStatus.EXPIRED}:
+        if status.status not in {
+            BatchStatus.COMPLETED,
+            BatchStatus.FAILED,
+            BatchStatus.CANCELED,
+            BatchStatus.EXPIRED,
+        }:
             raise self._job_error(
                 BatchErrorPhase.DOWNLOAD,
                 handle.provider_job_id,
@@ -191,7 +205,16 @@ class AnthropicBatchAdapter:
     def _build_requests(
         self, litellm_model_id: str, items: list[PreparedBatchItem]
     ) -> list[dict[str, Any]]:
-        ref = resolve_model_ref(litellm_model_id)
+        try:
+            ref = resolve_model_ref(litellm_model_id)
+        except Exception as exc:
+            raise self._job_error(
+                BatchErrorPhase.PREPARE,
+                None,
+                "invalid_model_id",
+                self._format_exception(exc),
+                retryable=False,
+            ) from exc
         if ref.provider != _PROVIDER:
             raise self._job_error(
                 BatchErrorPhase.PREPARE,
@@ -203,7 +226,17 @@ class AnthropicBatchAdapter:
 
         requests: list[dict[str, Any]] = []
         for item in items:
-            encoded = base64.b64encode(item.image_path.read_bytes()).decode("ascii")
+            try:
+                image_bytes = item.image_path.read_bytes()
+            except OSError as exc:
+                raise self._job_error(
+                    BatchErrorPhase.PREPARE,
+                    None,
+                    "image_read_failed",
+                    self._format_exception(exc),
+                    retryable=False,
+                ) from exc
+            encoded = base64.b64encode(image_bytes).decode("ascii")
             requests.append(
                 {
                     "custom_id": item.custom_id,

@@ -167,6 +167,58 @@ def test_submit_rejects_payload_too_large(tmp_path: Path, monkeypatch: pytest.Mo
     assert exc_info.value.code == "payload_too_large"
 
 
+def test_submit_rejects_unsupported_prompt_profile(tmp_path: Path) -> None:
+    request = make_request(tmp_path)
+    request = BatchSubmitRequest(
+        provider=request.provider,
+        endpoint=request.endpoint,
+        litellm_model_id=request.litellm_model_id,
+        prompt_profile="alternate",
+        description=request.description,
+        api_keys=request.api_keys,
+        items=request.items,
+    )
+
+    with pytest.raises(BatchJobError) as exc_info:
+        AnthropicBatchAdapter().submit_batch(request)
+
+    assert exc_info.value.code == "unsupported_prompt_profile"
+
+
+def test_submit_wraps_invalid_model_id(tmp_path: Path) -> None:
+    request = make_request(tmp_path)
+    request = BatchSubmitRequest(
+        provider=request.provider,
+        endpoint=request.endpoint,
+        litellm_model_id="not-a-litellm-id",
+        prompt_profile=request.prompt_profile,
+        description=request.description,
+        api_keys=request.api_keys,
+        items=request.items,
+    )
+
+    with pytest.raises(BatchJobError) as exc_info:
+        AnthropicBatchAdapter().submit_batch(request)
+
+    assert exc_info.value.phase is BatchErrorPhase.PREPARE
+    assert exc_info.value.code == "invalid_model_id"
+
+
+def test_submit_wraps_image_read_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    request = make_request(tmp_path)
+
+    def fail_read_bytes(self: Path) -> bytes:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(Path, "read_bytes", fail_read_bytes)
+
+    with pytest.raises(BatchJobError) as exc_info:
+        AnthropicBatchAdapter().submit_batch(request)
+
+    assert exc_info.value.phase is BatchErrorPhase.PREPARE
+    assert exc_info.value.code == "image_read_failed"
+
+
 def test_retrieve_and_cancel_normalize_status(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_batches = FakeBatches()
     install_fake_anthropic(monkeypatch, fake_batches)
@@ -233,6 +285,43 @@ def test_fetch_results_stream_normalizes_success_and_terminal_failures(
     assert result.items[0].error.code == "provider_item_error"
     assert result.items[2].provider_status is BatchProviderItemStatus.CANCELED
     assert result.items[3].provider_status is BatchProviderItemStatus.EXPIRED
+
+
+def test_fetch_results_all_errored_terminal_batch_is_fetchable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class AllErroredBatches(FakeBatches):
+        def retrieve(self, batch_id: str):
+            return {
+                "id": batch_id,
+                "processing_status": "ended",
+                "request_counts": {
+                    "processing": 0,
+                    "succeeded": 0,
+                    "errored": 1,
+                    "canceled": 0,
+                    "expired": 0,
+                },
+            }
+
+    fake_batches = AllErroredBatches(
+        results_stream=[
+            {
+                "custom_id": "img-1",
+                "result": {"type": "errored", "error": {"message": "bad request"}},
+            }
+        ]
+    )
+    install_fake_anthropic(monkeypatch, fake_batches)
+    handle = BatchJobHandle(
+        provider="anthropic", provider_job_id="msgbatch_123", api_keys={"anthropic": "k"}
+    )
+
+    result = AnthropicBatchAdapter().fetch_batch_results(handle)
+
+    assert result.status is BatchStatus.FAILED
+    assert result.items[0].error is not None
+    assert result.items[0].error.code == "provider_item_error"
 
 
 def test_fetch_results_maps_refusal_to_item_error(monkeypatch: pytest.MonkeyPatch) -> None:
