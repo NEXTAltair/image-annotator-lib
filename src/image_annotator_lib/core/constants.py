@@ -20,6 +20,8 @@ CACHE_DIR = PROJECT_ROOT / "models"
 SYSTEM_CONFIG_PATH = CONFIG_DIR / "annotator_config.toml"
 # ユーザー設定ファイルのパス (プロジェクトルート/config/user_config.toml)
 USER_CONFIG_PATH = CONFIG_DIR / "user_config.toml"
+# Runtime-derived model metadata cache (deletable local state)
+MODEL_RUNTIME_CACHE_PATH = CONFIG_DIR / "model_runtime_cache.toml"
 
 # ADR 0023 Phase 1 (Issue #35, PR #40): `AVAILABLE_API_MODELS_CONFIG_PATH` 定数は廃止。
 # WebAPI モデル一覧は `core/api_model_discovery.py` で LiteLLM 同梱 DB から runtime
@@ -28,6 +30,7 @@ USER_CONFIG_PATH = CONFIG_DIR / "user_config.toml"
 DEFAULT_PATHS = {
     "config_toml": SYSTEM_CONFIG_PATH,  # プロジェクト config
     "user_config_toml": USER_CONFIG_PATH,  # プロジェクト config
+    "model_runtime_cache_toml": MODEL_RUNTIME_CACHE_PATH,  # プロジェクト runtime state
     "log_file": LOG_DIR / "image-annotator-lib.log",  # プロジェクト logs
     "cache_dir": CACHE_DIR,  # プロジェクト models
 }

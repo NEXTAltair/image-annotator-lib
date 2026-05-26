@@ -102,10 +102,14 @@ def test_get_model_size_from_config_not_found(mock_config_registry):
 @pytest.mark.unit
 @patch("image_annotator_lib.core.loaders.loader_base.config_registry")
 def test_save_size_to_config(mock_config_registry):
-    """計算したモデルサイズを config に保存するテスト"""
+    """計算したモデルサイズを runtime cache に保存するテスト"""
     ModelLoad._save_size_to_config("test_model", 2048)  # 2GB
-    mock_config_registry.set_system_value.assert_called_once_with("test_model", "estimated_size_gb", 2.0)
-    mock_config_registry.save_system_config.assert_called_once()
+    mock_config_registry.set_runtime_cache_value.assert_called_once_with(
+        "test_model", "estimated_size_gb", 2.0
+    )
+    mock_config_registry.save_runtime_cache.assert_called_once()
+    mock_config_registry.set_system_value.assert_not_called()
+    mock_config_registry.save_system_config.assert_not_called()
 
 
 # --- Error Handling ---

@@ -845,7 +845,7 @@ def test_calculate_transformer_size_mb_error():
 @pytest.mark.unit
 @pytest.mark.fast
 def test_save_size_to_config_success():
-    """Test saving calculated size to config."""
+    """Test saving calculated size to runtime cache."""
     model_name = "test-model"
     size_mb = 2048.0  # 2GB
     expected_size_gb = 2.0
@@ -853,10 +853,12 @@ def test_save_size_to_config_success():
     with patch("image_annotator_lib.core.loaders.loader_base.config_registry") as mock_config:
         ModelLoad._save_size_to_config(model_name, size_mb)
 
-        mock_config.set_system_value.assert_called_once_with(
+        mock_config.set_runtime_cache_value.assert_called_once_with(
             model_name, "estimated_size_gb", expected_size_gb
         )
-        mock_config.save_system_config.assert_called_once()
+        mock_config.save_runtime_cache.assert_called_once()
+        mock_config.set_system_value.assert_not_called()
+        mock_config.save_system_config.assert_not_called()
 
 
 @pytest.mark.unit
@@ -869,6 +871,8 @@ def test_save_size_to_config_zero_size():
     with patch("image_annotator_lib.core.loaders.loader_base.config_registry") as mock_config:
         ModelLoad._save_size_to_config(model_name, size_mb)
 
+        mock_config.set_runtime_cache_value.assert_not_called()
+        mock_config.save_runtime_cache.assert_not_called()
         mock_config.set_system_value.assert_not_called()
         mock_config.save_system_config.assert_not_called()
 

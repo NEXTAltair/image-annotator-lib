@@ -220,16 +220,18 @@ class LoaderBase(ABC):
 
     @staticmethod
     def _save_size_to_config(model_name: str, size_mb: float) -> None:
-        """計算されたサイズを MB 単位で Config に保存する。"""
+        """計算されたサイズを MB 単位で runtime cache に保存する。"""
         if size_mb <= 0:
             return
         try:
             size_gb = size_mb / 1024
-            config_registry.set_system_value(model_name, "estimated_size_gb", round(size_gb, 3))
-            config_registry.save_system_config()
-            logger.debug(f"モデル '{model_name}' 計算サイズ ({size_gb:.3f}GB) をシステム設定に保存。")
+            config_registry.set_runtime_cache_value(
+                model_name, "estimated_size_gb", round(size_gb, 3)
+            )
+            config_registry.save_runtime_cache()
+            logger.debug(f"モデル '{model_name}' 計算サイズ ({size_gb:.3f}GB) を runtime cache に保存。")
         except Exception as e:
-            logger.error(f"モデル '{model_name}' サイズのシステム設定保存中にエラー: {e}", exc_info=True)
+            logger.error(f"モデル '{model_name}' サイズの runtime cache 保存中にエラー: {e}", exc_info=True)
 
     @classmethod
     def _get_or_calculate_size(

@@ -39,10 +39,12 @@ def registry():
 def tmp_config_paths(tmp_path):
     """Create temporary config paths for testing."""
     system_path = tmp_path / "system" / "annotator_config.toml"
+    runtime_cache_path = tmp_path / "runtime" / "model_runtime_cache.toml"
     user_path = tmp_path / "user" / "user_config.toml"
     system_path.parent.mkdir()
+    runtime_cache_path.parent.mkdir()
     user_path.parent.mkdir()
-    return system_path, user_path
+    return system_path, runtime_cache_path, user_path
 
 
 # --- Tests for ModelConfigRegistry ---
@@ -52,6 +54,7 @@ def tmp_config_paths(tmp_path):
 def test_registry_init(registry):
     """Test that the registry initializes with empty dicts."""
     assert registry._system_config_data == {}
+    assert registry._runtime_cache_data == {}
     assert registry._user_config_data == {}
     assert registry._merged_config_data == {}
 
@@ -62,19 +65,27 @@ def test_determine_config_paths(registry, monkeypatch):
     monkeypatch.setattr(
         config_module,
         "DEFAULT_PATHS",
-        {"config_toml": "/default/system/config.toml", "user_config_toml": "/default/user/config.toml"},
+        {
+            "config_toml": "/default/system/config.toml",
+            "model_runtime_cache_toml": "/default/runtime/model_runtime_cache.toml",
+            "user_config_toml": "/default/user/config.toml",
+        },
     )
 
     # Test with default paths
     registry._determine_config_paths()
     assert registry._system_config_path == Path("/default/system/config.toml")
+    assert registry._runtime_cache_path == Path("/default/runtime/model_runtime_cache.toml")
     assert registry._user_config_path == Path("/default/user/config.toml")
 
     # Test with custom paths
     registry._determine_config_paths(
-        config_path="/custom/system.toml", user_config_path="/custom/user.toml"
+        config_path="/custom/system.toml",
+        runtime_cache_path="/custom/runtime.toml",
+        user_config_path="/custom/user.toml",
     )
     assert registry._system_config_path == Path("/custom/system.toml")
+    assert registry._runtime_cache_path == Path("/custom/runtime.toml")
     assert registry._user_config_path == Path("/custom/user.toml")
 
 
@@ -117,20 +128,25 @@ def test_ensure_system_config_exists_does_nothing(mock_copy, registry, tmp_path)
 @pytest.mark.fast
 def test_load_and_set_configs(registry, tmp_config_paths):
     """Test loading system and user configs."""
-    system_path, user_path = tmp_config_paths
+    system_path, runtime_cache_path, user_path = tmp_config_paths
 
     with open(system_path, "w") as f:
         toml.dump(MOCK_SYSTEM_CONFIG, f)
+    with open(runtime_cache_path, "w") as f:
+        toml.dump({"model-a": {"estimated_size_gb": 1.25, "device": "cpu"}}, f)
     with open(user_path, "w") as f:
         toml.dump(MOCK_USER_CONFIG, f)
 
     registry._system_config_path = system_path
+    registry._runtime_cache_path = runtime_cache_path
     registry._user_config_path = user_path
 
     registry._load_and_set_system_config()
+    registry._load_and_set_runtime_cache()
     registry._load_and_set_user_config()
 
     assert registry._system_config_data == MOCK_SYSTEM_CONFIG
+    assert registry._runtime_cache_data == {"model-a": {"estimated_size_gb": 1.25}}
     assert registry._user_config_data == MOCK_USER_CONFIG
 
 
@@ -146,6 +162,74 @@ def test_merge_configs(registry):
     # Ensure it's a deep copy
     registry._merged_config_data["annotator"]["device"] = "new_device"
     assert MOCK_SYSTEM_CONFIG["annotator"]["device"] == "cpu"
+
+
+@pytest.mark.fast
+def test_merge_configs_prefers_user_over_runtime_cache_over_system(registry):
+    """estimated_size_gb precedence is user > runtime cache > system."""
+    registry._system_config_data = {
+        "system-only": {"estimated_size_gb": 1.0},
+        "cached-model": {"estimated_size_gb": 1.0},
+        "user-model": {"estimated_size_gb": 1.0},
+    }
+    registry._runtime_cache_data = {
+        "cached-model": {"estimated_size_gb": 2.0},
+        "user-model": {"estimated_size_gb": 2.0},
+    }
+    registry._user_config_data = {"user-model": {"estimated_size_gb": 3.0}}
+
+    registry._merge_configs()
+
+    assert registry.get("system-only", "estimated_size_gb") == 1.0
+    assert registry.get("cached-model", "estimated_size_gb") == 2.0
+    assert registry.get("user-model", "estimated_size_gb") == 3.0
+
+
+@pytest.mark.fast
+def test_merge_configs_uses_system_size_when_runtime_cache_missing(registry):
+    """Missing runtime cache keeps annotator_config.toml value as fallback."""
+    registry._system_config_data = {"model": {"estimated_size_gb": 1.0}}
+    registry._runtime_cache_data = {}
+    registry._user_config_data = {}
+
+    registry._merge_configs()
+
+    assert registry.get("model", "estimated_size_gb") == 1.0
+
+
+@pytest.mark.fast
+def test_runtime_cache_filters_non_runtime_metadata(registry, tmp_path):
+    """Runtime cache is restricted to runtime-derived metadata."""
+    runtime_cache_path = tmp_path / "model_runtime_cache.toml"
+    with open(runtime_cache_path, "w") as f:
+        toml.dump(
+            {
+                "model": {
+                    "estimated_size_gb": 1.25,
+                    "device": "cuda:0",
+                    "capabilities": ["tags"],
+                }
+            },
+            f,
+        )
+
+    registry._runtime_cache_path = runtime_cache_path
+    registry._load_and_set_runtime_cache()
+
+    assert registry._runtime_cache_data == {"model": {"estimated_size_gb": 1.25}}
+
+
+@pytest.mark.fast
+def test_save_runtime_cache_persists_only_runtime_metadata(registry, tmp_path):
+    """Runtime cache writes are local deletable state, separate from system config."""
+    runtime_cache_path = tmp_path / "model_runtime_cache.toml"
+    registry._runtime_cache_path = runtime_cache_path
+
+    registry.set_runtime_cache_value("model", "estimated_size_gb", 2.5)
+    registry.set_runtime_cache_value("model", "device", "cuda:0")
+    registry.save_runtime_cache()
+
+    assert toml.load(runtime_cache_path) == {"model": {"estimated_size_gb": 2.5}}
 
 
 @pytest.mark.fast
@@ -288,6 +372,19 @@ def test_add_default_setting_does_not_modify_project_system_config():
 
     assert project_system_config.read_text(encoding="utf-8") == original_content
     assert "test_stub_model" in config_registry._system_config_data
+
+
+@pytest.mark.fast
+def test_runtime_size_cache_does_not_modify_project_system_config():
+    """Regression test for Issue #97: runtime size cache must not rewrite system catalog."""
+    project_system_config = Path("config/annotator_config.toml")
+    original_content = project_system_config.read_text(encoding="utf-8")
+
+    config_registry.set_runtime_cache_value("test_runtime_model", "estimated_size_gb", 2.0)
+    config_registry.save_runtime_cache()
+
+    assert project_system_config.read_text(encoding="utf-8") == original_content
+    assert config_registry.get("test_runtime_model", "estimated_size_gb") == 2.0
 
 
 # --- Tests for Standalone Functions ---
