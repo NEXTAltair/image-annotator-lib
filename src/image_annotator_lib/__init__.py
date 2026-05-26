@@ -8,6 +8,27 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 from .api import PHashAnnotationResults as PHashAnnotationResults
 from .api import list_annotator_info
+from .core.config import config_registry
+from .core.constants import (
+    DEFAULT_PATHS,
+    MODEL_RUNTIME_CACHE_PATH,
+    SYSTEM_CONFIG_PATH,
+    USER_CONFIG_PATH,
+)
+from .core.model_factory import ModelLoad
+from .core.registry import (
+    initialize_registry,
+    list_available_annotators,
+)
+from .core.types import AnnotationResult, AnnotatorInfo, ModelType
+from .core.utils import init_logger
+from .exceptions.errors import AnnotatorError, ModelLoadError, ModelNotFoundError, OutOfMemoryError
+from .webapi.api_model_discovery import (
+    discover_available_vision_models,
+    get_available_models,
+    is_model_deprecated,
+    list_all_models,
+)
 from .webapi.batch import (
     BatchErrorPhase,
     BatchFetchResult,
@@ -29,27 +50,6 @@ from .webapi.batch import (
     retrieve_batch,
     submit_batch,
 )
-from .core.api_model_discovery import (
-    discover_available_vision_models,
-    get_available_models,
-    is_model_deprecated,
-    list_all_models,
-)
-from .core.config import config_registry
-from .core.constants import (
-    DEFAULT_PATHS,
-    MODEL_RUNTIME_CACHE_PATH,
-    SYSTEM_CONFIG_PATH,
-    USER_CONFIG_PATH,
-)
-from .core.model_factory import ModelLoad
-from .core.registry import (
-    initialize_registry,
-    list_available_annotators,
-)
-from .core.types import AnnotationResult, AnnotatorInfo, ModelType
-from .core.utils import init_logger
-from .exceptions.errors import AnnotatorError, ModelLoadError, ModelNotFoundError, OutOfMemoryError
 
 # --- Public API ---
 # ADR 0023 Phase 1: create_agent は廃止 (SimplifiedAgentFactory 全廃)。
