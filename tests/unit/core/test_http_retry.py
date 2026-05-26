@@ -9,7 +9,7 @@ import pytest
 from pydantic_ai.retries import AsyncTenacityTransport
 from tenacity.stop import stop_after_attempt
 
-from image_annotator_lib.core.http_retry import (
+from image_annotator_lib.webapi.http_retry import (
     HTTP_RETRY_MAX_ATTEMPTS,
     HTTP_RETRY_MAX_WAIT_SECONDS,
     RETRYABLE_HTTP_STATUSES,

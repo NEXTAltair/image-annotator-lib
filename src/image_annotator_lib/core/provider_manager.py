@@ -24,18 +24,18 @@ from ..exceptions.errors import (
     SafetyRefusalError,
 )
 from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
-from .http_retry import build_retry_http_client
-from .image_preprocess import preprocess_images_to_binary
-from .model_id import build_pydantic_model, resolve_model_ref
-from .output_normalization import build_annotation_output_normalizer
-from .result_adapter import to_annotation_result
+from ..webapi.http_retry import build_retry_http_client
+from ..webapi.image_preprocess import preprocess_images_to_binary
+from ..webapi.model_id import build_pydantic_model, resolve_model_ref
+from ..webapi.output_normalization import build_annotation_output_normalizer
+from ..webapi.result_adapter import to_annotation_result
 from .types import AnnotationResult, TaskCapability
 from .utils import calculate_phash, logger
 
 # ADR 0023 retry policy:
 # - output normalization / schema validation failure: PydanticAI `output_retries=1` で 1 回再生成
 #   (`ModelRetry` 経由)。
-# - HTTP/API transient failure: Phase 1.8 (Issue #46) で `core/http_retry.py` の
+# - HTTP/API transient failure: Phase 1.8 (Issue #46) で `webapi/http_retry.py` の
 #   `AsyncTenacityTransport` が provider HTTP client 層で initial+2 retries (max 3 attempts)。
 # 両 retry は独立した経路で機能し、互いに干渉しない。
 _OUTPUT_RETRIES = 1

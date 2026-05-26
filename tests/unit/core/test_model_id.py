@@ -1,18 +1,18 @@
-"""ADR 0023 Phase 1: core/model_id.py の unit test."""
+"""ADR 0023 Phase 1: webapi/model_id.py の unit test."""
 
 from __future__ import annotations
 
 import pytest
 
-from image_annotator_lib.core.model_id import (
-    SUPPORTED_PROVIDERS,
-    PydanticAIModelRef,
-    resolve_model_ref,
-)
 from image_annotator_lib.exceptions.errors import (
     IdMappingError,
     MissingApiKeyError,
     UnknownProviderError,
+)
+from image_annotator_lib.webapi.model_id import (
+    SUPPORTED_PROVIDERS,
+    PydanticAIModelRef,
+    resolve_model_ref,
 )
 
 
@@ -108,7 +108,7 @@ class TestBuildPydanticModelMissingKey:
     """`build_pydantic_model()` の API key validation を確認する (provider 構築は別の integration test で)。"""
 
     def test_empty_api_key_raises(self) -> None:
-        from image_annotator_lib.core.model_id import build_pydantic_model
+        from image_annotator_lib.webapi.model_id import build_pydantic_model
 
         ref = resolve_model_ref("openai/gpt-4o")
         with pytest.raises(MissingApiKeyError):

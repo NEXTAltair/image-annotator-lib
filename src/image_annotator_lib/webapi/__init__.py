@@ -1,1 +1,2 @@
-"""WebAPI-specific implementation modules."""
+"""WebAPI execution support package."""
+

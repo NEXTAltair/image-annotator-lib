@@ -1,11 +1,11 @@
-"""ADR 0023 Phase 1: core/image_preprocess.py の unit test."""
+"""ADR 0023 Phase 1: webapi/image_preprocess.py の unit test."""
 
 from __future__ import annotations
 
 from PIL import Image
 from pydantic_ai.messages import BinaryContent
 
-from image_annotator_lib.core.image_preprocess import preprocess_images_to_binary
+from image_annotator_lib.webapi.image_preprocess import preprocess_images_to_binary
 
 
 class TestPreprocessImagesToBinary:

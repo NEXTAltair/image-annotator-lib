@@ -7,11 +7,11 @@ import inspect
 import pytest
 from pydantic_ai import ModelRetry
 
-from image_annotator_lib.core.output_normalization import (
+from image_annotator_lib.core.types import TaskCapability
+from image_annotator_lib.webapi.output_normalization import (
     build_annotation_output_normalizer,
     normalize_annotation_output,
 )
-from image_annotator_lib.core.types import TaskCapability
 
 
 class TestNormalizeAnnotationOutput:

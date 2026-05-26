@@ -2,7 +2,7 @@
 
 ADR 0023 `### Schema → Result 変換` を実装する責務集約モジュール。
 `ProviderManager` は inference 実行のみを担当し、結果変換ロジックは持たない。
-Validation 前の軽微な schema 揺れは `core.output_normalization` が PydanticAI
+Validation 前の軽微な schema 揺れは `webapi.output_normalization` が PydanticAI
 output 処理内で補正する。
 
 参考: docs/decisions/0023-pydanticai-litellm-webapi-inference-boundary.md
@@ -10,7 +10,7 @@ output 処理内で補正する。
 
 from __future__ import annotations
 
-from .types import AnnotationResult, AnnotationSchema
+from ..core.types import AnnotationResult, AnnotationSchema
 
 
 def _clean_string_list(value: list[str]) -> list[str]:

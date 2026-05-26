@@ -1,9 +1,9 @@
-"""ADR 0023 Phase 1: core/result_adapter.py の unit test."""
+"""ADR 0023 Phase 1: webapi/result_adapter.py の unit test."""
 
 from __future__ import annotations
 
-from image_annotator_lib.core.result_adapter import to_annotation_result
 from image_annotator_lib.core.types import AnnotationSchema
+from image_annotator_lib.webapi.result_adapter import to_annotation_result
 
 
 class TestToAnnotationResult:

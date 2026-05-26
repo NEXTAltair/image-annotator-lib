@@ -1,6 +1,6 @@
 """実 provider API key を使った WebAPI on-demand validation (ADR 0001 amended)。
 
-`_BUILDER_DISPATCH` (`core/model_id.py`) で対応する 4 provider (OpenAI / Anthropic /
+`_BUILDER_DISPATCH` (`webapi/model_id.py`) で対応する 4 provider (OpenAI / Anthropic /
 Google / OpenRouter) を各 1 model でカバーし、`image_annotator_lib.annotate()` public
 API 経由で実 WebAPI request を送る。PydanticAI / LiteLLM / provider SDK の breaking
 change を開発者ローカルで早期検知することが目的。
@@ -35,7 +35,7 @@ from image_annotator_lib import annotate
 _RESOURCE_IMG = Path(__file__).parent.parent / "resources" / "img" / "1_img" / "file07.webp"
 
 # (model_name, provider key in api_keys dict, env var name).
-# provider key は `core/model_id.py:_BUILDER_DISPATCH` のキー (`gemini` は `google` に
+# provider key は `webapi/model_id.py:_BUILDER_DISPATCH` のキー (`gemini` は `google` に
 # 正規化されるため `api_keys` には `"google"` を渡す)。
 _PROVIDER_KEY_MAP: dict[str, tuple[str, str]] = {
     "gemini/gemini-flash-lite-latest": ("google", "GEMINI_API_KEY"),

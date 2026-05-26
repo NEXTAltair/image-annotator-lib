@@ -10,10 +10,10 @@ from typing import Any
 
 from pydantic_ai import ModelRetry
 
-from image_annotator_lib.core.model_id import resolve_model_ref
-from image_annotator_lib.core.output_normalization import build_annotation_output_normalizer
 from image_annotator_lib.core.types import AnnotationSchema, TaskCapability, UnifiedAnnotationResult
 from image_annotator_lib.model_class.annotator_webapi.webapi_shared import BASE_PROMPT
+from image_annotator_lib.webapi.model_id import resolve_model_ref
+from image_annotator_lib.webapi.output_normalization import build_annotation_output_normalizer
 
 from ..preparation import PreparedBatchItem, prepare_items
 from ..types import (
