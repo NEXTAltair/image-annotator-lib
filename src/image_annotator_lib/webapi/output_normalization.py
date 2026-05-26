@@ -26,7 +26,7 @@ from typing import Any
 from pydantic import ValidationError
 from pydantic_ai import ModelRetry
 
-from .types import AnnotationSchema, RatingPrediction, TaskCapability
+from ..core.types import AnnotationSchema, RatingPrediction, TaskCapability
 
 _WEBAPI_RATING_SOURCE_SCHEME = "prompt_defined"
 _DEFAULT_REQUIRED_CAPABILITIES = frozenset(

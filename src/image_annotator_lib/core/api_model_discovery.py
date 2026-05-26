@@ -2,7 +2,7 @@
 
 LiteLLM 同梱 DB を runtime SSoT として直接参照する。旧 `available_api_models.toml`
 キャッシュ、OpenRouter fallback fetch、TTL refresh、background refresh thread は
-すべて廃止された。`SUPPORTED_PROVIDERS` (`core/model_id.py`) に含まれる provider のみ
+すべて廃止された。`SUPPORTED_PROVIDERS` (`webapi/model_id.py`) に含まれる provider のみ
 を扱う。
 
 参考: docs/decisions/0023-pydanticai-litellm-webapi-inference-boundary.md
@@ -19,7 +19,7 @@ os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 import litellm
 
-from .model_id import SUPPORTED_PROVIDERS
+from ..webapi.model_id import SUPPORTED_PROVIDERS
 from .utils import logger
 
 _SUPPORTED_LITELLM_MODES: frozenset[str] = frozenset({"chat", "responses"})
@@ -69,7 +69,7 @@ def _canonicalize_litellm_id(
 def is_allowed_provider(model_id: str, info: dict[str, Any] | None = None) -> bool:
     """model_id の provider が ``SUPPORTED_PROVIDERS`` に含まれるか判定する。
 
-    ``core/model_id.py`` の dispatch table を SSoT とし、本ファイル独自の allowlist は持たない。
+    ``webapi/model_id.py`` の dispatch table を SSoT とし、本ファイル独自の allowlist は持たない。
 
     Issue #60: bare ID は LiteLLM 同梱 DB の ``litellm_provider`` field を介して
     provider を判定する (``_canonicalize_litellm_id()`` 経由)。
