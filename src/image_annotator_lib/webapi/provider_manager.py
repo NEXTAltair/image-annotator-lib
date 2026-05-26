@@ -287,7 +287,7 @@ class ProviderManager:
 
         Args:
             model_name: 呼び出し元モデル名 (logging 用、解決には使わない)。
-            provider: `core/model_id.SUPPORTED_PROVIDERS` の provider 名。
+            provider: `webapi/model_id.SUPPORTED_PROVIDERS` の provider 名。
             api_keys: provider -> API key の dict。
         """
         if api_keys and provider in api_keys and api_keys[provider]:
