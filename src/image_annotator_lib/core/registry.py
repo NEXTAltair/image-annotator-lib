@@ -697,7 +697,7 @@ def _register_webapi_models_from_discovery() -> None:
     logger.debug("LiteLLM 同梱 DB から WebAPI モデルの直接登録を開始します...")
     try:
         from ..webapi.annotator import WebApiAnnotator
-        from .api_model_discovery import discover_available_vision_models
+        from ..webapi.api_model_discovery import discover_available_vision_models
 
         result = discover_available_vision_models()
         api_models: dict[str, dict[str, Any]] = result.get("metadata", {})

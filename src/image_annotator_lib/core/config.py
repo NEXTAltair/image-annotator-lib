@@ -432,5 +432,5 @@ config_registry = _ConfigRegistryProxy()
 # ADR 0023 Phase 1 (Issue #35 PR #40): `available_api_models.toml` cache は **明示的に廃止**。
 # 旧 `_load_full_api_models_file` / `load_available_api_models` / `load_api_models_meta` /
 # `load_last_refresh` / `save_available_api_models` は本ファイルから削除された。
-# WebAPI モデル一覧と capability metadata は `core/api_model_discovery.py` で
+# WebAPI モデル一覧と capability metadata は `webapi/api_model_discovery.py` で
 # LiteLLM 同梱 DB から runtime 取得する (TOML キャッシュなし)。

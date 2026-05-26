@@ -12,6 +12,15 @@ import sys
 
 import pytest
 
+from image_annotator_lib.webapi.annotator import WebApiAnnotator
+from image_annotator_lib.webapi.api_model_discovery import discover_available_vision_models
+from image_annotator_lib.webapi.http_retry import build_retry_http_client
+from image_annotator_lib.webapi.image_preprocess import preprocess_images_to_binary
+from image_annotator_lib.webapi.model_id import resolve_model_ref
+from image_annotator_lib.webapi.output_normalization import normalize_annotation_output
+from image_annotator_lib.webapi.provider_manager import ProviderManager
+from image_annotator_lib.webapi.result_adapter import to_annotation_result
+
 _HEAVY_MODULES: tuple[str, ...] = ("torch", "torchvision", "transformers", "onnxruntime", "tensorflow")
 """eager load を禁止する heavy native dep の module 名集合。"""
 
@@ -58,3 +67,17 @@ def test_import_image_annotator_lib_does_not_eager_load_heavy_deps() -> None:
     assert loaded == [], (
         f"eager-loaded heavy deps after bare `import image_annotator_lib`: {loaded}"
     )
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_webapi_package_import_surface() -> None:
+    """WebAPI subsystem の最終 import surface が `image_annotator_lib.webapi` にあること。"""
+    assert WebApiAnnotator.__name__ == "WebApiAnnotator"
+    assert ProviderManager.__name__ == "ProviderManager"
+    assert callable(resolve_model_ref)
+    assert callable(discover_available_vision_models)
+    assert callable(build_retry_http_client)
+    assert callable(preprocess_images_to_binary)
+    assert callable(normalize_annotation_output)
+    assert callable(to_annotation_result)
