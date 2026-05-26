@@ -13,6 +13,8 @@ from .constants import (
 )
 from .utils import logger
 
+RUNTIME_MODEL_METADATA_KEYS = frozenset({"estimated_size_gb"})
+
 
 @lru_cache
 def _load_config_from_file(config_path: Path) -> dict[str, dict[str, Any]]:
@@ -40,23 +42,32 @@ class ModelConfigRegistry:
     def __init__(self) -> None:
         """初期化時に設定データを空の辞書で初期化します。"""
         self._system_config_data: dict[str, dict[str, Any]] = {}
+        self._runtime_cache_data: dict[str, dict[str, Any]] = {}
         self._user_config_data: dict[str, dict[str, Any]] = {}
         self._merged_config_data: dict[str, dict[str, Any]] = {}
         self._system_config_path: Path | None = None
+        self._runtime_cache_path: Path | None = None
         self._user_config_path: Path | None = None
 
     def _determine_config_paths(
         self,
         config_path: str | Path | None = None,
         user_config_path: str | Path | None = None,
+        runtime_cache_path: str | Path | None = None,
     ) -> None:
         """システム設定とユーザー設定のパスを決定し、インスタンス変数に格納する。"""
         self._system_config_path = Path(config_path if config_path else DEFAULT_PATHS["config_toml"])
         self._user_config_path = Path(
             user_config_path if user_config_path else DEFAULT_PATHS["user_config_toml"]
         )
+        self._runtime_cache_path = Path(
+            runtime_cache_path
+            if runtime_cache_path
+            else DEFAULT_PATHS["model_runtime_cache_toml"]
+        )
         logger.debug(f"システム設定パスを決定: {self._system_config_path}")
         logger.debug(f"ユーザー設定パスを決定: {self._user_config_path}")
+        logger.debug(f"モデル runtime cache パスを決定: {self._runtime_cache_path}")
 
     def _ensure_system_config_exists(self) -> None:
         """システム設定ファイルが存在しない場合、テンプレートからコピーする。"""
@@ -129,23 +140,70 @@ class ModelConfigRegistry:
                 f"ユーザー設定ファイル {self._user_config_path} が存在しないかパスが指定されていません。"
             )
 
+    @staticmethod
+    def _filter_runtime_cache_data(config_data: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Runtime cache から許可された runtime-derived metadata だけを抽出する。"""
+        runtime_cache_data: dict[str, dict[str, Any]] = {}
+        for model_name, model_config in config_data.items():
+            if not isinstance(model_config, dict):
+                continue
+            filtered_config = {
+                key: copy.deepcopy(value)
+                for key, value in model_config.items()
+                if key in RUNTIME_MODEL_METADATA_KEYS
+            }
+            if filtered_config:
+                runtime_cache_data[model_name] = filtered_config
+        return runtime_cache_data
+
+    def _load_and_set_runtime_cache(self) -> None:
+        """Runtime-derived model metadata cache を読み込み、内部状態を更新する。"""
+        self._runtime_cache_data = {}
+        if self._runtime_cache_path is not None and self._runtime_cache_path.exists():
+            if self._runtime_cache_path.is_file():
+                try:
+                    loaded_data = _load_config_from_file(self._runtime_cache_path)
+                    self._runtime_cache_data = self._filter_runtime_cache_data(loaded_data)
+                    logger.info(
+                        f"モデル runtime cache を {self._runtime_cache_path} から読み込みました。"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"モデル runtime cache {self._runtime_cache_path} の読み込み中にエラー: {e}"
+                    )
+                    self._runtime_cache_data = {}
+            else:
+                logger.warning(
+                    f"モデル runtime cache パス {self._runtime_cache_path} はファイルではありません。読み込みをスキップします。"
+                )
+        else:
+            logger.debug(
+                f"モデル runtime cache {self._runtime_cache_path} が存在しないかパスが指定されていません。"
+            )
+
     def load(
         self,
         config_path: str | Path | None = None,
         user_config_path: str | Path | None = None,
+        runtime_cache_path: str | Path | None = None,
     ) -> None:
         """システム設定ファイルとユーザー設定ファイルを読み込み、内部データを更新します。"""
         logger.info("設定ファイルの読み込みを開始します...")
-        self._determine_config_paths(config_path, user_config_path)
+        self._determine_config_paths(config_path, user_config_path, runtime_cache_path)
         self._ensure_system_config_exists()
         self._load_and_set_system_config()
+        self._load_and_set_runtime_cache()
         self._load_and_set_user_config()
         self._merge_configs()
         logger.info("設定ファイルの読み込みが完了しました。")
 
     def _merge_configs(self) -> None:
-        """システム設定とユーザー設定をマージして _merged_config_data を作成 (Deep Copyを使用)"""
+        """システム、runtime cache、ユーザー設定をマージして _merged_config_data を作成する。"""
         self._merged_config_data = copy.deepcopy(self._system_config_data)
+        for model_name, runtime_model_config in self._runtime_cache_data.items():
+            if model_name not in self._merged_config_data:
+                self._merged_config_data[model_name] = {}
+            self._merged_config_data[model_name].update(copy.deepcopy(runtime_model_config))
         for model_name, user_model_config in self._user_config_data.items():
             if model_name in self._merged_config_data:
                 merged_model_config = self._merged_config_data[model_name]
@@ -200,6 +258,17 @@ class ModelConfigRegistry:
             self._system_config_data[model_name] = {}
         self._system_config_data[model_name][key] = value
         # Immediately update the merged view as well
+        self._merge_configs()
+
+    def set_runtime_cache_value(self, model_name: str, key: str, value: Any) -> None:
+        """指定されたモデルの runtime-derived metadata を runtime cache として更新します。"""
+        if key not in RUNTIME_MODEL_METADATA_KEYS:
+            logger.warning(f"モデル runtime cache に保存できないキーをスキップ: {key}")
+            return
+        logger.debug(f"モデル runtime cache を更新: モデル '{model_name}', キー '{key}', 値 '{value}'")
+        if model_name not in self._runtime_cache_data:
+            self._runtime_cache_data[model_name] = {}
+        self._runtime_cache_data[model_name][key] = value
         self._merge_configs()
 
     def add_default_setting(self, section_name: str, key: str, value: Any) -> None:
@@ -270,6 +339,31 @@ class ModelConfigRegistry:
         except Exception as e:
             logger.error(
                 f"ユーザー設定ファイル {save_path} の保存中にエラーが発生しました: {e}", exc_info=True
+            )
+
+    def save_runtime_cache(self, runtime_cache_path: str | Path | None = None) -> None:
+        """現在の runtime-derived model metadata cache を指定されたファイルパスに保存します。"""
+        save_path = Path(runtime_cache_path) if runtime_cache_path else self._runtime_cache_path
+
+        if save_path is None:
+            logger.error("モデル runtime cache の保存パスが指定されていません。保存をスキップします。")
+            return
+
+        if not self._runtime_cache_data:
+            logger.debug("保存すべきモデル runtime cache がありません。保存をスキップします。")
+            return
+
+        try:
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, "w", encoding="utf-8") as f:
+                toml.dump(self._runtime_cache_data, f)
+            _load_config_from_file.cache_clear()
+            logger.info(f"モデル runtime cache を {save_path} に保存しました。")
+
+        except Exception as e:
+            logger.error(
+                f"モデル runtime cache {save_path} の保存中にエラーが発生しました: {e}",
+                exc_info=True,
             )
 
     def save_system_config(self, system_config_path: str | Path | None = None) -> None:

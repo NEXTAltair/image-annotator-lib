@@ -17,6 +17,7 @@ from .core.api_model_discovery import (
 from .core.config import config_registry
 from .core.constants import (
     DEFAULT_PATHS,
+    MODEL_RUNTIME_CACHE_PATH,
     SYSTEM_CONFIG_PATH,
     USER_CONFIG_PATH,
 )
@@ -34,6 +35,7 @@ from .exceptions.errors import AnnotatorError, ModelLoadError, ModelNotFoundErro
 # get_available_models / list_all_models / is_model_deprecated は LiteLLM runtime call に切替。
 __all__ = [
     "DEFAULT_PATHS",
+    "MODEL_RUNTIME_CACHE_PATH",
     "SYSTEM_CONFIG_PATH",
     "USER_CONFIG_PATH",
     "AnnotationResult",
