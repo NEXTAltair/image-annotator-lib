@@ -627,7 +627,7 @@ class InsufficientCreditsError(WebApiError):
 class IdMappingError(WebApiError):
     """litellm_model_id の解析に失敗した場合の例外。
 
-    `core/model_id.resolve_model_ref()` が prefix 解析や builder dispatch に失敗した
+    `webapi/model_id.resolve_model_ref()` が prefix 解析や builder dispatch に失敗した
     ときに raise する。空文字 / `provider/model` 形式違反などが該当する。
 
     Attributes:
