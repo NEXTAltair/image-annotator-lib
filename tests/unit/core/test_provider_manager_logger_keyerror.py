@@ -23,7 +23,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from PIL import Image
 
-from image_annotator_lib.core.provider_manager import ProviderManager
+from image_annotator_lib.webapi.provider_manager import ProviderManager
 
 
 class _FakeModelHTTPError(Exception):

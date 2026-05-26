@@ -266,7 +266,7 @@ def test_registered_webapi_model_resolves_to_webapi_annotator(isolated_registry)
     がモデルクラス registry に `WebApiAnnotator` を登録し、metadata の `class` も
     `WebApiAnnotator` であることを検証する。
     """
-    from image_annotator_lib.core.webapi_annotator import WebApiAnnotator
+    from image_annotator_lib.webapi.annotator import WebApiAnnotator
 
     with patch(_DISCOVERY_PATCH_TARGET, return_value=_DISCOVERY_RESULT):
         _register_webapi_models_from_discovery()

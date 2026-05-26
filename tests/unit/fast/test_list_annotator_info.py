@@ -10,7 +10,7 @@ import pytest
 
 from image_annotator_lib import AnnotatorInfo, list_annotator_info
 from image_annotator_lib.core.types import TaskCapability
-from image_annotator_lib.core.webapi_annotator import WebApiAnnotator
+from image_annotator_lib.webapi.annotator import WebApiAnnotator
 
 # --- テスト用ダミークラス ---
 

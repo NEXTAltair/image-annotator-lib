@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from PIL import Image
 
-from image_annotator_lib.core.provider_manager import (
+from image_annotator_lib.webapi.provider_manager import (
     ProviderManager,
     _format_exception_chain,
 )
