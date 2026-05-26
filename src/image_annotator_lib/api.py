@@ -89,7 +89,7 @@ def list_annotator_info() -> list[AnnotatorInfo]:
         get_webapi_metadata,
         initialize_registry,
     )
-    from .core.webapi_annotator import WebApiAnnotator
+    from .webapi.annotator import WebApiAnnotator
 
     if not _REGISTRY_INITIALIZED:
         initialize_registry()

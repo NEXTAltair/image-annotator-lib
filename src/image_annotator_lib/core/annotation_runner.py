@@ -22,6 +22,7 @@ from typing import Any
 
 from PIL import Image
 
+from ..webapi.annotator import WebApiAnnotator
 from .base.annotator import BaseAnnotator
 from .registry import (
     find_model_class_case_insensitive,
@@ -31,7 +32,6 @@ from .registry import (
 )
 from .types import PHashAnnotationResults, UnifiedAnnotationResult
 from .utils import calculate_phash, get_model_capabilities, logger
-from .webapi_annotator import WebApiAnnotator
 
 _MODEL_INSTANCE_REGISTRY: dict[str, Any] = {}
 

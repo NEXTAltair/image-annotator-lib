@@ -15,10 +15,11 @@ from typing import Any, Self
 
 from PIL import Image
 
-from .base.annotator import BaseAnnotator
-from .provider_manager import ProviderManager
-from .types import AnnotationResult, RatingPrediction, TaskCapability, UnifiedAnnotationResult
-from .utils import calculate_phash, logger
+from image_annotator_lib.webapi.provider_manager import ProviderManager
+
+from ..core.base.annotator import BaseAnnotator
+from ..core.types import AnnotationResult, RatingPrediction, TaskCapability, UnifiedAnnotationResult
+from ..core.utils import calculate_phash, logger
 
 
 class WebApiAnnotator(BaseAnnotator):

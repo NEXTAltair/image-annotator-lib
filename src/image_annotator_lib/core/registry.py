@@ -487,7 +487,7 @@ def _requires_api_key(model_class: ModelClass, model_config: dict[str, Any]) -> 
         return bool(model_config["requires_api_key"])
 
     # WebApiAnnotator (またはサブクラス) は API key 必須
-    from .webapi_annotator import WebApiAnnotator
+    from ..webapi.annotator import WebApiAnnotator
 
     if issubclass(model_class, WebApiAnnotator):
         return True
@@ -518,7 +518,7 @@ def _resolve_registry_capabilities(model_name: str, is_api: bool) -> frozenset[T
 
     if is_api:
         # ADR 0023 Phase 1: WebApiAnnotator は AnnotationSchema (tags/captions/score) を返す
-        from .webapi_annotator import WebApiAnnotator  # 循環 import 回避のため遅延
+        from ..webapi.annotator import WebApiAnnotator  # 循環 import 回避のため遅延
 
         return WebApiAnnotator.ADVERTISED_CAPABILITIES
 
@@ -691,13 +691,13 @@ def _register_webapi_models_from_discovery() -> None:
     旧 `available_api_models.toml` 経由の登録は廃止。`discover_available_vision_models()`
     の `metadata` (LiteLLM `get_model_info()` 由来) を直接使用する。
 
-    Issue #35: 登録対象クラスは `WebApiAnnotator` (`core/webapi_annotator.py`) を
+    Issue #35: 登録対象クラスは `WebApiAnnotator` (`webapi/annotator.py`) を
     直接 import して使う。旧 `PydanticAIWebAPIAnnotator` 経路は廃止。
     """
     logger.debug("LiteLLM 同梱 DB から WebAPI モデルの直接登録を開始します...")
     try:
         from ..webapi.api_model_discovery import discover_available_vision_models
-        from .webapi_annotator import WebApiAnnotator
+        from ..webapi.annotator import WebApiAnnotator
 
         result = discover_available_vision_models()
         api_models: dict[str, dict[str, Any]] = result.get("metadata", {})

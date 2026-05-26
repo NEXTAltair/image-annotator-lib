@@ -87,7 +87,7 @@ def mock_model_load():
 @pytest.fixture
 def mock_provider_manager():
     """ProviderManager のモック"""
-    with patch("image_annotator_lib.core.provider_manager.ProviderManager") as mock:
+    with patch("image_annotator_lib.webapi.provider_manager.ProviderManager") as mock:
         mock.get_provider_instance.return_value = MagicMock()
         mock.run_inference_with_model.return_value = {
             "test_hash": {

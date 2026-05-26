@@ -2,7 +2,7 @@
 
 Note:
     ADR 0023 Phase 1 (Issue #35) で WebAPI 系は `WebApiAnnotator`
-    (`core/webapi_annotator.py`) に統合された。旧 `WebApiBaseAnnotator` は廃止。
+    (`webapi/annotator.py`) に統合された。旧 `WebApiBaseAnnotator` は廃止。
 """
 
 from .annotator import BaseAnnotator
