@@ -32,7 +32,7 @@
 
 ```python
 from image_annotator_lib import discover_available_vision_models
-from image_annotator_lib.core.api_model_discovery import should_refresh, trigger_background_refresh
+from image_annotator_lib.webapi.api_model_discovery import should_refresh, trigger_background_refresh
 
 # キャッシュから読み込み（TTL 内なら再取得しない）
 result = discover_available_vision_models()

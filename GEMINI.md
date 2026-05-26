@@ -46,19 +46,20 @@ The library's architecture is modular, separating different model types and prov
 ### Key Architectural Principles:
 
 - **Encapsulation:** The design strictly follows the "Tell, Don't Ask" principle. Classes should expose behavior (methods) rather than state. Direct access to internal variables (`_`) is forbidden, and getters/setters are discouraged in favor of methods that perform actions.
-- **Provider Pattern:** The `ProviderManager` abstracts away the specifics of each API provider (Google, OpenAI, etc.), allowing for shared connections and resources. This is a central piece of the modern Web API interaction model.
-- **Factory Pattern:** The `PydanticAIProviderFactory` serves as a central factory for creating and caching `pydantic-ai` `Agent` instances, optimizing resource usage.
+- **Provider Pattern:** The `ProviderManager` abstracts away the specifics of each API provider (Google, OpenAI, etc.). This is a central piece of the modern Web API interaction model.
+- **WebAPI Execution Boundary:** `ProviderManager` creates PydanticAI native provider/model objects for each inference call and keeps provider-specific WebAPI logic under `webapi/`.
 - **Registry Pattern:** Used for both class definitions (`get_cls_obj_registry`) and model instances (`_MODEL_INSTANCE_REGISTRY` in `api.py`).
 
 ### Key Components:
 
 - **`src/image_annotator_lib/api.py`**: The main public-facing API of the library. It provides the `annotate()` function and manages the lifecycle of annotator instances.
-- **`src/image_annotator_lib/core/`**: Contains the core logic.
-    - **`provider_manager.py`**: Manages provider-level instances (e.g., one instance for all of Google's models) to share resources like API clients efficiently.
-    - **`pydantic_ai_factory.py`**: Contains `PydanticAIProviderFactory` and `PydanticAIAnnotatorMixin`. This factory creates and caches `pydantic-ai` `Agent` instances.
+- **`src/image_annotator_lib/core/`**: Contains shared core logic for annotators.
     - **`config.py`**: A global `config_registry` handles loading and accessing model configurations from TOML files.
     - **`registry.py`**: A class registry (`get_cls_obj_registry`) maps model names to their corresponding annotator classes.
     - **`base/`**: Abstract base classes for different annotator types.
+- **`src/image_annotator_lib/webapi/`**: Contains WebAPI execution, provider/model mapping, discovery, retry, preprocessing, normalization, and result adaptation.
+    - **`provider_manager.py`**: Runs WebAPI inference through PydanticAI native providers/models.
+    - **`annotator.py`**: Contains the unified `WebApiAnnotator` wrapper.
 - **`src/image_annotator_lib/model_class/`**: Contains the concrete implementations of annotator classes.
 
 ## 6. Development Workflow
@@ -99,7 +100,7 @@ Commands should be run from the project root (`C:\LoRAIro\local_packages\image-a
     - **`pyproject.toml`**: Project metadata, dependencies, and tool configurations (`ruff`, `pytest`, `mypy`).
 - **Core Logic:**
     - **`src/image_annotator_lib/api.py`**: Entry point for understanding user-facing functionality.
-    - **`src/image_annotator_lib/core/provider_manager.py`**: Crucial for understanding the new Web API architecture.
-    - **`src/image_annotator_lib/core/pydantic_ai_factory.py`**: Key to the `pydantic-ai` implementation.
+    - **`src/image_annotator_lib/webapi/provider_manager.py`**: Crucial for understanding the Web API architecture.
+    - **`src/image_annotator_lib/webapi/model_id.py`**: Provider/model mapping for PydanticAI native model construction.
 - **Documentation:**
     - **`docs/`**: Contains architectural and design decision documents.

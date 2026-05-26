@@ -52,7 +52,7 @@ result = discover_available_vision_models(force_refresh=True)
 `config/available_api_models.toml` の `[meta] last_refresh` を確認して TTL 超過を判定します。
 
 ```python
-from image_annotator_lib.core.api_model_discovery import should_refresh
+from image_annotator_lib.webapi.api_model_discovery import should_refresh
 
 if should_refresh():
     print("モデルリストの更新が必要です")
@@ -71,7 +71,7 @@ if should_refresh(ttl_days=1):
 バックグラウンドスレッドで `available_api_models.toml` を非同期更新します。呼び出し元をブロックしません。
 
 ```python
-from image_annotator_lib.core.api_model_discovery import (
+from image_annotator_lib.webapi.api_model_discovery import (
     should_refresh,
     trigger_background_refresh,
 )

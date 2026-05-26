@@ -9,9 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
-- **LiteLLM 統合** (ISSUE B): `core/api_model_discovery.py` に LiteLLM ローカル DB を使用した Vision モデル自動検出機能を追加
+- **LiteLLM 統合** (ISSUE B): 当初 `core/api_model_discovery.py` に LiteLLM ローカル DB を使用した Vision モデル自動検出機能を追加。現在の実装位置は `webapi/api_model_discovery.py`
 - **`deprecated_on` フィルタ** (ISSUE C): `simplified_agent_factory.py` に `get_available_models()` / `list_all_models()` / `is_model_deprecated()` を追加
-- **TTL ベース自動 refresh** (ISSUE E): `core/api_model_discovery.py` に `should_refresh()` / `trigger_background_refresh()` を追加
+- **TTL ベース自動 refresh** (ISSUE E): 当初 `core/api_model_discovery.py` に `should_refresh()` / `trigger_background_refresh()` を追加。現在の実装位置は `webapi/api_model_discovery.py`
 - **`[meta] last_refresh`**: `config/available_api_models.toml` に refresh タイムスタンプのメタデータセクションを導入
 - **アトミック書き込み**: `save_available_api_models()` を `tempfile + os.replace()` によるアトミック書き込みに変更
 - **CI 週次 refresh** (ISSUE G): `.github/workflows/refresh-models.yml` による週次自動更新と PR 自動作成
