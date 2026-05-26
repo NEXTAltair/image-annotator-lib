@@ -12,8 +12,25 @@ from .core.annotation_runner import run_annotation
 from .core.registry import list_available_annotators as _registry_list_annotators
 from .core.types import AnnotatorInfo, PHashAnnotationResults
 from .core.utils import logger
+from .webapi.batch import (
+    cancel_batch,
+    fetch_batch_results,
+    list_batch_capable_models,
+    retrieve_batch,
+    submit_batch,
+)
 
-__all__ = ["PHashAnnotationResults", "annotate", "list_annotator_info", "list_available_annotators"]
+__all__ = [
+    "PHashAnnotationResults",
+    "annotate",
+    "cancel_batch",
+    "fetch_batch_results",
+    "list_annotator_info",
+    "list_available_annotators",
+    "list_batch_capable_models",
+    "retrieve_batch",
+    "submit_batch",
+]
 
 
 def annotate(
