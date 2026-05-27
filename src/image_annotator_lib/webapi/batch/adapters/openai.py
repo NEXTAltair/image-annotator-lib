@@ -40,10 +40,11 @@ def _load_openai_converter() -> Any:
     try:
         module = import_module("image_annotator_lib.webapi.openai_moderations")
         return module.category_scores_to_rating_prediction
-    except (ModuleNotFoundError, AttributeError):
-        return lambda response: RatingPrediction(
-            raw_label="pg", source_scheme="openai_moderation_v1", confidence_score=None
-        )
+    except (ModuleNotFoundError, AttributeError) as exc:
+        raise RuntimeError(
+            "OpenAI batch adapter requires image_annotator_lib.webapi.openai_moderations. "
+            "Merge feat/issue-119-openai-moderations before using /v1/moderations batch."
+        ) from exc
 
 
 _CATEGORY_SCORES_TO_RATING_PREDICTION = _load_openai_converter()

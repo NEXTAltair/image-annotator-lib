@@ -6,11 +6,11 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+import importlib
 from types import SimpleNamespace
 
 import pytest
 
-from image_annotator_lib.core.types import RatingPrediction
 from image_annotator_lib.webapi.batch import (
     BatchItemStatus,
     BatchProviderItemStatus,
@@ -156,12 +156,6 @@ def test_fetch_batch_results_normalizes_openai_output_lines(
     )
     batches = FakeOpenAIBatches()
     install_fake_openai(monkeypatch, files=files, batches=batches)
-    monkeypatch.setattr(
-        openai_adapter_module,
-        "_CATEGORY_SCORES_TO_RATING_PREDICTION",
-        lambda _: RatingPrediction(raw_label="r", source_scheme="openai_moderation_v1", confidence_score=0.88),
-    )
-
     handle = BatchJobHandle(provider="openai", provider_job_id="batch_001", api_keys={"openai": "test-key"})
     result = OpenAIBatchAdapter().fetch_batch_results(handle)
 
@@ -172,6 +166,7 @@ def test_fetch_batch_results_normalizes_openai_output_lines(
     assert result.items[0].status is BatchItemStatus.SUCCEEDED
     assert result.items[0].annotation is not None
     assert result.items[0].annotation.ratings[0].raw_label == "r"
+    assert result.items[0].annotation.ratings[0].source_scheme == "openai_moderation_v1"
     assert result.items[2].status is BatchItemStatus.FAILED
     assert result.items[2].provider_status is BatchProviderItemStatus.FAILED
 
@@ -214,12 +209,6 @@ def test_fetch_batch_results_marks_output_item_error_and_ignores_extra_lines(
         },
     )
     install_fake_openai(monkeypatch, files=files, batches=batches)
-    monkeypatch.setattr(
-        openai_adapter_module,
-        "_CATEGORY_SCORES_TO_RATING_PREDICTION",
-        lambda _: RatingPrediction(raw_label="pg", source_scheme="openai_moderation_v1", confidence_score=None),
-    )
-
     handle = BatchJobHandle(provider="openai", provider_job_id="batch_001", api_keys={"openai": "test-key"})
     result = OpenAIBatchAdapter().fetch_batch_results(handle)
 
@@ -247,14 +236,56 @@ def test_fetch_batch_results_preserves_custom_id_mapping_for_success_items(
     )
     batches = FakeOpenAIBatches()
     install_fake_openai(monkeypatch, files=files, batches=batches)
-    monkeypatch.setattr(
-        openai_adapter_module,
-        "_CATEGORY_SCORES_TO_RATING_PREDICTION",
-        lambda _: RatingPrediction(raw_label="pg", source_scheme="openai_moderation_v1", confidence_score=None),
-    )
-
     handle = BatchJobHandle(provider="openai", provider_job_id="batch_001", api_keys={"openai": "test-key"})
     result = OpenAIBatchAdapter().fetch_batch_results(handle)
 
     assert result.items[0].custom_id == "custom-image-42"
     assert result.items[0].annotation is not None
+
+
+def test_fetch_batch_results_uses_openai_moderations_converter_for_high_risk_scores(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    files = FakeOpenAIFiles(
+        contents={
+            "file_out": _jsonl(
+                [
+                    {
+                        "custom_id": "img-1",
+                        "response": {
+                            "status_code": 200,
+                            "body": {
+                                "results": [
+                                    {
+                                        "category_scores": {
+                                            "violence/graphic": 0.50,
+                                            "sexual": 0.99,
+                                        },
+                                    }
+                                ]
+                            },
+                        },
+                    },
+                ]
+            ),
+            "file_err": "",
+        }
+    )
+    batches = FakeOpenAIBatches()
+    install_fake_openai(monkeypatch, files=files, batches=batches)
+
+    handle = BatchJobHandle(provider="openai", provider_job_id="batch_001", api_keys={"openai": "test-key"})
+    result = OpenAIBatchAdapter().fetch_batch_results(handle)
+
+    item = result.items[0]
+    assert item.annotation is not None
+    assert item.annotation.ratings[0].raw_label == "xxx"
+    assert item.annotation.ratings[0].confidence_score == 0.99
+
+
+def test_openai_adapter_requires_t1_converter(monkeypatch: pytest.MonkeyPatch) -> None:
+    with monkeypatch.context() as mp:
+        mp.setattr(importlib, "import_module", lambda *_args, **_kwargs: (_ for _ in ()).throw(ModuleNotFoundError("missing")))
+        with pytest.raises(RuntimeError, match="requires image_annotator_lib.webapi.openai_moderations"):
+            importlib.reload(openai_adapter_module)
