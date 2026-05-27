@@ -141,7 +141,7 @@ def _format_litellm_metadata(model_id: str, info: dict[str, Any]) -> dict[str, A
     provider_raw, _ = canonical.split("/", 1)
     provider = "OpenAI" if provider_raw == "openai" else provider_raw.capitalize()
 
-    return {
+    metadata = {
         "provider": provider,
         "model_name_short": canonical,
         "display_name": canonical,
@@ -157,6 +157,9 @@ def _format_litellm_metadata(model_id: str, info: dict[str, Any]) -> dict[str, A
         "output_cost_per_token": info.get("output_cost_per_token"),
         "deprecation_date": info.get("deprecation_date"),
     }
+    if _is_openai_moderation_model(canonical):
+        metadata["capabilities"] = ["ratings"]
+    return metadata
 
 
 def _collect_models(
