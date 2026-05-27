@@ -448,19 +448,21 @@ def _determine_model_type(
     Returns:
         ModelType: "tagger" / "scorer" / "captioner" / "vision" / "rating" のいずれか
     """
-    # 既存 user config には AnimeRatingAnnotator を type="tagger" としてコピー済みの
-    # ものがあるため、既知の rating-only モデルは legacy type より優先して補正する。
-    if _is_rating_only_model(model_name, model_class):
-        return "rating"
-
     # 設定の `type` を優先で参照 (実際の config キーは "type")
     config_type = model_config.get("type")
     if isinstance(config_type, str) and config_type in _VALID_MODEL_TYPES:
+        # 既存 user config には AnimeRatingAnnotator を type="tagger" としてコピー済みの
+        # ものがあるため、既知の rating-only モデルだけ legacy tagger type を補正する。
+        if config_type == "tagger" and _is_rating_only_model(model_name, model_class):
+            return "rating"
         return cast(ModelType, config_type)
 
     # モデル名やクラス名から推定
     model_name_lower = model_name.lower()
     class_name_lower = model_class.__name__.lower()
+
+    if _is_rating_only_model(model_name, model_class):
+        return "rating"
 
     # スコア系モデルの判定
     if any(keyword in model_name_lower for keyword in ["aesthetic", "score", "quality"]):

@@ -192,6 +192,25 @@ def test_rating_only_class_overrides_legacy_tagger_type(patched_registry):
 
 @pytest.mark.unit
 @pytest.mark.fast
+def test_rating_name_respects_explicit_non_legacy_type(patched_registry):
+    """rating 風の名前でも legacy tagger 以外の明示 type は尊重する。"""
+    with patched_registry(
+        model_dict={"custom_moderation_score": _DummyScorer},
+        config_dict={
+            "custom_moderation_score": {
+                "type": "scorer",
+                "device": "cuda",
+                "capabilities": ["scores"],
+            }
+        },
+    ):
+        result = list_annotator_info()
+
+    assert result[0].model_type == "scorer"
+
+
+@pytest.mark.unit
+@pytest.mark.fast
 def test_webapi_model_classification(patched_registry):
     """WebApiAnnotator が is_api=True, device=None で分類される。"""
     with patched_registry(
