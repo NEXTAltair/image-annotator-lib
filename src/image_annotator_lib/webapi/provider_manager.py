@@ -27,8 +27,10 @@ from ..exceptions.errors import (
 )
 from ..model_class.annotator_webapi.webapi_shared import BASE_PROMPT
 from .http_retry import build_retry_http_client
+from .image_payload import build_base64_data_url
 from .image_preprocess import preprocess_images_to_binary
 from .model_id import build_pydantic_model, resolve_model_ref
+from .openai_moderations import category_scores_to_rating_prediction
 from .output_normalization import build_annotation_output_normalizer
 from .result_adapter import to_annotation_result
 
@@ -45,6 +47,7 @@ _USER_PROMPT_TEXT = "Analyze this image and provide annotations as specified."
 
 # LoRAIro #274: cause/context chain を辿る最大段数 (循環・過剰深さの安全弁)。
 _EXCEPTION_CHAIN_MAX_DEPTH = 5
+_OPENAI_MODERATION_PREFIX = "openai/omni-moderation-"
 
 
 def _build_system_prompt(capabilities: set[TaskCapability] | frozenset[TaskCapability] | None) -> str:
@@ -134,6 +137,14 @@ class ProviderManager:
         Returns:
             `dict[phash, AnnotationResult]`。画像ごとに 1 entry。
         """
+        if _is_openai_moderation_model(litellm_model_id):
+            return await cls._run_openai_moderation_inference(
+                model_name=model_name,
+                images_list=images_list,
+                litellm_model_id=litellm_model_id,
+                api_keys=api_keys,
+            )
+
         # ADR 0023 Phase 1.8 (Issue #46): transport retry 付き AsyncClient を推論呼び出しごとに
         # 新規生成する。Agent / Provider / Model キャッシュなし方針 (ADR 0023 Agent ライフサイクル)
         # に揃え、httpx.AsyncClient も同じ寿命で aclose() する。test 経路 (`_test_agent` 注入) では
@@ -294,6 +305,82 @@ class ProviderManager:
             return api_keys[provider]
 
         raise MissingApiKeyError(provider=provider)
+
+    @classmethod
+    async def _run_openai_moderation_inference(
+        cls,
+        *,
+        model_name: str,
+        images_list: list[Image.Image],
+        litellm_model_id: str,
+        api_keys: dict[str, str] | None,
+    ) -> dict[str, AnnotationResult]:
+        """Run OpenAI Moderations directly for image rating models."""
+
+        ref = resolve_model_ref(litellm_model_id)
+        api_key = cls._resolve_api_key(model_name, ref.provider, api_keys)
+        http_client = build_retry_http_client()
+        try:
+            from openai import AsyncOpenAI
+
+            client = AsyncOpenAI(api_key=api_key, http_client=http_client)
+            binary_contents = preprocess_images_to_binary(images_list)
+            results: dict[str, AnnotationResult] = {}
+            for index, (image, binary) in enumerate(zip(images_list, binary_contents, strict=True)):
+                phash = calculate_phash(image) or f"unknown_image_{index}"
+                try:
+                    response = await client.moderations.create(
+                        model=ref.provider_model_id,
+                        input=[
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": build_base64_data_url(binary.data, binary.media_type),
+                                },
+                            }
+                        ],
+                    )
+                    payload = _openai_response_to_dict(response)
+                    prediction = category_scores_to_rating_prediction(payload)
+                    results[phash] = AnnotationResult(
+                        phash=phash,
+                        tags=[],
+                        formatted_output={
+                            "tags": [],
+                            "captions": [],
+                            "score": None,
+                            "ratings": [prediction],
+                        },
+                        error=None,
+                    )
+                except Exception as exc:
+                    error_detail = _format_exception_chain(exc)
+                    logger.error(
+                        f"OpenAI Moderations 推論失敗: model={model_name}, "
+                        f"litellm_model_id={litellm_model_id}, error={error_detail}"
+                    )
+                    results[phash] = to_annotation_result(None, phash, error=error_detail)
+            return results
+        finally:
+            await http_client.aclose()
+
+
+def _is_openai_moderation_model(litellm_model_id: str) -> bool:
+    return litellm_model_id.startswith(_OPENAI_MODERATION_PREFIX)
+
+
+def _openai_response_to_dict(response: Any) -> dict[str, Any]:
+    if isinstance(response, dict):
+        return response
+    model_dump = getattr(response, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(mode="json")
+        return dumped if isinstance(dumped, dict) else {}
+    to_dict = getattr(response, "to_dict", None)
+    if callable(to_dict):
+        dumped = to_dict()
+        return dumped if isinstance(dumped, dict) else {}
+    return {}
 
 
 # --- Refusal 分類のための内部 helper ---

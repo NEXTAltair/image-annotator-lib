@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
+
+from image_annotator_lib.webapi.image_payload import build_base64_data_url
 
 from .types import BatchErrorPhase, BatchJobError, BatchSubmitItem
 
@@ -73,7 +74,6 @@ def build_openai_moderations_jsonl(
                 message=f"Failed to read image for OpenAI batch input: {item.image_path}: {exc}",
                 retryable=False,
             ) from exc
-        encoded = base64.b64encode(payload_bytes).decode("ascii")
         lines.append(
             json.dumps(
                 {
@@ -86,7 +86,7 @@ def build_openai_moderations_jsonl(
                             {
                                 "type": "image_url",
                                 "image_url": {
-                                    "url": f"data:{item.image_mime_type};base64,{encoded}",
+                                    "url": build_base64_data_url(payload_bytes, item.image_mime_type),
                                 },
                             }
                         ],

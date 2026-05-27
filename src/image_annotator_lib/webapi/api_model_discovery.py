@@ -23,6 +23,7 @@ from ..core.utils import logger
 from .model_id import SUPPORTED_PROVIDERS
 
 _SUPPORTED_LITELLM_MODES: frozenset[str] = frozenset({"chat", "responses"})
+_OPENAI_MODERATION_PREFIX = "openai/omni-moderation-"
 
 
 def _canonicalize_litellm_id(
@@ -85,7 +86,14 @@ def is_allowed_provider(model_id: str, info: dict[str, Any] | None = None) -> bo
     return provider in SUPPORTED_PROVIDERS
 
 
-def _is_litellm_model_annotation_compatible(info: dict[str, Any]) -> bool:
+def _is_openai_moderation_model(model_id: str | None) -> bool:
+    return bool(model_id and model_id.startswith(_OPENAI_MODERATION_PREFIX))
+
+
+def _is_litellm_model_annotation_compatible(
+    info: dict[str, Any],
+    model_id: str | None = None,
+) -> bool:
     """画像アノテーションに適したモデルか判定する (Vision + Tool/Function calling)。
 
     ADR 0023 Phase 1 (Issue #45): structured output は PydanticAI default Tool Output
@@ -93,6 +101,9 @@ def _is_litellm_model_annotation_compatible(info: dict[str, Any]) -> bool:
     主条件にする。`supports_response_schema` は NativeOutput 最適化の参考用 metadata
     として LiteLLM 側にあるが、本判定では使わない。
     """
+    if _is_openai_moderation_model(model_id):
+        return True
+
     mode = info.get("mode", "chat")
     return (
         info.get("supports_vision") is True
@@ -180,15 +191,18 @@ def _collect_models(
             continue
         if info is None:
             continue
-        if require_compatible and not _is_litellm_model_annotation_compatible(info):
+        formatted = _format_litellm_metadata(model_id, info)
+        if formatted is None:
+            continue
+        if require_compatible and not _is_litellm_model_annotation_compatible(
+            info, model_id=formatted["model_name_short"]
+        ):
             continue
         if exclude_deprecated and info.get("deprecation_date"):
             continue
-        formatted = _format_litellm_metadata(model_id, info)
-        if formatted:
-            # Issue #60: dict キーは正規化後 ID で統一。
-            # registry / CLI / LoRAIro DB 列に伝播する `model_name_short` と一致させる。
-            metadata[formatted["model_name_short"]] = formatted
+        # Issue #60: dict キーは正規化後 ID で統一。
+        # registry / CLI / LoRAIro DB 列に伝播する `model_name_short` と一致させる。
+        metadata[formatted["model_name_short"]] = formatted
     return metadata
 
 
