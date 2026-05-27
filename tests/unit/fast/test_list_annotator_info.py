@@ -173,6 +173,25 @@ def test_local_rating_model_classification(patched_registry):
 
 @pytest.mark.unit
 @pytest.mark.fast
+def test_rating_only_class_overrides_legacy_tagger_type(patched_registry):
+    """既存 user config の type='tagger' でも rating 専用 class は rating に補正する。"""
+    with patched_registry(
+        model_dict={"anime_rating_mobilenetv3_sce_dist": _DummyRatingAnnotator},
+        config_dict={
+            "anime_rating_mobilenetv3_sce_dist": {
+                "type": "tagger",
+                "device": "cuda",
+                "capabilities": ["ratings"],
+            }
+        },
+    ):
+        result = list_annotator_info()
+
+    assert result[0].model_type == "rating"
+
+
+@pytest.mark.unit
+@pytest.mark.fast
 def test_webapi_model_classification(patched_registry):
     """WebApiAnnotator が is_api=True, device=None で分類される。"""
     with patched_registry(

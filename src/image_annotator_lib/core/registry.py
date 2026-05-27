@@ -419,6 +419,17 @@ def get_webapi_metadata(model_name: str) -> dict[str, Any] | None:
 _VALID_MODEL_TYPES: frozenset[str] = frozenset(("tagger", "scorer", "captioner", "vision", "rating"))
 
 
+def _is_rating_only_model(model_name: str, model_class: ModelClass) -> bool:
+    """Known rating-only models override legacy config ``type`` values."""
+    model_name_lower = model_name.lower()
+    class_name_lower = model_class.__name__.lower()
+    return (
+        any(keyword in model_name_lower for keyword in ("anime_rating", "moderation"))
+        or "ratingannotator" in class_name_lower
+        or "moderation" in class_name_lower
+    )
+
+
 def _determine_model_type(
     model_name: str, model_class: ModelClass, model_config: dict[str, Any]
 ) -> ModelType:
@@ -437,7 +448,12 @@ def _determine_model_type(
     Returns:
         ModelType: "tagger" / "scorer" / "captioner" / "vision" / "rating" のいずれか
     """
-    # 設定の `type` を最優先で参照 (実際の config キーは "type")
+    # 既存 user config には AnimeRatingAnnotator を type="tagger" としてコピー済みの
+    # ものがあるため、既知の rating-only モデルは legacy type より優先して補正する。
+    if _is_rating_only_model(model_name, model_class):
+        return "rating"
+
+    # 設定の `type` を優先で参照 (実際の config キーは "type")
     config_type = model_config.get("type")
     if isinstance(config_type, str) and config_type in _VALID_MODEL_TYPES:
         return cast(ModelType, config_type)
@@ -445,12 +461,6 @@ def _determine_model_type(
     # モデル名やクラス名から推定
     model_name_lower = model_name.lower()
     class_name_lower = model_class.__name__.lower()
-
-    # レーティング専用モデルの判定
-    if any(keyword in model_name_lower for keyword in ["anime_rating", "moderation"]):
-        return "rating"
-    if any(keyword in class_name_lower for keyword in ["ratingannotator", "moderation"]):
-        return "rating"
 
     # スコア系モデルの判定
     if any(keyword in model_name_lower for keyword in ["aesthetic", "score", "quality"]):
