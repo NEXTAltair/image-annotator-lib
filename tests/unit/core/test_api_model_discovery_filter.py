@@ -49,6 +49,26 @@ class TestIsLitellmModelAnnotationCompatible:
         }
         assert _is_litellm_model_annotation_compatible(info) is False
 
+    def test_openai_moderation_model_is_compatible_without_function_calling(self):
+        """OpenAI Moderations は PydanticAI tool calling を使わない専用経路として登録対象。"""
+        info = {
+            "supports_vision": False,
+            "supports_function_calling": False,
+            "mode": "moderation",
+        }
+        assert (
+            _is_litellm_model_annotation_compatible(info, model_id="openai/omni-moderation-latest") is True
+        )
+
+    def test_unrelated_non_tool_model_stays_excluded(self):
+        """非 tool モデルの互換条件は OpenAI Moderations 以外へ広げない。"""
+        info = {
+            "supports_vision": True,
+            "supports_function_calling": False,
+            "mode": "chat",
+        }
+        assert _is_litellm_model_annotation_compatible(info, model_id="openai/gpt-4o") is False
+
     def test_function_calling_missing_is_excluded(self):
         """function_calling キー欠落でも除外 (`is True` 比較なので False/None/欠落いずれも弾く)。"""
         info = {
@@ -363,6 +383,35 @@ class TestCollectModelsPassesProviderToGetModelInfo:
         mock_info.assert_called_once_with(
             "gemini-2.0-flash-exp-image-generation", custom_llm_provider="gemini"
         )
+
+    def test_collect_models_registers_openai_moderation_without_function_calling(self):
+        """OpenAI moderation allowlist は exact prefix のみに限定される。"""
+        moderation_info = {
+            "litellm_provider": "openai",
+            "supports_vision": False,
+            "supports_function_calling": False,
+            "mode": "moderation",
+        }
+        non_tool_info = {
+            "litellm_provider": "openai",
+            "supports_vision": True,
+            "supports_function_calling": False,
+            "mode": "chat",
+        }
+        mock_cost = {
+            "omni-moderation-latest": moderation_info,
+            "gpt-non-tool": non_tool_info,
+        }
+
+        with patch("image_annotator_lib.webapi.api_model_discovery.litellm") as mock_litellm:
+            mock_litellm.model_cost = mock_cost
+            mock_litellm.get_model_info.side_effect = lambda model_id, custom_llm_provider: mock_cost[
+                model_id
+            ]
+            metadata = _collect_models(require_compatible=True, exclude_deprecated=False)
+
+        assert "openai/omni-moderation-latest" in metadata
+        assert "openai/gpt-non-tool" not in metadata
 
 
 @pytest.mark.unit
