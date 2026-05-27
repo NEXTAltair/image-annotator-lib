@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import datetime
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
@@ -208,7 +208,8 @@ AnnotationResultV2 = (
 
 # --- capability-based統一バリデーションスキーマ (Plan対応) ---
 
-class TaskCapability(str, Enum):
+
+class TaskCapability(StrEnum):
     """サポートするタスク能力(ADR 0002: SCORE_LABELS 追加)。"""
 
     TAGS = "tags"
@@ -313,7 +314,7 @@ UnifiedPHashAnnotationResults = dict[str, dict[str, UnifiedAnnotationResult]]
 # --- アノテーターメタデータ用の型定義 (Issue #19) ---
 
 
-ModelType = Literal["tagger", "scorer", "captioner", "vision"]
+ModelType = Literal["tagger", "scorer", "captioner", "vision", "rating"]
 """アノテーターモデルの主用途分類。
 
 `is_api` と直交した capability 軸の分類。WebAPI モデルでも tagger/scorer/captioner
@@ -323,6 +324,7 @@ ModelType = Literal["tagger", "scorer", "captioner", "vision"]
 - "scorer": 数値スコアモデル (aesthetic scorer 等)
 - "captioner": キャプション生成モデル (BLIP, GIT 等)
 - "vision": 汎用 vision モデル / 未分類 (汎用 VLM 等)
+- "rating": レーティング専用モデル (anime_rating / moderation preflight 等)
 """
 
 
@@ -332,7 +334,7 @@ class AnnotatorInfo:
 
     Attributes:
         name: モデル名 (レジストリキー)。
-        model_type: モデルの主用途分類 (tagger/scorer/captioner/vision)。
+        model_type: モデルの主用途分類 (tagger/scorer/captioner/vision/rating)。
         capabilities: モデルが提供する出力種別の集合。
         is_local: ローカル実行モデルか。
         is_api: 外部 API を呼ぶモデルか (API キー必要)。

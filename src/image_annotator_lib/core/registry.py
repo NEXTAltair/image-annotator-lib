@@ -416,7 +416,18 @@ def get_webapi_metadata(model_name: str) -> dict[str, Any] | None:
     return _WEBAPI_MODEL_METADATA.get(model_name)
 
 
-_VALID_MODEL_TYPES: frozenset[str] = frozenset(("tagger", "scorer", "captioner", "vision"))
+_VALID_MODEL_TYPES: frozenset[str] = frozenset(("tagger", "scorer", "captioner", "vision", "rating"))
+
+
+def _is_rating_only_model(model_name: str, model_class: ModelClass) -> bool:
+    """Known rating-only models override legacy config ``type`` values."""
+    model_name_lower = model_name.lower()
+    class_name_lower = model_class.__name__.lower()
+    return (
+        any(keyword in model_name_lower for keyword in ("anime_rating", "moderation"))
+        or "ratingannotator" in class_name_lower
+        or "moderation" in class_name_lower
+    )
 
 
 def _determine_model_type(
@@ -435,21 +446,28 @@ def _determine_model_type(
         model_config: モデル設定
 
     Returns:
-        ModelType: "tagger" / "scorer" / "captioner" / "vision" のいずれか
+        ModelType: "tagger" / "scorer" / "captioner" / "vision" / "rating" のいずれか
     """
-    # 設定の `type` を最優先で参照 (実際の config キーは "type")
+    # 設定の `type` を優先で参照 (実際の config キーは "type")
     config_type = model_config.get("type")
     if isinstance(config_type, str) and config_type in _VALID_MODEL_TYPES:
+        # 既存 user config には AnimeRatingAnnotator を type="tagger" としてコピー済みの
+        # ものがあるため、既知の rating-only モデルだけ legacy tagger type を補正する。
+        if config_type == "tagger" and _is_rating_only_model(model_name, model_class):
+            return "rating"
         return cast(ModelType, config_type)
 
     # モデル名やクラス名から推定
     model_name_lower = model_name.lower()
     class_name_lower = model_class.__name__.lower()
 
+    if _is_rating_only_model(model_name, model_class):
+        return "rating"
+
     # スコア系モデルの判定
-    if any(keyword in model_name_lower for keyword in ["aesthetic", "score", "rating", "quality"]):
+    if any(keyword in model_name_lower for keyword in ["aesthetic", "score", "quality"]):
         return "scorer"
-    if any(keyword in class_name_lower for keyword in ["aesthetic", "score", "rating", "quality"]):
+    if any(keyword in class_name_lower for keyword in ["aesthetic", "score", "quality"]):
         return "scorer"
 
     # タガー系モデルの判定

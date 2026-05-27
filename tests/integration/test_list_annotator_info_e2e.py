@@ -27,7 +27,7 @@ def test_list_annotator_info_real_registry():
         assert info.is_local != info.is_api, f"{info.name}: XOR 違反"
         if info.is_api:
             assert info.device is None, f"{info.name}: API モデルなのに device あり"
-        assert info.model_type in ("tagger", "scorer", "captioner", "vision")
+        assert info.model_type in ("tagger", "scorer", "captioner", "vision", "rating")
 
     # 名前ソートされている
     names = [info.name for info in infos]

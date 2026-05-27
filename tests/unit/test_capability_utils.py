@@ -175,6 +175,15 @@ class TestGetModelCapabilities:
         assert capabilities == {TaskCapability.TAGS}
 
     @patch("image_annotator_lib.core.config.config_registry")
+    def test_type_fallback_rating_maps_to_ratings_only(self, mock_config_registry):
+        """rating 専用 type は scores/tags を付けず RATINGS のみに推論する。"""
+        mock_config_registry.get.side_effect = [[], "rating"]
+
+        capabilities = get_model_capabilities("anime_rating_mobilenetv3_sce_dist")
+
+        assert capabilities == {TaskCapability.RATINGS}
+
+    @patch("image_annotator_lib.core.config.config_registry")
     def test_explicit_capabilities_override_class_based_fallback(self, mock_config_registry):
         """明示 capabilities が指定されていれば class ベースフォールバックは適用しない。
 

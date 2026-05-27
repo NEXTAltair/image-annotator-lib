@@ -103,7 +103,7 @@ model_path = "deepghs/anime_rating"
 model_variant = "mobilenetv3_sce_dist"
 class = "AnimeRatingAnnotator"
 estimated_size_gb = 0.047
-type = "tagger"
+type = "rating"
 capabilities = [ "ratings",]
 
 [anime_rating_caformer_s36_plus]
@@ -111,7 +111,7 @@ model_path = "deepghs/anime_rating"
 model_variant = "caformer_s36_plus"
 class = "AnimeRatingAnnotator"
 estimated_size_gb = 0.52
-type = "tagger"
+type = "rating"
 capabilities = [ "ratings",]
 
 [camie_tagger_initial]
@@ -247,4 +247,3 @@ model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v1-20
 class = "DeepDanbooruTagger"
 estimated_size_gb = 0.66
 type = "tagger"
-
