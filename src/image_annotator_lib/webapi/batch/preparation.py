@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,3 +53,48 @@ def prepare_items(items: list[BatchSubmitItem], *, provider: str) -> list[Prepar
             )
         )
     return prepared
+
+
+def build_openai_moderations_jsonl(
+    items: list[PreparedBatchItem], *, endpoint: str, litellm_model_id: str
+) -> str:
+    """Build OpenAI batch input JSONL for /v1/moderations requests."""
+
+    lines: list[str] = []
+    for item in items:
+        try:
+            payload_bytes = item.image_path.read_bytes()
+        except OSError as exc:
+            raise BatchJobError(
+                phase=BatchErrorPhase.PREPARE,
+                provider="openai",
+                provider_job_id=None,
+                code="image_read_failed",
+                message=f"Failed to read image for OpenAI batch input: {item.image_path}: {exc}",
+                retryable=False,
+            ) from exc
+        encoded = base64.b64encode(payload_bytes).decode("ascii")
+        lines.append(
+            json.dumps(
+                {
+                    "custom_id": item.custom_id,
+                    "method": "POST",
+                    "url": endpoint,
+                    "body": {
+                        "model": litellm_model_id,
+                        "input": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{item.image_mime_type};base64,{encoded}",
+                                },
+                            }
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+
+    return "\n".join(lines)

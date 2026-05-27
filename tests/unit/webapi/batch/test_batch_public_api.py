@@ -68,3 +68,32 @@ def test_list_batch_capable_models_returns_anthropic_metadata(monkeypatch) -> No
     assert TaskCapability.RATINGS in models[0].capabilities
     assert models[0].metadata["result_retention_days"] == 29
     assert models[0].metadata["zero_data_retention_eligible"] is False
+
+
+def test_list_batch_capable_models_includes_openai_ratings_model(monkeypatch) -> None:
+    monkeypatch.setattr(service, "list_available_annotators", lambda: ["claude", "gpt"])
+    monkeypatch.setattr(
+        service,
+        "get_webapi_metadata",
+        lambda name: {
+            "claude": {
+                "provider": "anthropic",
+                "litellm_model_id": "anthropic/claude-3-5-haiku-latest",
+                "capabilities": ["tags", "captions", "scores", "ratings"],
+            },
+            "gpt": {
+                "provider": "openai",
+                "litellm_model_id": "openai/omni-moderation-latest",
+                "capabilities": ["ratings"],
+            },
+        }.get(name),
+    )
+
+    models = list_batch_capable_models()
+    providers = {model.provider for model in models}
+
+    assert providers == {"anthropic", "openai"}
+    openai_model = next(model for model in models if model.provider == "openai")
+    assert openai_model.litellm_model_id == "openai/omni-moderation-latest"
+    assert openai_model.metadata["provider_batch_api"] == "openai_batch"
+    assert openai_model.metadata["zero_data_retention_eligible"] is True

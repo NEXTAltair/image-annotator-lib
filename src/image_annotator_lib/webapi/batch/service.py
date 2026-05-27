@@ -8,6 +8,7 @@ from image_annotator_lib.core.registry import get_webapi_metadata, list_availabl
 from image_annotator_lib.core.types import TaskCapability
 
 from .adapters.anthropic import AnthropicBatchAdapter
+from .adapters.openai import OpenAIBatchAdapter
 from .types import (
     BatchErrorPhase,
     BatchFetchResult,
@@ -24,6 +25,8 @@ def _adapter_for_provider(provider: str) -> AnthropicBatchAdapter:
     normalized = provider.lower()
     if normalized == "anthropic":
         return AnthropicBatchAdapter()
+    if normalized == "openai":
+        return OpenAIBatchAdapter()
     raise BatchJobError(
         phase=BatchErrorPhase.PREPARE,
         provider=normalized,
@@ -47,22 +50,30 @@ def _capabilities_from_metadata(value: object) -> frozenset[TaskCapability]:
 
 
 def list_batch_capable_models() -> list[BatchModelInfo]:
-    """Return direct Anthropic models usable with the provider batch route."""
+    """Return direct Anthropic and OpenAI models usable with the provider batch route."""
     models: list[BatchModelInfo] = []
     for model_name in list_available_annotators():
         metadata = get_webapi_metadata(model_name)
-        if not metadata or str(metadata.get("provider", "")).lower() != "anthropic":
+        provider = str(metadata.get("provider", "")).lower()
+        if provider not in {"anthropic", "openai"}:
             continue
         litellm_model_id = metadata.get("litellm_model_id")
         if not isinstance(litellm_model_id, str) or not litellm_model_id:
             continue
+        capabilities = _capabilities_from_metadata(metadata.get("capabilities"))
+        if provider == "openai" and TaskCapability.RATINGS not in capabilities:
+            continue
         models.append(
             BatchModelInfo(
-                provider="anthropic",
+                provider=provider,
                 litellm_model_id=litellm_model_id,
                 display_name=model_name,
-                capabilities=_capabilities_from_metadata(metadata.get("capabilities")),
-                metadata=AnthropicBatchAdapter.batch_metadata(),
+                capabilities=capabilities,
+                metadata=(
+                    OpenAIBatchAdapter.batch_metadata()
+                    if provider == "openai"
+                    else AnthropicBatchAdapter.batch_metadata()
+                ),
             )
         )
     return models
