@@ -694,28 +694,50 @@ def _request_counts(batch: Any) -> Any:
     return _get(batch, "request_counts") or {}
 
 
+# OpenAI Batch API の request_counts field 名 (実 API 確認 2026-05-27)。
+# 過去の adapter 実装は古い `succeeded` / `errored` を仮定していたが、現実の
+# response は `completed` / `failed` / `total` を使う (#518 runtime smoke で発覚)。
+# Legacy 名は backward compat 用に併存させる。
+_COUNT_KEY_ALIASES: dict[str, tuple[str, ...]] = {
+    "succeeded": ("completed", "succeeded"),
+    "errored": ("failed", "errored"),
+    "canceled": ("cancelled", "canceled"),
+    "expired": ("expired",),
+    "total": ("total",),
+}
+
+
 def _count(batch: Any, name: str) -> int | None:
-    value = _get(_request_counts(batch), name)
-    return int(value) if isinstance(value, (int, float)) else None
+    counts = _request_counts(batch)
+    for key in _COUNT_KEY_ALIASES.get(name, (name,)):
+        value = _get(counts, key)
+        if isinstance(value, (int, float)):
+            return int(value)
+    return None
 
 
 def _request_count(batch: Any) -> int | None:
-    counts = [_count(batch, key) for key in ("processing", "succeeded", "errored", "canceled", "expired")]
+    total = _count(batch, "total")
+    if total is not None:
+        return total
+    counts = [_count(batch, key) for key in ("succeeded", "errored", "canceled", "expired")]
     known_counts = [count for count in counts if count is not None]
     return sum(known_counts) if known_counts else None
 
 
 def _status_from_batch(batch: Any) -> BatchStatus:
-    processing_status = str(_get(batch, "processing_status") or "").lower()
-    if processing_status in {"in_progress", "validating", "cancelling", "canceling", "finalizing", "queued"}:
+    # OpenAI は実 response で `status` field を使う。古い実装は `processing_status` を
+    # 仮定していたが現実の API では None。両方読んで最初に見つかった値を使う。
+    raw_status = str(_get(batch, "status") or _get(batch, "processing_status") or "").lower()
+    if raw_status in {"in_progress", "validating", "cancelling", "canceling", "finalizing", "queued"}:
         return BatchStatus.RUNNING
-    if processing_status == "cancelled":
+    if raw_status in {"cancelled", "canceled"}:
         return BatchStatus.CANCELED
-    if processing_status == "expired":
+    if raw_status == "expired":
         return BatchStatus.EXPIRED
-    if processing_status == "failed":
+    if raw_status == "failed":
         return BatchStatus.FAILED
-    if processing_status in {"completed", "ended"}:
+    if raw_status in {"completed", "ended"}:
         total = _request_count(batch) or 0
         succeeded = _count(batch, "succeeded") or 0
         errored = _count(batch, "errored") or 0
