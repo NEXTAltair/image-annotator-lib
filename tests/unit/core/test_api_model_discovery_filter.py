@@ -167,6 +167,18 @@ class TestFormatLitellmMetadata:
         assert metadata["model_name_short"] == "openai/gpt-4o"
         assert metadata["display_name"] == "openai/gpt-4o"
         assert metadata["provider"] == "OpenAI"
+        assert "capabilities" not in metadata
+
+    def test_openai_moderation_metadata_declares_ratings_capability(self):
+        """OpenAI Moderations must preserve ratings through WebApiAnnotator formatting."""
+        info = {
+            "supports_vision": False,
+            "supports_function_calling": False,
+            "mode": "moderation",
+        }
+        metadata = _format_litellm_metadata("openai/omni-moderation-latest", info)
+        assert metadata is not None
+        assert metadata["capabilities"] == ["ratings"]
 
     def test_claude_bare_canonicalized(self):
         """Issue #52 / #60: bare ``claude-*`` は ``anthropic/<bare>`` に正規化される。
@@ -411,6 +423,7 @@ class TestCollectModelsPassesProviderToGetModelInfo:
             metadata = _collect_models(require_compatible=True, exclude_deprecated=False)
 
         assert "openai/omni-moderation-latest" in metadata
+        assert metadata["openai/omni-moderation-latest"]["capabilities"] == ["ratings"]
         assert "openai/gpt-non-tool" not in metadata
 
 
