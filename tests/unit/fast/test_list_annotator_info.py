@@ -27,6 +27,10 @@ class _DummyCaptioner:
     """ローカル ML キャプショナーのダミー実装。クラス名から model_type=captioner と判定される。"""
 
 
+class _DummyRatingAnnotator:
+    """ローカル ML レーティング専用モデルのダミー実装。"""
+
+
 # Note: ADR 0023 Phase 1 (Issue #35) で `_requires_api_key` は class 名照合ではなく
 # `issubclass(model_class, WebApiAnnotator)` 判定に変わった。WebAPI ダミー class は
 # 廃止し、registry に直接 `WebApiAnnotator` を登録する形式に書き換え済み。
@@ -141,6 +145,30 @@ def test_local_ml_model_classification(patched_registry):
     assert info.is_api is False
     assert info.device == "cuda"
     assert TaskCapability.TAGS in info.capabilities
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_local_rating_model_classification(patched_registry):
+    """rating 専用モデルが model_type='rating' / RATINGS capability で分類される。"""
+    with patched_registry(
+        model_dict={"anime_rating_mobilenetv3_sce_dist": _DummyRatingAnnotator},
+        config_dict={
+            "anime_rating_mobilenetv3_sce_dist": {
+                "type": "rating",
+                "device": "cuda",
+                "capabilities": ["ratings"],
+            }
+        },
+    ):
+        result = list_annotator_info()
+
+    assert len(result) == 1
+    info = result[0]
+    assert info.model_type == "rating"
+    assert info.capabilities == frozenset({TaskCapability.RATINGS})
+    assert info.is_local is True
+    assert info.is_api is False
 
 
 @pytest.mark.unit

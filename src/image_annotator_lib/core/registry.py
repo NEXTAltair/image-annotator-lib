@@ -234,7 +234,7 @@ def _try_register_model(
 
     if model_name in registry:
         if registry[model_name] is model_cls:
-            logger.debug(f"モデル名 '{model_name}' は既に登録されています（同一クラス）。スキップします。")
+            logger.debug(f"モデル名 '{model_name}' は既に登録されています(同一クラス)。スキップします。")
             return True
         logger.warning(
             f"モデル名 '{model_name}' は既に登録されています。クラス '{model_cls.__name__}' で上書きします。"
@@ -416,7 +416,7 @@ def get_webapi_metadata(model_name: str) -> dict[str, Any] | None:
     return _WEBAPI_MODEL_METADATA.get(model_name)
 
 
-_VALID_MODEL_TYPES: frozenset[str] = frozenset(("tagger", "scorer", "captioner", "vision"))
+_VALID_MODEL_TYPES: frozenset[str] = frozenset(("tagger", "scorer", "captioner", "vision", "rating"))
 
 
 def _determine_model_type(
@@ -435,7 +435,7 @@ def _determine_model_type(
         model_config: モデル設定
 
     Returns:
-        ModelType: "tagger" / "scorer" / "captioner" / "vision" のいずれか
+        ModelType: "tagger" / "scorer" / "captioner" / "vision" / "rating" のいずれか
     """
     # 設定の `type` を最優先で参照 (実際の config キーは "type")
     config_type = model_config.get("type")
@@ -446,10 +446,16 @@ def _determine_model_type(
     model_name_lower = model_name.lower()
     class_name_lower = model_class.__name__.lower()
 
+    # レーティング専用モデルの判定
+    if any(keyword in model_name_lower for keyword in ["anime_rating", "moderation"]):
+        return "rating"
+    if any(keyword in class_name_lower for keyword in ["ratingannotator", "moderation"]):
+        return "rating"
+
     # スコア系モデルの判定
-    if any(keyword in model_name_lower for keyword in ["aesthetic", "score", "rating", "quality"]):
+    if any(keyword in model_name_lower for keyword in ["aesthetic", "score", "quality"]):
         return "scorer"
-    if any(keyword in class_name_lower for keyword in ["aesthetic", "score", "rating", "quality"]):
+    if any(keyword in class_name_lower for keyword in ["aesthetic", "score", "quality"]):
         return "scorer"
 
     # タガー系モデルの判定

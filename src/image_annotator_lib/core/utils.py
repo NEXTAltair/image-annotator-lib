@@ -361,6 +361,7 @@ def _infer_capabilities_from_type(model_name: str) -> set[Any] | None:
         "tagger": [TaskCapability.TAGS],
         "scorer": [TaskCapability.SCORES],
         "captioner": [TaskCapability.CAPTIONS],
+        "rating": [TaskCapability.RATINGS],
     }
     inferred = type_to_capabilities.get(model_type, [])
     if not inferred:
