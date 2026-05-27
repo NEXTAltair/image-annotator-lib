@@ -8,10 +8,20 @@ from datetime import datetime
 from importlib import import_module
 from typing import Any
 
-from image_annotator_lib.core.types import RatingPrediction, TaskCapability, UnifiedAnnotationResult
+from image_annotator_lib.core.types import (
+    AnnotationSchema,
+    RatingPrediction,
+    TaskCapability,
+    UnifiedAnnotationResult,
+)
 from image_annotator_lib.webapi.model_id import resolve_model_ref
+from image_annotator_lib.webapi.output_normalization import normalize_annotation_output
 
-from ..preparation import build_openai_moderations_jsonl, prepare_items
+from ..preparation import (
+    build_openai_chat_completions_annotation_jsonl,
+    build_openai_moderations_jsonl,
+    prepare_items,
+)
 from ..types import (
     BatchErrorPhase,
     BatchFetchResult,
@@ -31,9 +41,22 @@ from ..types import (
 _PROVIDER = "openai"
 _MAX_LIBRARY_ITEMS = 500
 _SUPPORTED_PROMPT_PROFILES = frozenset({"default"})
-_SUPPORTED_ENDPOINTS = frozenset({"/v1/moderations", "/v1/moderations/"})
+_MODERATIONS_ENDPOINTS = frozenset({"/v1/moderations", "/v1/moderations/"})
+_CHAT_COMPLETIONS_ENDPOINTS = frozenset({"/v1/chat/completions", "/v1/chat/completions/"})
+_SUPPORTED_ENDPOINTS = _MODERATIONS_ENDPOINTS | _CHAT_COMPLETIONS_ENDPOINTS
 _DEFAULT_COMPLETION_WINDOW = "24h"
-_SUPPORTED_CAPABILITIES = frozenset({TaskCapability.RATINGS})
+_DEFAULT_ANNOTATION_CAPABILITIES = frozenset(
+    {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
+)
+_CAPABILITIES_BY_ENDPOINT_GROUP: dict[frozenset[str], frozenset[TaskCapability]] = {
+    _MODERATIONS_ENDPOINTS: frozenset({TaskCapability.RATINGS}),
+    _CHAT_COMPLETIONS_ENDPOINTS: _DEFAULT_ANNOTATION_CAPABILITIES,
+}
+_ANNOTATION_TOOL_NAME = "normalize_annotation_output"
+_ANNOTATION_BASE_PROMPT = (
+    "You analyze images and return structured annotations via the "
+    "`normalize_annotation_output` tool. Respect required fields per capability."
+)
 
 
 def _load_openai_converter() -> Any:
@@ -103,11 +126,20 @@ class OpenAIBatchAdapter:
 
         model_ref = self._resolve_model_ref(request.litellm_model_id)
         prepared = prepare_items(request.items, provider=_PROVIDER)
-        request_payload = build_openai_moderations_jsonl(
-            prepared,
-            endpoint=normalized_endpoint,
-            litellm_model_id=model_ref.provider_model_id,
-        )
+        if normalized_endpoint in _MODERATIONS_ENDPOINTS:
+            request_payload = build_openai_moderations_jsonl(
+                prepared,
+                endpoint=normalized_endpoint,
+                litellm_model_id=model_ref.provider_model_id,
+            )
+        else:
+            request_payload = build_openai_chat_completions_annotation_jsonl(
+                prepared,
+                endpoint=normalized_endpoint,
+                litellm_model_id=model_ref.provider_model_id,
+                system_prompt=_ANNOTATION_BASE_PROMPT,
+                capabilities=_DEFAULT_ANNOTATION_CAPABILITIES,
+            )
 
         try:
             input_file = self._client(api_key).files.create(
@@ -222,11 +254,16 @@ class OpenAIBatchAdapter:
                 retryable=False,
             )
 
+        batch_endpoint = str(_get(batch, "endpoint") or "")
+        normalized_batch_endpoint = (
+            batch_endpoint if batch_endpoint.startswith("/") else f"/{batch_endpoint}"
+        )
+
         seen: dict[str, int] = {}
         items: list[BatchResultItem] = []
         if output_file_id:
             output_lines = self._read_jsonl_lines(api_key, str(output_file_id))
-            items.extend(self._parse_output_lines(output_lines, seen))
+            items.extend(self._parse_output_lines(output_lines, seen, normalized_batch_endpoint))
         if error_file_id:
             error_lines = self._read_jsonl_lines(api_key, str(error_file_id))
             items.extend(self._parse_error_lines(error_lines, seen))
@@ -252,10 +289,12 @@ class OpenAIBatchAdapter:
             ) from exc
         return _to_status_result(batch, provider_job_id=handle.provider_job_id)
 
-    def _parse_output_lines(self, lines: list[str], seen: dict[str, int]) -> list[BatchResultItem]:
+    def _parse_output_lines(
+        self, lines: list[str], seen: dict[str, int], endpoint: str
+    ) -> list[BatchResultItem]:
         parsed: list[BatchResultItem] = []
         for raw in lines:
-            parsed_item = self._normalize_result_item(raw, line_type="output")
+            parsed_item = self._normalize_result_item(raw, line_type="output", endpoint=endpoint)
             if parsed_item is None:
                 continue
             if parsed_item.custom_id in seen:
@@ -267,7 +306,7 @@ class OpenAIBatchAdapter:
     def _parse_error_lines(self, lines: list[str], seen: dict[str, int]) -> list[BatchResultItem]:
         parsed: list[BatchResultItem] = []
         for raw in lines:
-            parsed_item = self._normalize_result_item(raw, line_type="error")
+            parsed_item = self._normalize_result_item(raw, line_type="error", endpoint="")
             if parsed_item is None:
                 continue
             if parsed_item.custom_id in seen:
@@ -276,7 +315,9 @@ class OpenAIBatchAdapter:
             parsed.append(parsed_item)
         return parsed
 
-    def _normalize_result_item(self, raw_line: str, *, line_type: str) -> BatchResultItem | None:
+    def _normalize_result_item(
+        self, raw_line: str, *, line_type: str, endpoint: str
+    ) -> BatchResultItem | None:
         if not raw_line.strip():
             return None
         try:
@@ -331,8 +372,8 @@ class OpenAIBatchAdapter:
                 retryable=_provider_item_retryable(error),
             )
 
-        moderation_response = _extract_moderation_response(response)
-        if not isinstance(moderation_response, Mapping):
+        response_body = _extract_response_body(response)
+        if not isinstance(response_body, Mapping):
             return _failed_result_item(
                 custom_id,
                 BatchProviderItemStatus.UNKNOWN,
@@ -341,12 +382,125 @@ class OpenAIBatchAdapter:
                 "OpenAI output response payload was not a mapping",
                 retryable=False,
             )
-        rating = _CATEGORY_SCORES_TO_RATING_PREDICTION(moderation_response)
+
+        if endpoint in _CHAT_COMPLETIONS_ENDPOINTS:
+            return self._build_chat_completions_item(custom_id, response_body)
+        # Moderations endpoint (default fallback for backward compatibility)
+        rating = _CATEGORY_SCORES_TO_RATING_PREDICTION(response_body)
         return BatchResultItem(
             custom_id=custom_id,
             status=BatchItemStatus.SUCCEEDED,
             provider_status=BatchProviderItemStatus.SUCCEEDED,
-            annotation=_to_unified(rating),
+            annotation=_to_unified_rating(rating),
+            error=None,
+        )
+
+    def _build_chat_completions_item(
+        self, custom_id: str, response_body: Mapping[str, Any]
+    ) -> BatchResultItem:
+        """Parse a /v1/chat/completions Batch output line into BatchResultItem.
+
+        annotation tool 出力 (`tool_calls[0].function.arguments`) を JSON parse し、
+        `normalize_annotation_output()` (output_normalization) で軽微正規化 +
+        `AnnotationSchema` validate を経て `UnifiedAnnotationResult` に包む (Issue #518)。
+
+        refusal (`message.refusal` non-null / `finish_reason == "content_filter"`) は
+        `BatchItemError(code="provider_safety_refusal")` に正規化する。
+        """
+
+        choices = response_body.get("choices") if isinstance(response_body, Mapping) else None
+        if not isinstance(choices, list) or not choices:
+            return _failed_result_item(
+                custom_id,
+                BatchProviderItemStatus.UNKNOWN,
+                BatchErrorPhase.PARSE,
+                "result_choices_missing",
+                "OpenAI chat completions output had no `choices`",
+                retryable=False,
+            )
+
+        choice = choices[0]
+        message = _get(choice, "message") if isinstance(choice, Mapping) else None
+        finish_reason = str(_get(choice, "finish_reason") or "").lower()
+        refusal = _get(message, "refusal") if isinstance(message, Mapping) else None
+
+        if finish_reason == "content_filter" or (isinstance(refusal, str) and refusal.strip()):
+            refusal_message = (
+                refusal.strip()
+                if isinstance(refusal, str) and refusal.strip()
+                else "OpenAI safety filter refused the request"
+            )
+            return _failed_result_item(
+                custom_id,
+                BatchProviderItemStatus.FAILED,
+                BatchErrorPhase.NORMALIZE,
+                "provider_safety_refusal",
+                refusal_message,
+                retryable=False,
+            )
+
+        tool_calls = _get(message, "tool_calls") if isinstance(message, Mapping) else None
+        if not isinstance(tool_calls, list) or not tool_calls:
+            return _failed_result_item(
+                custom_id,
+                BatchProviderItemStatus.UNKNOWN,
+                BatchErrorPhase.PARSE,
+                "result_tool_call_missing",
+                "OpenAI chat completions output had no tool_calls; finish_reason="
+                f"{finish_reason or 'unknown'}",
+                retryable=False,
+            )
+
+        function = _get(tool_calls[0], "function")
+        arguments_raw = _get(function, "arguments") if isinstance(function, Mapping) else None
+        if not isinstance(arguments_raw, str) or not arguments_raw.strip():
+            return _failed_result_item(
+                custom_id,
+                BatchProviderItemStatus.UNKNOWN,
+                BatchErrorPhase.PARSE,
+                "result_tool_arguments_missing",
+                "OpenAI tool_calls[0].function.arguments was empty or non-string",
+                retryable=False,
+            )
+
+        try:
+            arguments = json.loads(arguments_raw)
+        except json.JSONDecodeError as exc:
+            return _failed_result_item(
+                custom_id,
+                BatchProviderItemStatus.FAILED,
+                BatchErrorPhase.PARSE,
+                "result_tool_arguments_invalid_json",
+                f"OpenAI tool_calls arguments JSON decode failed: {exc}",
+                retryable=False,
+            )
+        if not isinstance(arguments, dict):
+            return _failed_result_item(
+                custom_id,
+                BatchProviderItemStatus.FAILED,
+                BatchErrorPhase.PARSE,
+                "result_tool_arguments_not_object",
+                "OpenAI tool_calls arguments was not a JSON object",
+                retryable=False,
+            )
+
+        try:
+            schema = normalize_annotation_output(**arguments)
+        except Exception as exc:
+            return _failed_result_item(
+                custom_id,
+                BatchProviderItemStatus.FAILED,
+                BatchErrorPhase.NORMALIZE,
+                "result_normalize_failed",
+                f"normalize_annotation_output failed: {self._format_exception(exc)}",
+                retryable=False,
+            )
+
+        return BatchResultItem(
+            custom_id=custom_id,
+            status=BatchItemStatus.SUCCEEDED,
+            provider_status=BatchProviderItemStatus.SUCCEEDED,
+            annotation=_to_unified_annotation(schema),
             error=None,
         )
 
@@ -449,10 +603,10 @@ class OpenAIBatchAdapter:
         return str(error_type).lower() in {"api_error", "server_error", "overloaded_error", "rate_limit_error"}
 
 
-def _to_unified(prediction: RatingPrediction) -> UnifiedAnnotationResult:
+def _to_unified_rating(prediction: RatingPrediction) -> UnifiedAnnotationResult:
     return UnifiedAnnotationResult(
         model_name="openai_batch",
-        capabilities=_SUPPORTED_CAPABILITIES,
+        capabilities=frozenset({TaskCapability.RATINGS}),
         ratings=[prediction],
         provider_name=_PROVIDER,
         framework="openai_batch",
@@ -460,7 +614,33 @@ def _to_unified(prediction: RatingPrediction) -> UnifiedAnnotationResult:
     )
 
 
-def _extract_moderation_response(response: Mapping[str, Any] | Any) -> Any:
+def _to_unified_annotation(schema: AnnotationSchema) -> UnifiedAnnotationResult:
+    """Wrap a validated `AnnotationSchema` into `UnifiedAnnotationResult` for the chat
+    completions Batch path. capability は output された実 field の集合から推定する。
+    """
+    capabilities: set[TaskCapability] = set()
+    if schema.tags:
+        capabilities.add(TaskCapability.TAGS)
+    if schema.captions:
+        capabilities.add(TaskCapability.CAPTIONS)
+    if schema.score is not None:
+        capabilities.add(TaskCapability.SCORES)
+    if schema.ratings:
+        capabilities.add(TaskCapability.RATINGS)
+    return UnifiedAnnotationResult(
+        model_name="openai_batch",
+        capabilities=frozenset(capabilities) if capabilities else _DEFAULT_ANNOTATION_CAPABILITIES,
+        tags=list(schema.tags) if schema.tags else None,
+        captions=list(schema.captions) if schema.captions else None,
+        scores={"score": float(schema.score)} if schema.score is not None else None,
+        ratings=list(schema.ratings) if schema.ratings else None,
+        provider_name=_PROVIDER,
+        framework="openai_batch",
+        raw_output=None,
+    )
+
+
+def _extract_response_body(response: Mapping[str, Any] | Any) -> Any:
     body = _get(response, "body")
     if isinstance(body, dict):
         return body
