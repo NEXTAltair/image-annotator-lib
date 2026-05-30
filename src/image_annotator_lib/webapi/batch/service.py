@@ -20,8 +20,10 @@ from .types import (
     BatchSubmitResult,
 )
 
+BatchAdapter = AnthropicBatchAdapter | OpenAIBatchAdapter
 
-def _adapter_for_provider(provider: str) -> AnthropicBatchAdapter:
+
+def _adapter_for_provider(provider: str) -> BatchAdapter:
     normalized = provider.lower()
     if normalized == "anthropic":
         return AnthropicBatchAdapter()
@@ -54,6 +56,8 @@ def list_batch_capable_models() -> list[BatchModelInfo]:
     models: list[BatchModelInfo] = []
     for model_name in list_available_annotators():
         metadata = get_webapi_metadata(model_name)
+        if metadata is None:
+            continue
         provider = str(metadata.get("provider", "")).lower()
         if provider not in {"anthropic", "openai"}:
             continue

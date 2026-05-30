@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import image_annotator_lib
 from image_annotator_lib.core.types import TaskCapability
 from image_annotator_lib.webapi.batch import (
@@ -68,6 +70,34 @@ def test_list_batch_capable_models_returns_anthropic_metadata(monkeypatch) -> No
     assert TaskCapability.RATINGS in models[0].capabilities
     assert models[0].metadata["result_retention_days"] == 29
     assert models[0].metadata["zero_data_retention_eligible"] is False
+
+
+def test_list_batch_capable_models_skips_models_without_webapi_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ローカル ML モデルは get_webapi_metadata() が None を返す (iam-lib #128)。
+
+    list_available_annotators() はローカル ML モデル (WDTagger 等) も列挙するが、
+    それらは _WEBAPI_MODEL_METADATA 未登録のため get_webapi_metadata() が None を返す。
+    None を skip せず .get() を呼ぶと AttributeError でループ全体が落ち、batch-capable
+    一覧が常に空になる。None メタデータのモデルは skip し WebAPI モデルだけ返すこと。
+    """
+    monkeypatch.setattr(service, "list_available_annotators", lambda: ["wd-tagger", "claude"])
+    monkeypatch.setattr(
+        service,
+        "get_webapi_metadata",
+        lambda name: {
+            "claude": {
+                "provider": "anthropic",
+                "litellm_model_id": "anthropic/claude-3-5-haiku-latest",
+                "capabilities": ["tags", "captions", "scores", "ratings"],
+            }
+        }.get(name),  # "wd-tagger" は None (ローカル ML モデルを再現)
+    )
+
+    models = list_batch_capable_models()
+
+    assert {model.litellm_model_id for model in models} == {"anthropic/claude-3-5-haiku-latest"}
 
 
 def test_list_batch_capable_models_includes_openai_ratings_model(monkeypatch) -> None:
