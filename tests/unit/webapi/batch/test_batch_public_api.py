@@ -70,7 +70,9 @@ def test_list_batch_capable_models_returns_anthropic_metadata(monkeypatch) -> No
     assert models[0].metadata["zero_data_retention_eligible"] is False
 
 
-def test_list_batch_capable_models_skips_models_without_webapi_metadata(monkeypatch) -> None:
+def test_list_batch_capable_models_skips_models_without_webapi_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """ローカル ML モデルは get_webapi_metadata() が None を返す (iam-lib #128)。
 
     list_available_annotators() はローカル ML モデル (WDTagger 等) も列挙するが、
