@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import image_annotator_lib
 from image_annotator_lib.core.types import TaskCapability
 from image_annotator_lib.webapi.batch import (
