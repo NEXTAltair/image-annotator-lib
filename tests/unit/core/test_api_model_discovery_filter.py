@@ -19,7 +19,9 @@ from image_annotator_lib.webapi.api_model_discovery import (
     _canonicalize_litellm_id,
     _collect_models,
     _format_litellm_metadata,
+    _is_annotation_suitable,
     _is_litellm_model_annotation_compatible,
+    discover_available_vision_models,
     is_allowed_provider,
     is_model_deprecated,
 )
@@ -87,23 +89,148 @@ class TestIsLitellmModelAnnotationCompatible:
         }
         assert _is_litellm_model_annotation_compatible(info) is False
 
-    def test_responses_mode_is_compatible(self):
-        """mode=responses も chat と同様に compatible (Phase 1 仕様)。"""
+    def test_responses_mode_is_excluded(self):
+        """Issue #130: mode=responses は除外。
+
+        現 runtime (`build_pydantic_model`) は OpenAI を常に OpenAIChatModel
+        (`v1/chat/completions`) で構築するため responses 専用モデルは実行不能。
+        Responses runtime 対応は #131 で gate 反転予定。
+        """
         info = {
             "supports_vision": True,
             "supports_function_calling": True,
             "mode": "responses",
         }
-        assert _is_litellm_model_annotation_compatible(info) is True
+        assert _is_litellm_model_annotation_compatible(info) is False
 
     def test_completion_mode_is_excluded(self):
-        """mode=completion 等は除外 (Phase 1 は chat / responses のみ)。"""
+        """mode=completion 等は除外 (Issue #130 以降 chat のみ)。"""
         info = {
             "supports_vision": True,
             "supports_function_calling": True,
             "mode": "completion",
         }
         assert _is_litellm_model_annotation_compatible(info) is False
+
+    def test_chat_with_tools_in_supported_openai_params_is_compatible(self):
+        """Issue #130: supported_openai_params に tools があれば compatible。"""
+        info = {
+            "supports_vision": True,
+            "supports_function_calling": True,
+            "mode": "chat",
+            "supported_openai_params": ["max_tokens", "tools", "tool_choice", "response_format"],
+        }
+        assert _is_litellm_model_annotation_compatible(info) is True
+
+    def test_chat_without_tools_in_supported_openai_params_is_excluded(self):
+        """Issue #130: params が populate されているのに tools が無いモデルは除外。
+
+        gpt-5-search-api 族は litellm が supports_function_calling=True と報告するが
+        supported_openai_params に tools を持たないため構造化 tool 出力が不可能。
+        params (ground truth) を boolean より優先して弾く。
+        """
+        info = {
+            "supports_vision": True,
+            "supports_function_calling": True,
+            "mode": "chat",
+            "supported_openai_params": ["max_tokens", "web_search_options", "response_format"],
+        }
+        assert _is_litellm_model_annotation_compatible(info) is False
+
+    def test_unpopulated_supported_openai_params_trusts_function_calling(self):
+        """Issue #130: params が未populate (Gemini/Anthropic等) なら boolean を信頼する。
+
+        空リスト / キー欠落で tools 必須にすると Gemini/Anthropic を全滅させるため、
+        params が無い場合は従来どおり supports_function_calling のみで判定する。
+        """
+        info_missing = {
+            "supports_vision": True,
+            "supports_function_calling": True,
+            "mode": "chat",
+        }
+        assert _is_litellm_model_annotation_compatible(info_missing) is True
+        info_empty = {
+            "supports_vision": True,
+            "supports_function_calling": True,
+            "mode": "chat",
+            "supported_openai_params": [],
+        }
+        assert _is_litellm_model_annotation_compatible(info_empty) is True
+
+
+@pytest.mark.unit
+class TestIsAnnotationSuitable:
+    """Issue #130 軸B: 用途不適モデルの名前 denylist 検証。"""
+
+    @pytest.mark.parametrize(
+        "model_id",
+        [
+            "gemini/gemini-2.5-pro-preview-tts",
+            "gemini/gemini-2.5-computer-use-preview-10-2025",
+            "openai/gpt-4o-search-preview",
+            "openai/gpt-4o-mini-search-preview-2025-03-11",
+            "openai/o3-deep-research",
+            "openai/o4-mini-deep-research-2025-06-26",
+        ],
+    )
+    def test_unsuitable_models_excluded(self, model_id):
+        """TTS / computer-use / search-preview / deep-research は不適。"""
+        assert _is_annotation_suitable(model_id) is False
+
+    @pytest.mark.parametrize(
+        "model_id",
+        [
+            "openai/gpt-4o",
+            "openai/gpt-5",
+            "anthropic/claude-sonnet-4-5",
+            "gemini/gemini-2.5-pro",
+            # codex は denylist に入れない: OpenRouter chat codex は動作可能なため残す
+            "openrouter/openai/gpt-5.1-codex-max",
+        ],
+    )
+    def test_suitable_models_kept(self, model_id):
+        """標準モデルと OpenRouter codex は適格 (除外しない)。"""
+        assert _is_annotation_suitable(model_id) is True
+
+
+@pytest.mark.unit
+class TestDiscoverAvailableVisionModelsRegression:
+    """Issue #130: 実 litellm 同梱 DB に対する discovery 回帰テスト。
+
+    LITELLM_LOCAL_MODEL_COST_MAP=True (api_model_discovery import 時に設定) のため
+    network には出ない。litellm DB 更新で drift し得るが、月次 dependency review で
+    確認する前提の固定 (dependency-management.md)。
+    """
+
+    def test_responses_and_unsuitable_models_excluded(self):
+        models = set(discover_available_vision_models()["models"])
+        excluded = [
+            # 軸A: mode=responses (endpoint-gate)
+            "openai/o3-deep-research",
+            "openai/o4-mini-deep-research-2025-06-26",
+            "openai/gpt-5-pro",
+            "openai/o3-pro",
+            # 軸B-1: tools 非対応 (search-api)
+            "openai/gpt-5-search-api",
+            # 軸B-2: name denylist
+            "gemini/gemini-2.5-pro-preview-tts",
+            "gemini/gemini-2.5-computer-use-preview-10-2025",
+            "openai/gpt-4o-search-preview",
+        ]
+        for model_id in excluded:
+            assert model_id not in models, f"{model_id} は除外されるべき"
+
+    def test_standard_models_retained(self):
+        """過剰除外していないこと (標準 chat モデルは残る)。"""
+        models = set(discover_available_vision_models()["models"])
+        retained = [
+            "openai/gpt-4o",
+            "openai/gpt-5",
+            "anthropic/claude-sonnet-4-5",
+            "gemini/gemini-2.5-pro",
+        ]
+        for model_id in retained:
+            assert model_id in models, f"{model_id} は残るべき"
 
 
 @pytest.mark.unit
