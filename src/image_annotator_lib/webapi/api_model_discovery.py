@@ -22,8 +22,23 @@ import litellm
 from ..core.utils import logger
 from .model_id import SUPPORTED_PROVIDERS
 
-_SUPPORTED_LITELLM_MODES: frozenset[str] = frozenset({"chat", "responses"})
+# Issue #130: 現 runtime (`webapi/model_id.py:build_pydantic_model`) は OpenAI を常に
+# `OpenAIChatModel` (`v1/chat/completions`) で構築するため、`mode=responses` 専用モデル
+# (deep-research / codex 直 / pro ティア) は実行時に 404 になる。よって endpoint-gate は
+# `chat` のみ許可する。Responses runtime 対応 (iam-lib #131) で本 gate を反転する想定。
+_SUPPORTED_LITELLM_MODES: frozenset[str] = frozenset({"chat"})
 _OPENAI_MODERATION_PREFIX = "openai/omni-moderation-"
+
+# Issue #130 (軸B 残余): litellm metadata では判別できない (誤報 or 未populate) 専用用途
+# モデルを名前 substring で除外する。endpoint-gate (`_SUPPORTED_LITELLM_MODES`) とは独立。
+# #131 で endpoint-gate を反転しても本 denylist は維持する (deep-research は data-source
+# tool 前提のため Responses runtime 対応後も annotation 候補には含めない)。
+_ANNOTATION_UNSUITABLE_SUBSTR: tuple[str, ...] = (
+    "-tts",  # 音声出力モデル (Gemini, supported_openai_params 未populate)
+    "computer-use",  # PC 操作特化 (params 未populate)
+    "-search-preview",  # tools を申告するが web 検索強制 (gpt-4o-search-preview)
+    "deep-research",  # data-source tool 前提 (#131 で gate 反転後も除外維持)
+)
 
 
 def _canonicalize_litellm_id(
@@ -100,16 +115,44 @@ def _is_litellm_model_annotation_compatible(
     で得るため、`supports_response_schema` ではなく `supports_function_calling` を
     主条件にする。`supports_response_schema` は NativeOutput 最適化の参考用 metadata
     として LiteLLM 側にあるが、本判定では使わない。
+
+    Issue #130: 2 点を是正する。
+    1. endpoint-gate を `chat` のみに絞る (`_SUPPORTED_LITELLM_MODES`)。
+    2. `supports_function_calling` boolean が `supported_openai_params` と矛盾する
+       litellm の不正確さを是正する。params が populate されている場合は `tools` の
+       実在を要求し、未populate (Gemini/Anthropic 等) の場合のみ boolean を信頼する。
+       これにより gpt-5-search-api 族 (fc=True だが tools 非対応) を名前非依存で弾く。
     """
     if _is_openai_moderation_model(model_id):
         return True
 
     mode = info.get("mode", "chat")
-    return (
-        info.get("supports_vision") is True
-        and info.get("supports_function_calling") is True
-        and mode in _SUPPORTED_LITELLM_MODES
-    )
+    if mode not in _SUPPORTED_LITELLM_MODES:
+        return False
+    if info.get("supports_vision") is not True or info.get("supports_function_calling") is not True:
+        return False
+    # supported_openai_params が populate されているなら tools 実在を要求 (ground truth 優先)。
+    params = info.get("supported_openai_params")
+    if params and "tools" not in params:
+        return False
+    return True
+
+
+def _is_annotation_suitable(model_id: str) -> bool:
+    """画像アノテーション用途に不適な専用モデルを名前 substring で除外する (Issue #130 軸B)。
+
+    litellm metadata では判別できない (誤報 or 未populate) TTS / computer-use /
+    web 検索強制 / deep-research 系を `_ANNOTATION_UNSUITABLE_SUBSTR` で弾く。
+    endpoint-gate (`_is_litellm_model_annotation_compatible` の mode 条件) とは独立。
+
+    Args:
+        model_id: 正規化後の `provider/model` 形式 ID (`model_name_short`)。
+
+    Returns:
+        annotation 候補として適切なら True。denylist substring に一致したら False。
+    """
+    lowered = model_id.lower()
+    return not any(token in lowered for token in _ANNOTATION_UNSUITABLE_SUBSTR)
 
 
 def _format_litellm_metadata(model_id: str, info: dict[str, Any]) -> dict[str, Any] | None:
@@ -200,6 +243,10 @@ def _collect_models(
         if require_compatible and not _is_litellm_model_annotation_compatible(
             info, model_id=formatted["model_name_short"]
         ):
+            continue
+        # Issue #130 軸B: capability OK でも用途不適 (TTS / computer-use / search /
+        # deep-research) は annotation 候補から除外する。
+        if require_compatible and not _is_annotation_suitable(formatted["model_name_short"]):
             continue
         if exclude_deprecated and info.get("deprecation_date"):
             continue
