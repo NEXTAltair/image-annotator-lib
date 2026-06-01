@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import pytest
+from PIL import Image
 
 from image_annotator_lib.core import utils
-from image_annotator_lib.core.types import TaskCapability
+from image_annotator_lib.core.types import AnnotationResult, TaskCapability
+from image_annotator_lib.webapi import annotator as annotator_module
 from image_annotator_lib.webapi.annotator import WebApiAnnotator
 
 
@@ -61,6 +63,42 @@ class TestWebApiAnnotatorBasics:
         with annotator as ctx:
             assert ctx is annotator
         # __exit__ で例外なく抜ける
+
+
+class TestWebApiAnnotatorModeWiring:
+    """Issue #131: `mode` が `ProviderManager.run_inference_with_model` まで伝播する。"""
+
+    def test_init_defaults_mode_to_chat(self) -> None:
+        annotator = WebApiAnnotator(litellm_model_id="openai/gpt-4o")
+        assert annotator.mode == "chat"
+
+    def test_init_stores_explicit_mode(self) -> None:
+        annotator = WebApiAnnotator(litellm_model_id="openai/gpt-5-pro", mode="responses")
+        assert annotator.mode == "responses"
+
+    def test_run_inference_passes_mode_to_provider_manager(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`_run_inference` が `mode="responses"` で ProviderManager を呼ぶことを確認する。
+
+        実推論は monkeypatch で捕捉してモックする (network 不要)。
+        """
+        captured: dict[str, object] = {}
+        image = Image.new("RGB", (4, 4), color="white")
+
+        def fake_run(**kwargs: object) -> dict[str, AnnotationResult]:
+            captured.update(kwargs)
+            # _run_inference は phash でルックアップするため、空 dict を返して
+            # 「結果なし」経路 (warning + placeholder) に流す。mode の捕捉だけが目的。
+            return {}
+
+        monkeypatch.setattr(
+            annotator_module.ProviderManager, "run_inference_with_model", staticmethod(fake_run)
+        )
+
+        annotator = WebApiAnnotator(litellm_model_id="openai/gpt-5-pro", mode="responses")
+        annotator._run_inference([image])
+
+        assert captured["mode"] == "responses"
+        assert captured["litellm_model_id"] == "openai/gpt-5-pro"
 
 
 class TestWebApiAnnotatorRatings:

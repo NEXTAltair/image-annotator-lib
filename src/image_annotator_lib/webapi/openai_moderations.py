@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from image_annotator_lib.core.types import RatingPrediction
-
 
 OPENAI_MODERATION_SOURCE_SCHEME = "openai_moderation_v1"
 

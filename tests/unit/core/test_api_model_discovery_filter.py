@@ -89,15 +89,25 @@ class TestIsLitellmModelAnnotationCompatible:
         }
         assert _is_litellm_model_annotation_compatible(info) is False
 
-    def test_responses_mode_is_excluded(self):
-        """Issue #130: mode=responses は除外。
+    def test_responses_mode_is_compatible(self):
+        """Issue #131: mode=responses は compatible (endpoint-gate 反転の回帰防止)。
 
-        現 runtime (`build_pydantic_model`) は OpenAI を常に OpenAIChatModel
-        (`v1/chat/completions`) で構築するため responses 専用モデルは実行不能。
-        Responses runtime 対応は #131 で gate 反転予定。
+        `build_pydantic_model` が OpenAI `mode=responses` を OpenAIResponsesModel
+        (`v1/responses`) で構築するようになったため、vision + function_calling を
+        満たす responses 専用モデルは実行可能になった。annotation 不適なモデルは
+        軸B (`_ANNOTATION_UNSUITABLE_SUBSTR`) で別途除外する。
         """
         info = {
             "supports_vision": True,
+            "supports_function_calling": True,
+            "mode": "responses",
+        }
+        assert _is_litellm_model_annotation_compatible(info) is True
+
+    def test_responses_mode_without_vision_is_excluded(self):
+        """Issue #131: responses でも vision=False なら除外 (軸A は capability も判定)。"""
+        info = {
+            "supports_vision": False,
             "supports_function_calling": True,
             "mode": "responses",
         }
@@ -171,10 +181,15 @@ class TestIsAnnotationSuitable:
             "openai/gpt-4o-mini-search-preview-2025-03-11",
             "openai/o3-deep-research",
             "openai/o4-mini-deep-research-2025-06-26",
+            # Issue #131: codex はコーディング特化で annotation 不適。
+            # provider/endpoint 問わず一律除外する (responses 直も openrouter chat も)。
+            "openai/gpt-5-codex",
+            "openai/codex-mini-latest",
+            "openrouter/openai/gpt-5.1-codex-max",
         ],
     )
     def test_unsuitable_models_excluded(self, model_id):
-        """TTS / computer-use / search-preview / deep-research は不適。"""
+        """TTS / computer-use / search-preview / deep-research / codex は不適。"""
         assert _is_annotation_suitable(model_id) is False
 
     @pytest.mark.parametrize(
@@ -184,41 +199,59 @@ class TestIsAnnotationSuitable:
             "openai/gpt-5",
             "anthropic/claude-sonnet-4-5",
             "gemini/gemini-2.5-pro",
-            # codex は denylist に入れない: OpenRouter chat codex は動作可能なため残す
-            "openrouter/openai/gpt-5.1-codex-max",
+            # Issue #131: pro ティア (responses) は endpoint-gate 反転で実行可能。
+            # codex を含まないため軸B でも除外されない。
+            "openai/gpt-5-pro",
+            "openai/o3-pro",
         ],
     )
     def test_suitable_models_kept(self, model_id):
-        """標準モデルと OpenRouter codex は適格 (除外しない)。"""
+        """標準 chat モデルと pro ティア responses モデルは適格 (除外しない)。"""
         assert _is_annotation_suitable(model_id) is True
 
 
 @pytest.mark.unit
 class TestDiscoverAvailableVisionModelsRegression:
-    """Issue #130: 実 litellm 同梱 DB に対する discovery 回帰テスト。
+    """Issue #130 / #131: 実 litellm 同梱 DB に対する discovery 回帰テスト。
 
     LITELLM_LOCAL_MODEL_COST_MAP=True (api_model_discovery import 時に設定) のため
     network には出ない。litellm DB 更新で drift し得るが、月次 dependency review で
     確認する前提の固定 (dependency-management.md)。
     """
 
-    def test_responses_and_unsuitable_models_excluded(self):
+    def test_unsuitable_models_excluded(self):
+        """Issue #131: 軸B denylist (deep-research / codex 等) は引き続き除外される。"""
         models = set(discover_available_vision_models()["models"])
+        for model_id in models:
+            # 任意の deep-research / codex 文字列を含む ID は残ってはならない。
+            assert "deep-research" not in model_id, f"{model_id} (deep-research) は除外されるべき"
+            assert "codex" not in model_id, f"{model_id} (codex) は除外されるべき"
         excluded = [
-            # 軸A: mode=responses (endpoint-gate)
-            "openai/o3-deep-research",
-            "openai/o4-mini-deep-research-2025-06-26",
-            "openai/gpt-5-pro",
-            "openai/o3-pro",
             # 軸B-1: tools 非対応 (search-api)
             "openai/gpt-5-search-api",
             # 軸B-2: name denylist
             "gemini/gemini-2.5-pro-preview-tts",
             "gemini/gemini-2.5-computer-use-preview-10-2025",
             "openai/gpt-4o-search-preview",
+            "openai/o3-deep-research",
+            "openai/o4-mini-deep-research-2025-06-26",
+            # codex (responses 直 / openrouter chat いずれも除外)
+            "openrouter/openai/gpt-5.1-codex-max",
         ]
         for model_id in excluded:
             assert model_id not in models, f"{model_id} は除外されるべき"
+
+    def test_responses_pro_tier_models_included(self):
+        """Issue #131: endpoint-gate 反転で pro ティア responses モデルが候補に入る。"""
+        models = set(discover_available_vision_models()["models"])
+        included = [
+            "openai/gpt-5-pro",
+            "openai/o3-pro",
+            "openai/o1-pro",
+            "openai/gpt-5.5-pro",
+        ]
+        for model_id in included:
+            assert model_id in models, f"{model_id} は含まれるべき"
 
     def test_standard_models_retained(self):
         """過剰除外していないこと (標準 chat モデルは残る)。"""

@@ -22,11 +22,13 @@ import litellm
 from ..core.utils import logger
 from .model_id import SUPPORTED_PROVIDERS
 
-# Issue #130: 現 runtime (`webapi/model_id.py:build_pydantic_model`) は OpenAI を常に
-# `OpenAIChatModel` (`v1/chat/completions`) で構築するため、`mode=responses` 専用モデル
-# (deep-research / codex 直 / pro ティア) は実行時に 404 になる。よって endpoint-gate は
-# `chat` のみ許可する。Responses runtime 対応 (iam-lib #131) で本 gate を反転する想定。
-_SUPPORTED_LITELLM_MODES: frozenset[str] = frozenset({"chat"})
+# Issue #131: #130 で `chat` のみに絞っていた endpoint-gate を反転する。
+# `webapi/model_id.py:build_pydantic_model` が OpenAI `mode=responses` モデルを
+# `OpenAIResponsesModel` (`v1/responses`) で構築するようになったため、pro ティア /
+# deep-research / codex 等の responses 専用モデルも実行可能になった。
+# annotation 用途に不適なモデル (deep-research / codex 等) は endpoint-gate ではなく
+# `_ANNOTATION_UNSUITABLE_SUBSTR` (軸B) で別途除外する。軸A と軸B は分離を維持する。
+_SUPPORTED_LITELLM_MODES: frozenset[str] = frozenset({"chat", "responses"})
 _OPENAI_MODERATION_PREFIX = "openai/omni-moderation-"
 
 # Issue #130 (軸B 残余): litellm metadata では判別できない (誤報 or 未populate) 専用用途
@@ -37,7 +39,9 @@ _ANNOTATION_UNSUITABLE_SUBSTR: tuple[str, ...] = (
     "-tts",  # 音声出力モデル (Gemini, supported_openai_params 未populate)
     "computer-use",  # PC 操作特化 (params 未populate)
     "-search-preview",  # tools を申告するが web 検索強制 (gpt-4o-search-preview)
-    "deep-research",  # data-source tool 前提 (#131 で gate 反転後も除外維持)
+    "deep-research",  # data-source tool 前提 (#131 で endpoint-gate 反転後も除外維持)
+    "codex",  # コーディング特化モデル。provider/endpoint 問わず annotation 不適として
+    # 一律除外 (#131)。openai-direct responses codex も openrouter chat codex も対象。
 )
 
 

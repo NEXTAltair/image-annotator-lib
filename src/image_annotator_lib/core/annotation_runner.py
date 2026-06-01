@@ -46,17 +46,6 @@ def _is_webapi_annotator_class(annotator_class: type) -> bool:
     return issubclass(annotator_class, WebApiAnnotator)
 
 
-def _resolve_litellm_model_id(model_name: str) -> str | None:
-    """registry 登録 WebAPI モデルから litellm_model_id を解決する。
-
-    ADR 0023 Phase 1 (Issue #35, PR #40): 旧 `api_model_id` キーへのフォールバックは
-    廃止。`_register_webapi_models_from_discovery()` が `litellm_model_id` のみで
-    metadata を構築するため、本関数も `litellm_model_id` のみを参照する。
-    """
-    metadata = get_webapi_metadata(model_name) or {}
-    return metadata.get("litellm_model_id")
-
-
 def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None = None) -> BaseAnnotator:
     """モデル名から annotator インスタンスを生成する (registry のみ参照)。
 
@@ -84,23 +73,28 @@ def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None 
     if model_result is not None:
         actual_model_name, Annotator_class = model_result
 
-        # registry 登録 WebAPI モデル: metadata の litellm_model_id で WebApiAnnotator を構築
+        # registry 登録 WebAPI モデル: metadata の litellm_model_id / mode で WebApiAnnotator を構築。
+        # litellm_model_id と mode は同一 metadata から取得するため、二重 lookup を避けて
+        # `get_webapi_metadata` を一度だけ呼ぶ。
         if _is_webapi_annotator_class(Annotator_class):
-            litellm_model_id = _resolve_litellm_model_id(actual_model_name)
+            metadata = get_webapi_metadata(actual_model_name) or {}
+            litellm_model_id = metadata.get("litellm_model_id")
             if not litellm_model_id:
                 raise KeyError(
                     f"Model '{actual_model_name}' is registered as WebAPI but has no "
                     f"`litellm_model_id` in `_WEBAPI_MODEL_METADATA`"
                 )
+            mode = metadata.get("mode", "chat")
             logger.debug(
                 f"WebApiAnnotator (registry WebAPI): model={actual_model_name}, "
-                f"litellm_model_id={litellm_model_id}"
+                f"litellm_model_id={litellm_model_id}, mode={mode}"
             )
             return WebApiAnnotator(
                 litellm_model_id=litellm_model_id,
                 api_keys=api_keys,
                 model_name=actual_model_name,
                 capabilities=get_model_capabilities(actual_model_name),
+                mode=mode,
             )
 
         # registry 登録 ローカル ML モデル: 直接インスタンス化

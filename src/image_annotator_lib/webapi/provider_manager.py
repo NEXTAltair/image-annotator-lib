@@ -121,6 +121,7 @@ class ProviderManager:
         api_keys: dict[str, str] | None = None,
         config: dict[str, Any] | None = None,
         capabilities: set[TaskCapability] | frozenset[TaskCapability] | None = None,
+        mode: str = "chat",
         _test_agent: Agent | None = None,
     ) -> dict[str, AnnotationResult]:
         """非同期推論の中核実装。
@@ -132,6 +133,8 @@ class ProviderManager:
             api_keys: provider 名 (`openai` / `anthropic` / `google` / `openrouter`) 単位の API key dict。
             config: provider 固有の追加設定 (OpenRouter `referer` / `app_name` 等)。
             capabilities: 呼び出し元 WebAPI annotator が明示したタスク能力。
+            mode: registry metadata 由来の推論 endpoint 種別 (`"chat"` / `"responses"`)。
+                OpenAI の responses 系モデル構築のため `resolve_model_ref` に伝播する。
             _test_agent: pytest fixture からの Agent 注入専用 (本番では None)。
 
         Returns:
@@ -153,7 +156,7 @@ class ProviderManager:
         if _test_agent is not None:
             agent = _test_agent
         else:
-            ref = resolve_model_ref(litellm_model_id, config)
+            ref = resolve_model_ref(litellm_model_id, config, mode=mode)
             # ADR 0023 Phase 1 (Issue #45): capability check は discovery 段階で完結。
             # registry 経由の通常パスでは登録時に supports_vision / supports_function_calling
             # が確認済みのため、推論直前 fail-fast は冗長として削除した。
@@ -254,6 +257,7 @@ class ProviderManager:
         api_keys: dict[str, str] | None = None,
         config: dict[str, Any] | None = None,
         capabilities: set[TaskCapability] | frozenset[TaskCapability] | None = None,
+        mode: str = "chat",
         _test_agent: Agent | None = None,
     ) -> dict[str, AnnotationResult]:
         """`run_inference_with_model_async()` の sync wrapper。
@@ -278,6 +282,7 @@ class ProviderManager:
                 api_keys=api_keys,
                 config=config,
                 capabilities=capabilities,
+                mode=mode,
                 _test_agent=_test_agent,
             )
         )
