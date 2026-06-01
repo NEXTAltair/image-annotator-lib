@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from image_annotator_lib.exceptions.errors import (
@@ -12,6 +14,7 @@ from image_annotator_lib.exceptions.errors import (
 from image_annotator_lib.webapi.model_id import (
     SUPPORTED_PROVIDERS,
     PydanticAIModelRef,
+    build_pydantic_model,
     resolve_model_ref,
 )
 
@@ -108,8 +111,48 @@ class TestBuildPydanticModelMissingKey:
     """`build_pydantic_model()` の API key validation を確認する (provider 構築は別の integration test で)。"""
 
     def test_empty_api_key_raises(self) -> None:
-        from image_annotator_lib.webapi.model_id import build_pydantic_model
-
         ref = resolve_model_ref("openai/gpt-4o")
         with pytest.raises(MissingApiKeyError):
             build_pydantic_model(ref, "")
+
+
+class TestResolveModelRefEndpoint:
+    """`mode` -> `PydanticAIModelRef.endpoint` 配線を確認する (Issue #131)。"""
+
+    def test_openai_responses_mode_sets_responses_endpoint(self) -> None:
+        ref = resolve_model_ref("openai/gpt-5-pro", mode="responses")
+        assert ref.endpoint == "responses"
+
+    def test_openai_default_endpoint_is_chat(self) -> None:
+        ref = resolve_model_ref("openai/gpt-4o")
+        assert ref.endpoint == "chat"
+
+    def test_openai_explicit_chat_mode_is_chat(self) -> None:
+        ref = resolve_model_ref("openai/gpt-4o", mode="chat")
+        assert ref.endpoint == "chat"
+
+    def test_anthropic_responses_mode_stays_chat(self) -> None:
+        # responses は OpenAI provider 限定。anthropic は常に chat。
+        ref = resolve_model_ref("anthropic/claude-3-5-sonnet-20241022", mode="responses")
+        assert ref.endpoint == "chat"
+
+
+class TestBuildPydanticModelEndpoint:
+    """endpoint 種別ごとに対応する OpenAI Model class が構築されることを確認する (Issue #131)。
+
+    network は不要 (provider object 構築のみ。実 API call は行わない)。
+    """
+
+    def test_responses_endpoint_builds_responses_model(self) -> None:
+        from pydantic_ai.models.openai import OpenAIResponsesModel
+
+        ref = replace(resolve_model_ref("openai/gpt-5-pro"), endpoint="responses")
+        model = build_pydantic_model(ref, "dummy-key")
+        assert isinstance(model, OpenAIResponsesModel)
+
+    def test_chat_endpoint_builds_chat_model(self) -> None:
+        from pydantic_ai.models.openai import OpenAIChatModel
+
+        ref = resolve_model_ref("openai/gpt-4o")
+        model = build_pydantic_model(ref, "dummy-key")
+        assert isinstance(model, OpenAIChatModel)

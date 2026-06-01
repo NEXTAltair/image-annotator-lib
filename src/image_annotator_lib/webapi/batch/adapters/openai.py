@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 import json
+from collections.abc import Mapping
 from datetime import datetime
 from importlib import import_module
 from typing import Any
@@ -36,7 +36,6 @@ from ..types import (
     BatchSubmitRequest,
     BatchSubmitResult,
 )
-
 
 _PROVIDER = "openai"
 _MAX_LIBRARY_ITEMS = 500

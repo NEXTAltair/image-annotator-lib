@@ -53,6 +53,55 @@ class TestCreateAnnotatorInstanceLookupOrder:
         assert instance.litellm_model_id == "openrouter/openai/gpt-4o"
         assert instance.model_name == "openai/gpt-4o"
 
+    def test_registry_webapi_injects_responses_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Issue #131: registry metadata の `mode=responses` が WebApiAnnotator に注入される。
+
+        gpt-5-pro / o3-pro 等の responses 系モデルは metadata の `mode` を
+        `WebApiAnnotator.mode` まで伝播させ、推論時に `OpenAIResponsesModel` を
+        構築できる必要がある。
+        """
+        monkeypatch.setattr(
+            annotation_runner,
+            "find_model_class_case_insensitive",
+            lambda name: (("openai/gpt-5-pro", WebApiAnnotator) if name == "openai/gpt-5-pro" else None),
+        )
+        monkeypatch.setattr(
+            annotation_runner,
+            "get_webapi_metadata",
+            lambda name: (
+                {"litellm_model_id": "openai/gpt-5-pro", "provider": "openai", "mode": "responses"}
+                if name == "openai/gpt-5-pro"
+                else None
+            ),
+        )
+
+        instance = annotation_runner._create_annotator_instance("openai/gpt-5-pro")
+
+        assert isinstance(instance, WebApiAnnotator)
+        assert instance.mode == "responses"
+
+    def test_registry_webapi_defaults_mode_to_chat(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Issue #131: metadata に `mode` が無い場合は `chat` を既定値とする。"""
+        monkeypatch.setattr(
+            annotation_runner,
+            "find_model_class_case_insensitive",
+            lambda name: (("openai/gpt-4o", WebApiAnnotator) if name == "openai/gpt-4o" else None),
+        )
+        monkeypatch.setattr(
+            annotation_runner,
+            "get_webapi_metadata",
+            lambda name: (
+                {"litellm_model_id": "openai/gpt-4o", "provider": "openai"}
+                if name == "openai/gpt-4o"
+                else None
+            ),
+        )
+
+        instance = annotation_runner._create_annotator_instance("openai/gpt-4o")
+
+        assert isinstance(instance, WebApiAnnotator)
+        assert instance.mode == "chat"
+
     def test_registry_webapi_missing_litellm_model_id_raises_key_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

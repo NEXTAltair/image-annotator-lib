@@ -9,7 +9,7 @@ model object を構築するための情報を一箇所に集約する。
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from ..exceptions.errors import IdMappingError, MissingApiKeyError, UnknownProviderError
@@ -29,12 +29,16 @@ class PydanticAIModelRef:
         provider_model_id: provider 上のモデル名 (`gpt-4o` 等)。
         pydantic_model_id: PydanticAI model string が利用可能な場合の文字列形式。
             provider object 経由のみで構築する場合は None。
+        endpoint: 構築すべき OpenAI 系 endpoint 種別。`"chat"` (既定) は
+            `OpenAIChatModel`、`"responses"` は `OpenAIResponsesModel` を構築する。
+            responses は OpenAI provider 限定 (anthropic/google/openrouter は常に chat)。
     """
 
     provider: str
     litellm_model_id: str
     provider_model_id: str
     pydantic_model_id: str | None = None
+    endpoint: str = "chat"
 
 
 def _split_litellm_id(litellm_model_id: str) -> tuple[str, str]:
@@ -114,12 +118,17 @@ SUPPORTED_PROVIDERS: frozenset[str] = frozenset(_BUILDER_DISPATCH.keys())
 def resolve_model_ref(
     litellm_model_id: str,
     config: dict[str, Any] | None = None,
+    *,
+    mode: str = "chat",
 ) -> PydanticAIModelRef:
     """LiteLLM model ID から `PydanticAIModelRef` を生成する。
 
     Args:
         litellm_model_id: `openai/gpt-4o` のような LiteLLM 形式 ID。
         config: 将来の per-model override 用。Phase 1 では未使用。
+        mode: registry metadata 由来の推論 endpoint 種別 (`"chat"` 既定 / `"responses"`)。
+            `provider == "openai"` かつ `mode == "responses"` の場合のみ ref の
+            `endpoint` を `"responses"` に設定する。それ以外の provider は常に chat。
 
     Returns:
         provider 別 builder で構築された descriptor。
@@ -132,7 +141,33 @@ def resolve_model_ref(
     builder = _BUILDER_DISPATCH.get(provider)
     if builder is None:
         raise UnknownProviderError(provider=provider, litellm_model_id=litellm_model_id)
-    return builder(litellm_model_id, provider_model_id)
+    ref = builder(litellm_model_id, provider_model_id)
+    # responses endpoint は OpenAI provider 限定。他 provider は builder の chat 既定のまま。
+    if provider == "openai" and mode == "responses":
+        ref = replace(ref, endpoint="responses")
+    return ref
+
+
+def _build_openai_model(
+    ref: PydanticAIModelRef,
+    api_key: str,
+    http_client: httpx.AsyncClient | None,
+) -> Model:
+    """OpenAI provider の Chat / Responses endpoint を `ref.endpoint` で選択して構築する。
+
+    `mode=responses` 専用モデル (pro ティア等) は `OpenAIResponsesModel`、それ以外は
+    従来どおり `OpenAIChatModel` を使う (iam-lib #131)。provider object は共通。
+    """
+    from pydantic_ai.providers.openai import OpenAIProvider
+
+    provider = OpenAIProvider(api_key=api_key, http_client=http_client)
+    if ref.endpoint == "responses":
+        from pydantic_ai.models.openai import OpenAIResponsesModel
+
+        return OpenAIResponsesModel(model_name=ref.provider_model_id, provider=provider)
+    from pydantic_ai.models.openai import OpenAIChatModel
+
+    return OpenAIChatModel(model_name=ref.provider_model_id, provider=provider)
 
 
 def build_pydantic_model(
@@ -166,11 +201,7 @@ def build_pydantic_model(
         raise MissingApiKeyError(provider=ref.provider, litellm_model_id=ref.litellm_model_id)
 
     if ref.provider == "openai":
-        from pydantic_ai.models.openai import OpenAIChatModel
-        from pydantic_ai.providers.openai import OpenAIProvider
-
-        provider = OpenAIProvider(api_key=api_key, http_client=http_client)
-        return OpenAIChatModel(model_name=ref.provider_model_id, provider=provider)
+        return _build_openai_model(ref, api_key, http_client)
 
     if ref.provider == "anthropic":
         from pydantic_ai.models.anthropic import AnthropicModel

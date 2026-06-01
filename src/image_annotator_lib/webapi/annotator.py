@@ -40,6 +40,7 @@ class WebApiAnnotator(BaseAnnotator):
         api_keys: dict[str, str] | None = None,
         model_name: str | None = None,
         capabilities: set[TaskCapability] | frozenset[TaskCapability] | list[str] | None = None,
+        mode: str = "chat",
     ) -> None:
         """`WebApiAnnotator` を初期化する。
 
@@ -51,6 +52,8 @@ class WebApiAnnotator(BaseAnnotator):
                 省略時は `litellm_model_id` をモデル名として扱う (テスト stub 等の特殊用途)。
             capabilities: 明示タスク能力。`TaskCapability.RATINGS` が含まれる場合だけ
                 rating 出力を `UnifiedAnnotationResult.ratings` として公開する。
+            mode: registry metadata 由来の推論 endpoint 種別 (`"chat"` 既定 / `"responses"`)。
+                OpenAI の responses 系モデル構築のため推論時に `ProviderManager` へ伝播する。
         """
         # ADR 0023 Phase 1 / Issue #35 / Issue #45:
         # - WebAPI モデルは registry 経由でのみインスタンス化される (Issue #45 で
@@ -65,6 +68,7 @@ class WebApiAnnotator(BaseAnnotator):
         self.litellm_model_id = litellm_model_id
         self.api_keys = api_keys
         self.capabilities = self._normalize_capabilities(capabilities)
+        self.mode = mode
         self._config = None
         self.model_path = None
         self.device = "api"
@@ -79,7 +83,9 @@ class WebApiAnnotator(BaseAnnotator):
 
         normalized: set[TaskCapability] = set()
         for capability in capabilities:
-            normalized.add(capability if isinstance(capability, TaskCapability) else TaskCapability(capability))
+            normalized.add(
+                capability if isinstance(capability, TaskCapability) else TaskCapability(capability)
+            )
         return frozenset(normalized) if normalized else cls.ADVERTISED_CAPABILITIES
 
     def __enter__(self) -> Self:
@@ -110,6 +116,7 @@ class WebApiAnnotator(BaseAnnotator):
             litellm_model_id=self.litellm_model_id,
             api_keys=self.api_keys,
             capabilities=self.capabilities,
+            mode=self.mode,
         )
         ordered: list[AnnotationResult] = []
         for index, image in enumerate(processed):
