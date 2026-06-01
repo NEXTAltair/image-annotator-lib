@@ -67,6 +67,10 @@ class AnnotationResult(TypedDict, total=False):
     tags: list[str]
     formatted_output: Any
     error: str | None
+    # ADR 0006 amendment (#134/#599): refusal / 空などの annotation outcome 分類。
+    # library error ではなく「使えない outcome」を表す structured signal。
+    error_code: str | None
+    retryable: bool
 
 
 class TagConfidence(TypedDict):
@@ -219,6 +223,33 @@ class TaskCapability(StrEnum):
     RATINGS = "ratings"
 
 
+class AnnotationErrorCode(StrEnum):
+    """Annotation outcome の分類コード (ADR 0006 amendment: #134 / #599)。
+
+    refusal / 空などは **library にとってはエラーではない** (推論完了、使える出力が
+    無いだけの outcome) が、LoRAIro にとっては error_records 記録 + 再送除外すべき
+    エラーである。この境界を構造化して表現するための code。
+
+    値は **UPPERCASE** で固定する: LoRAIro `error_records.error_type` の正規化値
+    (migration 済) と一致させ、消費側の `getattr(error_code, "value", code)` 突合を
+    成立させるため (ADR 0006 本文の lowercase 例は #134 で UPPERCASE に改める)。
+
+    #134 で実際に produce するのは refusal 2 種 + `EMPTY_ANNOTATION` のみ。残りの code は
+    ADR 0006 完全実装 (provider-signal 網羅 parser) の follow-up 用に定義のみ置く。
+    """
+
+    SAFETY_REFUSAL = "SAFETY_REFUSAL"
+    CONTENT_POLICY_REFUSAL = "CONTENT_POLICY_REFUSAL"
+    IMAGE_POLICY_VIOLATION = "IMAGE_POLICY_VIOLATION"
+    INVALID_IMAGE = "INVALID_IMAGE"
+    MAX_TOKENS = "MAX_TOKENS"
+    PROVIDER_ERROR = "PROVIDER_ERROR"
+    ANNOTATION_OUTPUT_UNPARSEABLE = "ANNOTATION_OUTPUT_UNPARSEABLE"
+    ANNOTATION_SCHEMA_INVALID = "ANNOTATION_SCHEMA_INVALID"
+    EMPTY_ANNOTATION = "EMPTY_ANNOTATION"
+    UNKNOWN = "UNKNOWN"
+
+
 class UnifiedAnnotationResult(BaseModel):
     """統一アノテーション結果(capability-based validation対応)
 
@@ -229,6 +260,11 @@ class UnifiedAnnotationResult(BaseModel):
     model_name: str
     capabilities: set[TaskCapability]
     error: str | None = None
+    # ADR 0006 amendment (#134/#599): annotation outcome 分類。refusal / 空などは
+    # library エラーではないが LoRAIro は error_records 記録 + 再送除外する。
+    # `error` は message 専用、分類は `error_code` が担う。default 付き = 非破壊追加。
+    error_code: AnnotationErrorCode | None = None
+    retryable: bool = False
 
     # マルチタスク対応フィールド(capabilityに応じて使用)
     tags: list[str] | None = None
@@ -301,8 +337,8 @@ class UnifiedAnnotationResult(BaseModel):
 
     @model_validator(mode="after")
     def validate_capabilities_not_empty(self) -> UnifiedAnnotationResult:
-        """エラー結果以外はcapabilitiesが必須。"""
-        if self.error is None and not self.capabilities:
+        """エラー結果・outcome 分類結果以外はcapabilitiesが必須。"""
+        if self.error is None and self.error_code is None and not self.capabilities:
             raise ValueError("capabilities cannot be empty for non-error results")
         return self
 

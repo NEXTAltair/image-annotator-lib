@@ -257,3 +257,43 @@ class TestWebApiAnnotatorIssue35Regression:
             )
         finally:
             config_registry._merged_config_data.pop("test-base-annotator-issue35", None)
+
+
+class TestFormatPredictionsOutcome:
+    """ADR 0006 amendment (#134/#599): `_format_predictions` が outcome 分類
+    (`error_code` / `retryable`) を `UnifiedAnnotationResult` に伝播することを確認する。"""
+
+    def test_format_predictions_propagates_error_code_and_retryable(self) -> None:
+        from image_annotator_lib.core.types import AnnotationErrorCode
+
+        annotator = WebApiAnnotator(litellm_model_id="openai/o1")
+        raw = [
+            AnnotationResult(
+                phash="p",
+                tags=[],
+                formatted_output=None,
+                error="Empty annotation from 'openai/o1': requested capabilities (...) returned empty",
+                error_code=AnnotationErrorCode.EMPTY_ANNOTATION.value,
+                retryable=False,
+            )
+        ]
+        out = annotator._format_predictions(raw)
+        assert len(out) == 1
+        assert out[0].error_code is AnnotationErrorCode.EMPTY_ANNOTATION
+        assert out[0].retryable is False
+        assert out[0].error  # message は保持される
+
+    def test_format_predictions_success_has_no_error_code(self) -> None:
+        annotator = WebApiAnnotator(litellm_model_id="openai/gpt-4o")
+        raw = [
+            AnnotationResult(
+                phash="p",
+                tags=["cat"],
+                formatted_output={"tags": ["cat"], "captions": [], "score": None, "ratings": []},
+                error=None,
+            )
+        ]
+        out = annotator._format_predictions(raw)
+        assert out[0].error_code is None
+        assert out[0].error is None
+        assert out[0].tags == ["cat"]

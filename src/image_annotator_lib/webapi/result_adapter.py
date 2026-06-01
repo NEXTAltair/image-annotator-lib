@@ -22,6 +22,8 @@ def to_annotation_result(
     schema_output: AnnotationSchema | None,
     phash: str,
     error: str | None = None,
+    error_code: str | None = None,
+    retryable: bool = False,
 ) -> AnnotationResult:
     """PydanticAI が返した `AnnotationSchema` を `AnnotationResult` に変換する。
 
@@ -29,17 +31,22 @@ def to_annotation_result(
         schema_output: PydanticAI `AgentRunResult.output` (`AnnotationSchema` 検証済)。
             error 経路では None を渡してよい。
         phash: 対象画像の pHash。
-        error: 推論エラー時のメッセージ。None なら成功扱い。
+        error: 推論エラー / outcome 時の message。None なら成功扱い。
+        error_code: annotation outcome 分類コード (ADR 0006 amendment: refusal / 空 等)。
+            transport の generic error では None のまま (message のみ伝搬)。
+        retryable: outcome が caller 再実行で解消し得るか。refusal / 空は False。
 
     Returns:
         `AnnotationResult` (TypedDict)。error 経路でも `tags=[]` を含めて返す。
     """
-    if error is not None or schema_output is None:
+    if error is not None or error_code is not None or schema_output is None:
         return AnnotationResult(
             phash=phash,
             tags=[],
             formatted_output=None,
             error=error,
+            error_code=error_code,
+            retryable=retryable,
         )
 
     normalized_tags = _clean_string_list(schema_output.tags)

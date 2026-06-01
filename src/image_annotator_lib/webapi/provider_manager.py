@@ -17,10 +17,11 @@ from typing import Any
 from PIL import Image
 from pydantic_ai import Agent
 
-from ..core.types import AnnotationResult, TaskCapability
+from ..core.types import AnnotationErrorCode, AnnotationResult, AnnotationSchema, TaskCapability
 from ..core.utils import calculate_phash, logger
 from ..exceptions.errors import (
     ContentPolicyRefusalError,
+    EmptyAnnotationError,
     InferenceError,
     MissingApiKeyError,
     SafetyRefusalError,
@@ -48,6 +49,20 @@ _USER_PROMPT_TEXT = "Analyze this image and provide annotations as specified."
 # LoRAIro #274: cause/context chain を辿る最大段数 (循環・過剰深さの安全弁)。
 _EXCEPTION_CHAIN_MAX_DEPTH = 5
 _OPENAI_MODERATION_PREFIX = "openai/omni-moderation-"
+
+# ADR 0006 amendment (#134/#599): refusal 例外型 → annotation outcome code の写像。
+# library エラー文字列ではなく structured outcome (error_code + retryable) で返すため。
+_REFUSAL_ERROR_CODE: dict[type[BaseException], AnnotationErrorCode] = {
+    SafetyRefusalError: AnnotationErrorCode.SAFETY_REFUSAL,
+    ContentPolicyRefusalError: AnnotationErrorCode.CONTENT_POLICY_REFUSAL,
+}
+
+# Issue #134: 空成功判定で「中身あり」とみなす core capability。RATINGS は best-effort
+# (`_normalize_ratings` 参照) なので空成功判定の対象外。capabilities=None のときの
+# 既定は output_normalization._DEFAULT_REQUIRED_CAPABILITIES と揃える (SSoT は同 module)。
+_CORE_CAPABILITIES = frozenset(
+    {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
+)
 
 
 def _build_system_prompt(capabilities: set[TaskCapability] | frozenset[TaskCapability] | None) -> str:
@@ -182,20 +197,44 @@ class ProviderManager:
                 phash = calculate_phash(image) or f"unknown_image_{index}"
                 try:
                     run_result = await agent.run([_USER_PROMPT_TEXT, binary])
+                    # Issue #134: schema-valid だが全要求 capability が空の成功は、例外も
+                    # refusal シグナルも伴わず error=None で素通りする。EmptyAnnotationError
+                    # に分類して error_records 経路に乗せる (refusal contract #42 の拡張)。
+                    empty_exc = _classify_empty_output(
+                        run_result.output, capabilities, litellm_model_id, phash
+                    )
+                    if empty_exc is not None:
+                        logger.warning(
+                            f"WebAPI empty annotation: model={model_name}, "
+                            f"litellm_model_id={litellm_model_id}, phash={phash}, "
+                            f"capabilities={empty_exc.requested_capabilities}"
+                        )
+                        results[phash] = to_annotation_result(
+                            None,
+                            phash,
+                            error=str(empty_exc),
+                            error_code=AnnotationErrorCode.EMPTY_ANNOTATION,
+                            retryable=False,
+                        )
+                        continue
                     results[phash] = to_annotation_result(run_result.output, phash)
                 except Exception as exc:
                     refusal_exc = _classify_refusal(exc, litellm_model_id, phash)
                     if refusal_exc is not None:
-                        # ADR 0023 Phase 1.5 (Issue #42): UnifiedAnnotationResult.error に
-                        # exception type 名 prefix で構造的伝搬。LoRAIro 側で error_records に
-                        # decode する (annotation_save_service)。
+                        # ADR 0006 amendment (#134/#599): refusal は library エラーではなく
+                        # structured outcome。error_code (UPPERCASE) + retryable=False +
+                        # message で伝搬し、LoRAIro 側で error_records に記録する。
                         logger.warning(
                             f"WebAPI safety refusal: model={model_name}, "
                             f"litellm_model_id={litellm_model_id}, phash={phash}, "
                             f"reason={refusal_exc.provider_refusal_reason or 'no reason'}"
                         )
                         results[phash] = to_annotation_result(
-                            None, phash, error=f"{type(refusal_exc).__name__}: {refusal_exc}"
+                            None,
+                            phash,
+                            error=str(refusal_exc),
+                            error_code=_REFUSAL_ERROR_CODE[type(refusal_exc)],
+                            retryable=False,
                         )
                         continue
                     # ADR 0023 Phase 1.8 (Issue #46): transport retry 枯渇時は
@@ -595,6 +634,55 @@ def _classify_refusal(
             provider_refusal_reason=str(exc)[:200],
         )
     return None
+
+
+def _classify_empty_output(
+    output: AnnotationSchema,
+    capabilities: set[TaskCapability] | frozenset[TaskCapability] | None,
+    litellm_model_id: str,
+    image_phash: str,
+) -> EmptyAnnotationError | None:
+    """schema-valid だが全要求 capability が空の成功を EmptyAnnotationError に分類する。
+
+    ADR 0023 Issue #134: モデルが output tool を空引数で呼ぶと `_normalize_string_items`
+    が空リストを valid として返し、例外も refusal シグナルも伴わず `error=None` の
+    silent な空成功に潰れる。`_classify_refusal` (except 経路限定) では捕まらないため、
+    成功経路で本 helper が「全要求 core capability が空」を検出して error 化する。
+
+    判定は **要求された core capability が全て空** のときのみ True 相当
+    (`EmptyAnnotationError` 返却) とする。一部のみ空 (tags あり / captions 空) は
+    モデルが内容を返した正常系として扱い、誤検出しない。RATINGS は best-effort
+    出力なので判定対象に含めない。
+
+    Args:
+        output: 検証済み `AnnotationSchema` (`run_result.output`)。
+        capabilities: 呼び出し元が要求した capability 集合 (None なら既定 core 全て)。
+        litellm_model_id: 推論対象モデル ID。
+        image_phash: 対象画像の pHash。
+
+    Returns:
+        全要求 core capability が空なら `EmptyAnnotationError`、そうでなければ None。
+    """
+    required = frozenset(capabilities) if capabilities is not None else _CORE_CAPABILITIES
+    required_core = required & _CORE_CAPABILITIES
+    if not required_core:
+        # core capability を要求していない (rating のみ等) → 空成功判定の対象外。
+        return None
+
+    # 要求 core のうち 1 つでも内容があれば degenerate ではない。
+    if TaskCapability.TAGS in required_core and output.tags:
+        return None
+    if TaskCapability.CAPTIONS in required_core and output.captions:
+        return None
+    if TaskCapability.SCORES in required_core and output.score is not None:
+        return None
+
+    requested_names = sorted(cap.value for cap in required_core)
+    return EmptyAnnotationError(
+        litellm_model_id=litellm_model_id,
+        image_phash=image_phash,
+        requested_capabilities=requested_names,
+    )
 
 
 __all__ = ["ProviderManager"]
