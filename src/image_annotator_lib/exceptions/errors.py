@@ -785,6 +785,55 @@ class SafetyRefusalError(WebApiError):
         )
 
 
+class EmptyAnnotationError(WebApiError):
+    """成功レスポンスだが全要求 capability が空だった場合の例外 (ADR 0023 Issue #134)。
+
+    モデルが output tool を **空引数で呼んだ** ことで schema-valid な空成功
+    (`tags=[]` / `captions=[]` / `score=None`) に潰れるケース。例外も
+    `finish_reason`/`stop_reason` 等の構造化 refusal シグナルも伴わないため
+    `_classify_refusal` では検出できず、従来は `error=None` の正常扱いで
+    silent に素通りしていた (image 18253 / o1 で観測)。
+
+    SafetyRefusalError / ContentPolicyRefusalError とは粒度を分ける: refusal は
+    「なぜ拒否したか」を保持するが、空成功は **理由不明** なので別例外で表現する
+    (refusal だと断定して LoRAIro に誤った分類を伝えないため)。
+
+    ADR 0023 Phase 1.5 (Issue #42) の refusal contract と同様、retry せず
+    LoRAIro 側 error_records に記録 → 以後の WebAPI annotation 対象から除外する。
+
+    Attributes:
+        litellm_model_id: 空成功を返したモデル ID
+        image_phash: 対象画像の pHash (空文字許可)
+        requested_capabilities: 空だった要求 capability 名のリスト
+    """
+
+    def __init__(
+        self,
+        litellm_model_id: str,
+        image_phash: str = "",
+        requested_capabilities: list[str] | None = None,
+        details: dict[str, Any] | None = None,
+    ):
+        error_details = details or {}
+        error_details["litellm_model_id"] = litellm_model_id
+        if image_phash:
+            error_details["image_phash"] = image_phash
+        capabilities = requested_capabilities or []
+        if capabilities:
+            error_details["requested_capabilities"] = capabilities
+
+        self.litellm_model_id = litellm_model_id
+        self.image_phash = image_phash
+        self.requested_capabilities = capabilities
+        caps_text = ", ".join(capabilities) if capabilities else "all requested"
+        super().__init__(
+            f"Empty annotation from '{litellm_model_id}': "
+            f"requested capabilities ({caps_text}) returned empty",
+            provider_name="",
+            details=error_details,
+        )
+
+
 class ContentPolicyRefusalError(WebApiError):
     """Provider が content policy refusal を返した場合の例外。
 

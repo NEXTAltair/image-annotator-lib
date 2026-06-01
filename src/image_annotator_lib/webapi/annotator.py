@@ -139,12 +139,18 @@ class WebApiAnnotator(BaseAnnotator):
         formatted: list[UnifiedAnnotationResult] = []
         for ann in raw_outputs:
             error = ann.get("error")
-            if error:
+            error_code = ann.get("error_code")
+            retryable = ann.get("retryable", False)
+            if error or error_code:
+                # ADR 0006 amendment (#134/#599): refusal / 空は error_code + retryable で
+                # 構造化して伝搬する。`error` は message 専用 (分類 prefix を含まない)。
                 formatted.append(
                     UnifiedAnnotationResult(
                         model_name=self.model_name,
                         capabilities=set(self.capabilities),
                         error=error,
+                        error_code=error_code,
+                        retryable=retryable,
                         framework="pydantic_ai",
                     )
                 )
