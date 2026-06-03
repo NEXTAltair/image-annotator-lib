@@ -61,9 +61,7 @@ class ModelConfigRegistry:
             user_config_path if user_config_path else DEFAULT_PATHS["user_config_toml"]
         )
         self._runtime_cache_path = Path(
-            runtime_cache_path
-            if runtime_cache_path
-            else DEFAULT_PATHS["model_runtime_cache_toml"]
+            runtime_cache_path if runtime_cache_path else DEFAULT_PATHS["model_runtime_cache_toml"]
         )
         logger.debug(f"システム設定パスを決定: {self._system_config_path}")
         logger.debug(f"ユーザー設定パスを決定: {self._user_config_path}")
@@ -164,9 +162,7 @@ class ModelConfigRegistry:
                 try:
                     loaded_data = _load_config_from_file(self._runtime_cache_path)
                     self._runtime_cache_data = self._filter_runtime_cache_data(loaded_data)
-                    logger.info(
-                        f"モデル runtime cache を {self._runtime_cache_path} から読み込みました。"
-                    )
+                    logger.info(f"モデル runtime cache を {self._runtime_cache_path} から読み込みました。")
                 except Exception as e:
                     logger.warning(
                         f"モデル runtime cache {self._runtime_cache_path} の読み込み中にエラー: {e}"
@@ -218,7 +214,9 @@ class ModelConfigRegistry:
                     )
             else:
                 self._merged_config_data[model_name] = copy.deepcopy(user_model_config)
-        logger.debug("システム設定とユーザー設定をディープコピーでマージしました。")
+        # 各 setter (set / set_system_value / set_runtime_cache_value) からも呼ばれ、
+        # per-model 更新で firehose 化するため TRACE (ADR 0047)。
+        logger.trace("システム設定とユーザー設定をディープコピーでマージしました。")
 
     @staticmethod
     def _merge_capabilities(system_capabilities: Any, user_capabilities: Any) -> list[Any]:
@@ -244,7 +242,7 @@ class ModelConfigRegistry:
 
     def set(self, model_name: str, key: str, value: Any) -> None:
         """指定されたモデルとキーに対応する設定値をユーザー設定として更新します。"""
-        logger.debug(f"ユーザー設定を更新: モデル '{model_name}', キー '{key}', 値 '{value}'")
+        logger.trace(f"ユーザー設定を更新: モデル '{model_name}', キー '{key}', 値 '{value}'")
         if model_name not in self._user_config_data:
             self._user_config_data[model_name] = {}
         self._user_config_data[model_name][key] = value
@@ -253,7 +251,7 @@ class ModelConfigRegistry:
 
     def set_system_value(self, model_name: str, key: str, value: Any) -> None:
         """指定されたモデルとキーに対応する設定値をシステム設定として更新します。"""
-        logger.debug(f"システム設定を更新: モデル '{model_name}', キー '{key}', 値 '{value}'")
+        logger.trace(f"システム設定を更新: モデル '{model_name}', キー '{key}', 値 '{value}'")
         if model_name not in self._system_config_data:
             self._system_config_data[model_name] = {}
         self._system_config_data[model_name][key] = value
@@ -265,7 +263,7 @@ class ModelConfigRegistry:
         if key not in RUNTIME_MODEL_METADATA_KEYS:
             logger.warning(f"モデル runtime cache に保存できないキーをスキップ: {key}")
             return
-        logger.debug(f"モデル runtime cache を更新: モデル '{model_name}', キー '{key}', 値 '{value}'")
+        logger.trace(f"モデル runtime cache を更新: モデル '{model_name}', キー '{key}', 値 '{value}'")
         if model_name not in self._runtime_cache_data:
             self._runtime_cache_data[model_name] = {}
         self._runtime_cache_data[model_name][key] = value

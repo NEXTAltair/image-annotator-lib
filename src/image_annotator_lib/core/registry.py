@@ -47,7 +47,7 @@ def _import_module_from_file(module_file: Path, base_module_path: str) -> Module
     full_module_path = f"{base_module_path}.{module_path}"
     try:
         module = importlib.import_module(full_module_path)
-        logger.debug(f"モジュールのインポート成功: {full_module_path}")
+        logger.trace(f"モジュールのインポート成功: {full_module_path}")
         return module
     except ImportError as e:
         logger.error(f"モジュール {full_module_path} のインポート中にエラー: {e}", exc_info=True)
@@ -234,13 +234,13 @@ def _try_register_model(
 
     if model_name in registry:
         if registry[model_name] is model_cls:
-            logger.debug(f"モデル名 '{model_name}' は既に登録されています(同一クラス)。スキップします。")
+            logger.trace(f"モデル名 '{model_name}' は既に登録されています(同一クラス)。スキップします。")
             return True
         logger.warning(
             f"モデル名 '{model_name}' は既に登録されています。クラス '{model_cls.__name__}' で上書きします。"
         )
     registry[model_name] = model_cls
-    logger.debug(f"モデル '{model_name}' をクラス '{model_cls.__name__}' でレジストリに登録しました。")
+    logger.trace(f"モデル '{model_name}' をクラス '{model_cls.__name__}' でレジストリに登録しました。")
     return True
 
 
@@ -361,20 +361,20 @@ def find_model_class_case_insensitive(model_name: str) -> tuple[str, ModelClass]
     Returns:
         tuple[str, ModelClass] | None: (実際のキー名, モデルクラス) のタプル。見つからない場合はNone
     """
-    # デバッグ情報を追加
-    logger.debug(f"モデル検索: '{model_name}' を {len(_MODEL_CLASS_OBJ_REGISTRY)} 個のモデルから検索")
-    logger.debug(f"利用可能なモデル: {list(_MODEL_CLASS_OBJ_REGISTRY.keys())[:10]}...")
+    # デバッグ情報を追加 (モデル解決ごとに呼ばれる per-lookup firehose のため TRACE)
+    logger.trace(f"モデル検索: '{model_name}' を {len(_MODEL_CLASS_OBJ_REGISTRY)} 個のモデルから検索")
+    logger.trace(f"利用可能なモデル: {list(_MODEL_CLASS_OBJ_REGISTRY.keys())[:10]}...")
 
     # 最初に正確なマッチを試す
     if model_name in _MODEL_CLASS_OBJ_REGISTRY:
-        logger.debug(f"正確なマッチ: '{model_name}'")
+        logger.trace(f"正確なマッチ: '{model_name}'")
         return (model_name, _MODEL_CLASS_OBJ_REGISTRY[model_name])
 
     # 大文字・小文字を区別しない検索
     model_name_lower = model_name.lower()
     for key, value in _MODEL_CLASS_OBJ_REGISTRY.items():
         if key.lower() == model_name_lower:
-            logger.debug(f"モデル名を正規化: '{model_name}' -> '{key}'")
+            logger.trace(f"モデル名を正規化: '{model_name}' -> '{key}'")
             return (key, value)
 
     # 部分マッチを試す(ハイフンやスペースを無視)
@@ -382,7 +382,7 @@ def find_model_class_case_insensitive(model_name: str) -> tuple[str, ModelClass]
     for key, value in _MODEL_CLASS_OBJ_REGISTRY.items():
         normalized_key = key.lower().replace("-", "").replace(" ", "")
         if normalized_search in normalized_key or normalized_key in normalized_search:
-            logger.debug(f"部分マッチでモデル名を正規化: '{model_name}' -> '{key}'")
+            logger.trace(f"部分マッチでモデル名を正規化: '{model_name}' -> '{key}'")
             return (key, value)
 
     logger.warning(
@@ -714,8 +714,8 @@ def _register_webapi_models_from_discovery() -> None:
     """
     logger.debug("LiteLLM 同梱 DB から WebAPI モデルの直接登録を開始します...")
     try:
-        from ..webapi.api_model_discovery import discover_available_vision_models
         from ..webapi.annotator import WebApiAnnotator
+        from ..webapi.api_model_discovery import discover_available_vision_models
 
         result = discover_available_vision_models()
         api_models: dict[str, dict[str, Any]] = result.get("metadata", {})
