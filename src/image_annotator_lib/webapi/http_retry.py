@@ -18,7 +18,7 @@ PydanticAI provider 用 ``httpx.AsyncClient`` 向けにコード化する。
 
 - model fallback / LiteLLM Router retry (ADR 0023 line 313-314)
 - ``Retry-After > max_wait`` の halt-on-exceed (Phase 2 へ繰り延べ)
-- output validation retry (これは PydanticAI ``output_retries=1`` で別経路、
+- output validation retry (これは PydanticAI ``retries={"output": 1}`` で別経路、
   ``provider_manager._OUTPUT_RETRIES`` を参照)
 
 関連ドキュメント: docs/decisions/0023-pydanticai-litellm-webapi-inference-boundary.md

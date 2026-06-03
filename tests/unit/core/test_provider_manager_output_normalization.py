@@ -20,7 +20,7 @@ def test_provider_manager_returns_normalized_annotation_result() -> None:
             }
         ),
         output_type=normalize_annotation_output,
-        output_retries=1,
+        retries={"output": 1},
     )
     image = Image.new("RGB", (8, 8), color="white")
 

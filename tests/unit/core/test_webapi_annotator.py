@@ -76,6 +76,10 @@ class TestWebApiAnnotatorModeWiring:
         annotator = WebApiAnnotator(litellm_model_id="openai/gpt-5-pro", mode="responses")
         assert annotator.mode == "responses"
 
+    def test_init_stores_explicit_max_concurrency(self) -> None:
+        annotator = WebApiAnnotator(litellm_model_id="openai/gpt-4o", max_concurrency=2)
+        assert annotator.max_concurrency == 2
+
     def test_run_inference_passes_mode_to_provider_manager(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """`_run_inference` が `mode="responses"` で ProviderManager を呼ぶことを確認する。
 
@@ -99,6 +103,25 @@ class TestWebApiAnnotatorModeWiring:
 
         assert captured["mode"] == "responses"
         assert captured["litellm_model_id"] == "openai/gpt-5-pro"
+
+    def test_run_inference_passes_max_concurrency_to_provider_manager(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, object] = {}
+        image = Image.new("RGB", (4, 4), color="white")
+
+        def fake_run(**kwargs: object) -> dict[str, AnnotationResult]:
+            captured.update(kwargs)
+            return {}
+
+        monkeypatch.setattr(
+            annotator_module.ProviderManager, "run_inference_with_model", staticmethod(fake_run)
+        )
+
+        annotator = WebApiAnnotator(litellm_model_id="openai/gpt-4o", max_concurrency=2)
+        annotator._run_inference([image])
+
+        assert captured["max_concurrency"] == 2
 
 
 class TestWebApiAnnotatorRatings:
