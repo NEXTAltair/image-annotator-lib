@@ -41,6 +41,7 @@ class WebApiAnnotator(BaseAnnotator):
         model_name: str | None = None,
         capabilities: set[TaskCapability] | frozenset[TaskCapability] | list[str] | None = None,
         mode: str = "chat",
+        max_concurrency: int | None = None,
     ) -> None:
         """`WebApiAnnotator` を初期化する。
 
@@ -54,6 +55,8 @@ class WebApiAnnotator(BaseAnnotator):
                 rating 出力を `UnifiedAnnotationResult.ratings` として公開する。
             mode: registry metadata 由来の推論 endpoint 種別 (`"chat"` 既定 / `"responses"`)。
                 OpenAI の responses 系モデル構築のため推論時に `ProviderManager` へ伝播する。
+            max_concurrency: 同一モデル内で並列実行する画像 API request の最大数。
+                None の場合は `ProviderManager` の既定値を使う。
         """
         # ADR 0023 Phase 1 / Issue #35 / Issue #45:
         # - WebAPI モデルは registry 経由でのみインスタンス化される (Issue #45 で
@@ -69,6 +72,7 @@ class WebApiAnnotator(BaseAnnotator):
         self.api_keys = api_keys
         self.capabilities = self._normalize_capabilities(capabilities)
         self.mode = mode
+        self.max_concurrency = max_concurrency
         self._config = None
         self.model_path = None
         self.device = "api"
@@ -117,6 +121,7 @@ class WebApiAnnotator(BaseAnnotator):
             api_keys=self.api_keys,
             capabilities=self.capabilities,
             mode=self.mode,
+            max_concurrency=self.max_concurrency,
         )
         ordered: list[AnnotationResult] = []
         for index, image in enumerate(processed):

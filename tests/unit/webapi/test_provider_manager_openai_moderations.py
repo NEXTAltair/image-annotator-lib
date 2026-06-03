@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import ClassVar
 
@@ -27,33 +28,58 @@ class _FakeModerationResponse:
 
 
 class _FakeModerations:
-    def __init__(self, calls: list[dict], exc: Exception | None = None) -> None:
+    def __init__(
+        self,
+        calls: list[dict],
+        exc: Exception | None = None,
+        delay: float = 0,
+        tracker: dict[str, int] | None = None,
+    ) -> None:
         self._calls = calls
         self._exc = exc
+        self._delay = delay
+        self._tracker = tracker
 
     async def create(self, **kwargs):
         self._calls.append(kwargs)
-        if self._exc is not None:
-            raise self._exc
-        return _FakeModerationResponse()
+        if self._tracker is not None:
+            self._tracker["active"] += 1
+            self._tracker["peak"] = max(self._tracker["peak"], self._tracker["active"])
+        try:
+            if self._delay:
+                await asyncio.sleep(self._delay)
+            if self._exc is not None:
+                raise self._exc
+            return _FakeModerationResponse()
+        finally:
+            if self._tracker is not None:
+                self._tracker["active"] -= 1
 
 
 class _FakeAsyncOpenAI:
     calls: ClassVar[list[dict]] = []
     exc: ClassVar[Exception | None] = None
+    delay: ClassVar[float] = 0
+    tracker: ClassVar[dict[str, int] | None] = None
 
     def __init__(self, *, api_key: str, http_client) -> None:
         assert api_key == "test-key"
         assert http_client is not None
-        self.moderations = _FakeModerations(self.calls, self.exc)
+        self.moderations = _FakeModerations(self.calls, self.exc, self.delay, self.tracker)
 
 
-def _install_fake_openai(monkeypatch: pytest.MonkeyPatch, exc: Exception | None = None) -> list[dict]:
+def _install_fake_openai(
+    monkeypatch: pytest.MonkeyPatch,
+    exc: Exception | None = None,
+    *,
+    delay: float = 0,
+    tracker: dict[str, int] | None = None,
+) -> list[dict]:
     calls: list[dict] = []
     fake_cls = type(
         "FakeAsyncOpenAI",
         (_FakeAsyncOpenAI,),
-        {"calls": calls, "exc": exc},
+        {"calls": calls, "exc": exc, "delay": delay, "tracker": tracker},
     )
     monkeypatch.setitem(
         __import__("sys").modules,
@@ -115,3 +141,29 @@ def test_openai_moderation_api_error_is_wrapped_with_diagnostic(
     assert result["tags"] == []
     assert "RuntimeError: moderation failed" in result["error"]
     assert "ValueError: socket closed" in result["error"]
+
+
+def test_openai_moderation_respects_max_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = {"active": 0, "peak": 0}
+    calls = _install_fake_openai(monkeypatch, delay=0.02, tracker=tracker)
+    images = [Image.new("RGB", (8, 8), color=(index, index, index)) for index in range(5)]
+    for index, image in enumerate(images):
+        image.info["phash"] = f"moderation-{index}"
+    monkeypatch.setattr(
+        "image_annotator_lib.webapi.provider_manager.calculate_phash",
+        lambda image: image.info["phash"],
+    )
+
+    results = ProviderManager.run_inference_with_model(
+        model_name="openai/omni-moderation-latest",
+        images_list=images,
+        litellm_model_id="openai/omni-moderation-latest",
+        api_keys={"openai": "test-key"},
+        max_concurrency=2,
+    )
+
+    assert tracker["peak"] == 2
+    assert len(calls) == 5
+    assert list(results) == [f"moderation-{index}" for index in range(5)]

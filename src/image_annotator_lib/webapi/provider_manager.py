@@ -36,12 +36,13 @@ from .output_normalization import build_annotation_output_normalizer
 from .result_adapter import to_annotation_result
 
 # ADR 0023 retry policy:
-# - output normalization / schema validation failure: PydanticAI `output_retries=1` で 1 回再生成
+# - output normalization / schema validation failure: PydanticAI `retries={"output": 1}` で 1 回再生成
 #   (`ModelRetry` 経由)。
 # - HTTP/API transient failure: Phase 1.8 (Issue #46) で `webapi/http_retry.py` の
 #   `AsyncTenacityTransport` が provider HTTP client 層で initial+2 retries (max 3 attempts)。
 # 両 retry は独立した経路で機能し、互いに干渉しない。
 _OUTPUT_RETRIES = 1
+_DEFAULT_WEBAPI_MAX_CONCURRENCY = 3
 
 # Agent.run の user message として渡す短い指示。BASE_PROMPT は system_prompt 側で詳細を伝える。
 _USER_PROMPT_TEXT = "Analyze this image and provide annotations as specified."
@@ -63,6 +64,14 @@ _REFUSAL_ERROR_CODE: dict[type[BaseException], AnnotationErrorCode] = {
 _CORE_CAPABILITIES = frozenset(
     {TaskCapability.TAGS, TaskCapability.CAPTIONS, TaskCapability.SCORES}
 )
+
+
+def _resolve_max_concurrency(max_concurrency: int | None) -> int:
+    """Resolve and validate bounded WebAPI image request concurrency."""
+    resolved = _DEFAULT_WEBAPI_MAX_CONCURRENCY if max_concurrency is None else max_concurrency
+    if isinstance(resolved, bool) or not isinstance(resolved, int) or resolved < 1:
+        raise ValueError(f"max_concurrency must be a positive integer: {max_concurrency!r}")
+    return resolved
 
 
 def _build_system_prompt(capabilities: set[TaskCapability] | frozenset[TaskCapability] | None) -> str:
@@ -137,6 +146,7 @@ class ProviderManager:
         config: dict[str, Any] | None = None,
         capabilities: set[TaskCapability] | frozenset[TaskCapability] | None = None,
         mode: str = "chat",
+        max_concurrency: int | None = None,
         _test_agent: Agent | None = None,
     ) -> dict[str, AnnotationResult]:
         """非同期推論の中核実装。
@@ -150,17 +160,21 @@ class ProviderManager:
             capabilities: 呼び出し元 WebAPI annotator が明示したタスク能力。
             mode: registry metadata 由来の推論 endpoint 種別 (`"chat"` / `"responses"`)。
                 OpenAI の responses 系モデル構築のため `resolve_model_ref` に伝播する。
+            max_concurrency: 同一モデル内で並列実行する画像 API request の最大数。
+                None の場合は保守的な既定値を使う。
             _test_agent: pytest fixture からの Agent 注入専用 (本番では None)。
 
         Returns:
             `dict[phash, AnnotationResult]`。画像ごとに 1 entry。
         """
+        resolved_max_concurrency = _resolve_max_concurrency(max_concurrency)
         if _is_openai_moderation_model(litellm_model_id):
             return await cls._run_openai_moderation_inference(
                 model_name=model_name,
                 images_list=images_list,
                 litellm_model_id=litellm_model_id,
                 api_keys=api_keys,
+                max_concurrency=resolved_max_concurrency,
             )
 
         # ADR 0023 Phase 1.8 (Issue #46): transport retry 付き AsyncClient を推論呼び出しごとに
@@ -183,7 +197,7 @@ class ProviderManager:
                     model=model,
                     output_type=build_annotation_output_normalizer(capabilities),
                     system_prompt=_build_system_prompt(capabilities),
-                    output_retries=_OUTPUT_RETRIES,
+                    retries={"output": _OUTPUT_RETRIES},
                 )
             except BaseException:
                 # provider/model/Agent 構築途中で失敗した場合は、開いた AsyncClient を確実に閉じる。
@@ -192,75 +206,84 @@ class ProviderManager:
 
         try:
             binary_contents = preprocess_images_to_binary(images_list)
-            results: dict[str, AnnotationResult] = {}
-            for index, (image, binary) in enumerate(zip(images_list, binary_contents, strict=True)):
+            semaphore = asyncio.Semaphore(resolved_max_concurrency)
+
+            async def _run_one(index: int, image: Image.Image, binary: Any) -> tuple[str, AnnotationResult]:
                 phash = calculate_phash(image) or f"unknown_image_{index}"
-                try:
-                    run_result = await agent.run([_USER_PROMPT_TEXT, binary])
-                    # Issue #134: schema-valid だが全要求 capability が空の成功は、例外も
-                    # refusal シグナルも伴わず error=None で素通りする。EmptyAnnotationError
-                    # に分類して error_records 経路に乗せる (refusal contract #42 の拡張)。
-                    empty_exc = _classify_empty_output(
-                        run_result.output, capabilities, litellm_model_id, phash
+                async with semaphore:
+                    try:
+                        run_result = await agent.run([_USER_PROMPT_TEXT, binary])
+                        # Issue #134: schema-valid だが全要求 capability が空の成功は、例外も
+                        # refusal シグナルも伴わず error=None で素通りする。EmptyAnnotationError
+                        # に分類して error_records 経路に乗せる (refusal contract #42 の拡張)。
+                        empty_exc = _classify_empty_output(
+                            run_result.output, capabilities, litellm_model_id, phash
+                        )
+                        if empty_exc is not None:
+                            logger.warning(
+                                f"WebAPI empty annotation: model={model_name}, "
+                                f"litellm_model_id={litellm_model_id}, phash={phash}, "
+                                f"capabilities={empty_exc.requested_capabilities}"
+                            )
+                            return phash, to_annotation_result(
+                                None,
+                                phash,
+                                error=str(empty_exc),
+                                error_code=AnnotationErrorCode.EMPTY_ANNOTATION,
+                                retryable=False,
+                            )
+                        return phash, to_annotation_result(run_result.output, phash)
+                    except Exception as exc:
+                        refusal_exc = _classify_refusal(exc, litellm_model_id, phash)
+                        if refusal_exc is not None:
+                            # ADR 0006 amendment (#134/#599): refusal は library エラーではなく
+                            # structured outcome。error_code (UPPERCASE) + retryable=False +
+                            # message で伝搬し、LoRAIro 側で error_records に記録する。
+                            logger.warning(
+                                f"WebAPI safety refusal: model={model_name}, "
+                                f"litellm_model_id={litellm_model_id}, phash={phash}, "
+                                f"reason={refusal_exc.provider_refusal_reason or 'no reason'}"
+                            )
+                            return phash, to_annotation_result(
+                                None,
+                                phash,
+                                error=str(refusal_exc),
+                                error_code=_REFUSAL_ERROR_CODE[type(refusal_exc)],
+                                retryable=False,
+                            )
+                        # ADR 0023 Phase 1.8 (Issue #46): transport retry 枯渇時は
+                        # tenacity が httpx 例外を reraise する (RetryConfig(reraise=True))。
+                        # 既存の str(exc) 文字列伝搬経路でそのまま LoRAIro 側に流れる。
+                        #
+                        # LoRAIro #274: openai.APIConnectionError 等は str(exc) が
+                        # "Connection error." に潰れ、根本原因 (httpx の ConnectTimeout 等)
+                        # が AnnotationResult.error から失われる。cause/context chain を
+                        # 辿った診断文字列を log・result.error の双方に伝搬する。
+                        error_detail = _format_exception_chain(exc)
+                        # LoRAIro #274: traceback を logger に attach しない。loguru sink の
+                        # diagnose 設定により traceback 各フレームの変数値 (api_key 等) が
+                        # 展開され、機密情報漏洩 + 過剰ノイズになる。原因は error_detail
+                        # (cause chain: 例外各層の型 + message) で十分特定できる。
+                        #
+                        # Issue #69 / LoRAIro #275: 引数なしの `logger.error(message)` は
+                        # loguru が `message.format()` を呼ばないため、message 中の str(exc)
+                        # 由来 `{'type': ...}` dict 表現を placeholder と誤認せず、
+                        # `KeyError("'type'")` も leak しない。
+                        logger.error(
+                            f"WebAPI 推論失敗: model={model_name}, "
+                            f"litellm_model_id={litellm_model_id}, error={error_detail}"
+                        )
+                        return phash, to_annotation_result(None, phash, error=error_detail)
+
+            result_items = await asyncio.gather(
+                *(
+                    _run_one(index, image, binary)
+                    for index, (image, binary) in enumerate(
+                        zip(images_list, binary_contents, strict=True)
                     )
-                    if empty_exc is not None:
-                        logger.warning(
-                            f"WebAPI empty annotation: model={model_name}, "
-                            f"litellm_model_id={litellm_model_id}, phash={phash}, "
-                            f"capabilities={empty_exc.requested_capabilities}"
-                        )
-                        results[phash] = to_annotation_result(
-                            None,
-                            phash,
-                            error=str(empty_exc),
-                            error_code=AnnotationErrorCode.EMPTY_ANNOTATION,
-                            retryable=False,
-                        )
-                        continue
-                    results[phash] = to_annotation_result(run_result.output, phash)
-                except Exception as exc:
-                    refusal_exc = _classify_refusal(exc, litellm_model_id, phash)
-                    if refusal_exc is not None:
-                        # ADR 0006 amendment (#134/#599): refusal は library エラーではなく
-                        # structured outcome。error_code (UPPERCASE) + retryable=False +
-                        # message で伝搬し、LoRAIro 側で error_records に記録する。
-                        logger.warning(
-                            f"WebAPI safety refusal: model={model_name}, "
-                            f"litellm_model_id={litellm_model_id}, phash={phash}, "
-                            f"reason={refusal_exc.provider_refusal_reason or 'no reason'}"
-                        )
-                        results[phash] = to_annotation_result(
-                            None,
-                            phash,
-                            error=str(refusal_exc),
-                            error_code=_REFUSAL_ERROR_CODE[type(refusal_exc)],
-                            retryable=False,
-                        )
-                        continue
-                    # ADR 0023 Phase 1.8 (Issue #46): transport retry 枯渇時は
-                    # tenacity が httpx 例外を reraise する (RetryConfig(reraise=True))。
-                    # 既存の str(exc) 文字列伝搬経路でそのまま LoRAIro 側に流れる。
-                    #
-                    # LoRAIro #274: openai.APIConnectionError 等は str(exc) が
-                    # "Connection error." に潰れ、根本原因 (httpx の ConnectTimeout 等)
-                    # が AnnotationResult.error から失われる。cause/context chain を
-                    # 辿った診断文字列を log・result.error の双方に伝搬する。
-                    error_detail = _format_exception_chain(exc)
-                    # LoRAIro #274: traceback を logger に attach しない。loguru sink の
-                    # diagnose 設定により traceback 各フレームの変数値 (api_key 等) が
-                    # 展開され、機密情報漏洩 + 過剰ノイズになる。原因は error_detail
-                    # (cause chain: 例外各層の型 + message) で十分特定できる。
-                    #
-                    # Issue #69 / LoRAIro #275: 引数なしの `logger.error(message)` は
-                    # loguru が `message.format()` を呼ばないため、message 中の str(exc)
-                    # 由来 `{'type': ...}` dict 表現を placeholder と誤認せず、
-                    # `KeyError("'type'")` も leak しない。
-                    logger.error(
-                        f"WebAPI 推論失敗: model={model_name}, "
-                        f"litellm_model_id={litellm_model_id}, error={error_detail}"
-                    )
-                    results[phash] = to_annotation_result(None, phash, error=error_detail)
-            return results
+                )
+            )
+            return dict(result_items)
         finally:
             if http_client is not None:
                 await http_client.aclose()
@@ -297,6 +320,7 @@ class ProviderManager:
         config: dict[str, Any] | None = None,
         capabilities: set[TaskCapability] | frozenset[TaskCapability] | None = None,
         mode: str = "chat",
+        max_concurrency: int | None = None,
         _test_agent: Agent | None = None,
     ) -> dict[str, AnnotationResult]:
         """`run_inference_with_model_async()` の sync wrapper。
@@ -322,6 +346,7 @@ class ProviderManager:
                 config=config,
                 capabilities=capabilities,
                 mode=mode,
+                max_concurrency=max_concurrency,
                 _test_agent=_test_agent,
             )
         )
@@ -358,6 +383,7 @@ class ProviderManager:
         images_list: list[Image.Image],
         litellm_model_id: str,
         api_keys: dict[str, str] | None,
+        max_concurrency: int,
     ) -> dict[str, AnnotationResult]:
         """Run OpenAI Moderations directly for image rating models."""
 
@@ -369,42 +395,53 @@ class ProviderManager:
 
             client = AsyncOpenAI(api_key=api_key, http_client=http_client)
             binary_contents = preprocess_images_to_binary(images_list)
-            results: dict[str, AnnotationResult] = {}
-            for index, (image, binary) in enumerate(zip(images_list, binary_contents, strict=True)):
+            semaphore = asyncio.Semaphore(max_concurrency)
+
+            async def _run_one(index: int, image: Image.Image, binary: Any) -> tuple[str, AnnotationResult]:
                 phash = calculate_phash(image) or f"unknown_image_{index}"
-                try:
-                    response = await client.moderations.create(
-                        model=ref.provider_model_id,
-                        input=[
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": build_base64_data_url(binary.data, binary.media_type),
-                                },
-                            }
-                        ],
+                async with semaphore:
+                    try:
+                        response = await client.moderations.create(
+                            model=ref.provider_model_id,
+                            input=[
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": build_base64_data_url(binary.data, binary.media_type),
+                                    },
+                                }
+                            ],
+                        )
+                        payload = _openai_response_to_dict(response)
+                        prediction = category_scores_to_rating_prediction(payload)
+                        return phash, AnnotationResult(
+                            phash=phash,
+                            tags=[],
+                            formatted_output={
+                                "tags": [],
+                                "captions": [],
+                                "score": None,
+                                "ratings": [prediction],
+                            },
+                            error=None,
+                        )
+                    except Exception as exc:
+                        error_detail = _format_exception_chain(exc)
+                        logger.error(
+                            f"OpenAI Moderations 推論失敗: model={model_name}, "
+                            f"litellm_model_id={litellm_model_id}, error={error_detail}"
+                        )
+                        return phash, to_annotation_result(None, phash, error=error_detail)
+
+            result_items = await asyncio.gather(
+                *(
+                    _run_one(index, image, binary)
+                    for index, (image, binary) in enumerate(
+                        zip(images_list, binary_contents, strict=True)
                     )
-                    payload = _openai_response_to_dict(response)
-                    prediction = category_scores_to_rating_prediction(payload)
-                    results[phash] = AnnotationResult(
-                        phash=phash,
-                        tags=[],
-                        formatted_output={
-                            "tags": [],
-                            "captions": [],
-                            "score": None,
-                            "ratings": [prediction],
-                        },
-                        error=None,
-                    )
-                except Exception as exc:
-                    error_detail = _format_exception_chain(exc)
-                    logger.error(
-                        f"OpenAI Moderations 推論失敗: model={model_name}, "
-                        f"litellm_model_id={litellm_model_id}, error={error_detail}"
-                    )
-                    results[phash] = to_annotation_result(None, phash, error=error_detail)
-            return results
+                )
+            )
+            return dict(result_items)
         finally:
             await http_client.aclose()
 

@@ -17,7 +17,7 @@ from pydantic_ai.models.test import TestModel
 from image_annotator_lib.core.types import AnnotationSchema, TaskCapability
 from image_annotator_lib.exceptions.errors import EmptyAnnotationError
 from image_annotator_lib.webapi.output_normalization import build_annotation_output_normalizer
-from image_annotator_lib.webapi.provider_manager import _classify_empty_output, ProviderManager
+from image_annotator_lib.webapi.provider_manager import ProviderManager, _classify_empty_output
 
 _TAGS_CAPTIONS = frozenset({TaskCapability.TAGS, TaskCapability.CAPTIONS})
 
@@ -26,7 +26,7 @@ def _run(custom_output_args: dict[str, object], capabilities: frozenset[TaskCapa
     agent = Agent(
         model=TestModel(custom_output_args=custom_output_args),
         output_type=build_annotation_output_normalizer(capabilities),
-        output_retries=1,
+        retries={"output": 1},
     )
     image = Image.new("RGB", (8, 8), color="white")
     results = ProviderManager.run_inference_with_model(

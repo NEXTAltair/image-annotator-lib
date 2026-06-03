@@ -13,7 +13,7 @@ ADR 0023 Issue #47: PydanticAI `Agent.output_type` に渡す callable として
 - 各要素の trim、空文字除去
 
 補正不能 (非対応型 / list 内非文字列 / 解釈不能 score 等) は `ModelRetry`
-を raise し、PydanticAI `output_retries=1` に従って LLM 再生成へ流す。
+を raise し、PydanticAI `retries={"output": 1}` に従って LLM 再生成へ流す。
 壊れた JSON 修復 / free text からの regex 復元 / provider 別 parser は実装しない。
 """
 
