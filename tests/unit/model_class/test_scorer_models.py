@@ -653,3 +653,104 @@ def test_clip_scorer_handles_transformers5_pooled_output(
             assert torch.allclose(torch.norm(normalized, p=2, dim=-1), torch.tensor([1.0]), atol=1e-6)
             assert raw_outputs.shape == torch.Size([1])
             assert raw_outputs.item() == 7.5
+
+
+# ==============================================================================
+# Issue #142 回帰テスト: WaifuAesthetic fc{n} キー対応
+# ==============================================================================
+
+
+@pytest.mark.unit
+def test_infer_classifier_structure_fc_pattern():
+    """Issue #142 回帰: fc{n}.weight パターンから隠れ層サイズを正しく推測する。
+
+    WaifuAesthetic の重みファイルは fc1/fc2/fc3 命名を使用するため、
+    layers.{n} パターン検索が失敗してデフォルト [1024, 128, 64, 16] が使用されていた。
+    fc パターンへのフォールバックで [256, 128] が返ることを確認する。
+    """
+    import torch
+    from image_annotator_lib.core.loaders.clip_loader import CLIPLoader
+
+    loader = CLIPLoader("WaifuAesthetic", "cpu")
+    state_dict = {
+        "fc1.weight": torch.zeros(256, 512),
+        "fc1.bias": torch.zeros(256),
+        "fc2.weight": torch.zeros(128, 256),
+        "fc2.bias": torch.zeros(128),
+        "fc3.weight": torch.zeros(1, 128),
+        "fc3.bias": torch.zeros(1),
+    }
+    hidden_sizes = loader._infer_classifier_structure(state_dict)
+    assert hidden_sizes == [256, 128]
+
+
+@pytest.mark.unit
+def test_remap_state_dict_fc_keys():
+    """Issue #142 回帰: fc{n} キーが classifier の layers.{n} キーに正しくリネームされる。
+
+    リネーム後、fc プレフィックスのキーが消え、layers プレフィックスのキーが生成され、
+    テンソルの内容は元の値と同一であることを確認する。
+    """
+    import torch
+    import torch.nn as nn
+    from image_annotator_lib.core.classifier import Classifier
+    from image_annotator_lib.core.loaders.clip_loader import CLIPLoader
+
+    loader = CLIPLoader("WaifuAesthetic", "cpu")
+    original_fc1_weight = torch.zeros(256, 512)
+    fc_state_dict = {
+        "fc1.weight": original_fc1_weight,
+        "fc1.bias": torch.zeros(256),
+        "fc2.weight": torch.zeros(128, 256),
+        "fc2.bias": torch.zeros(128),
+        "fc3.weight": torch.zeros(1, 128),
+        "fc3.bias": torch.zeros(1),
+    }
+    classifier = Classifier(
+        512,
+        [256, 128],
+        1,
+        use_activation=True,
+        activation=nn.ReLU,
+        use_final_activation=True,
+        final_activation=nn.Sigmoid,
+    )
+    remapped = loader._remap_state_dict_keys(fc_state_dict, classifier)
+
+    assert "layers.0.weight" in remapped
+    assert "layers.0.bias" in remapped
+    assert not any(k.startswith("fc") for k in remapped)
+    assert torch.equal(remapped["layers.0.weight"], original_fc1_weight)
+
+
+@pytest.mark.unit
+def test_waifuaesthetic_classifier_loads_fc_weights():
+    """Issue #142 回帰: fc 形式の重みが classifier に正しくロードされる（ランダム初期化ではない）。
+
+    修正前は load_state_dict(strict=False) でキー不一致により全重みが無視され、
+    ランダム初期化のまま固定値 0.5565 を返していた。
+    修正後は fc{n} → layers.{n} のリネームが行われ、元の重みが反映されることを確認する。
+    """
+    import torch
+    from image_annotator_lib.core.loaders.clip_loader import CLIPLoader
+
+    loader = CLIPLoader("WaifuAesthetic", "cpu")
+    expected_weight = torch.randn(256, 512)
+    fc_state_dict = {
+        "fc1.weight": expected_weight.clone(),
+        "fc1.bias": torch.randn(256),
+        "fc2.weight": torch.randn(128, 256),
+        "fc2.bias": torch.randn(128),
+        "fc3.weight": torch.randn(1, 128),
+        "fc3.bias": torch.randn(1),
+    }
+    classifier_head = loader._create_and_load_classifier_head(
+        input_size=512,
+        hidden_sizes=[256, 128],
+        state_dict=fc_state_dict,
+        activation_type="ReLU",
+        final_activation_type="Sigmoid",
+        model_path_for_log="test/aes-B32-v0.pth",
+    )
+    loaded_state = classifier_head.state_dict()
+    assert torch.equal(loaded_state["layers.0.weight"], expected_weight)
