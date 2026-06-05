@@ -117,7 +117,11 @@ class ClipBaseAnnotator(BaseAnnotator):
 
         try:
             with torch.no_grad():
-                image_features = clip_model.get_image_features(**processed)
+                # transformers 5.x: CLIPModel.get_image_features は tensor ではなく
+                # BaseModelOutputWithPooling を返す。射影済み image embeds は .pooler_output に入る
+                # (旧 4.x の戻り tensor 相当)。古い tensor 戻り値にも備えて getattr で吸収する。
+                features_output = clip_model.get_image_features(**processed)
+                image_features = getattr(features_output, "pooler_output", features_output)
                 image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
                 raw_scores = classifier_head(image_features)
                 return raw_scores.squeeze(-1)
