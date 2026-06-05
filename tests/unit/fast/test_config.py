@@ -406,6 +406,44 @@ def test_load_config_from_file_errors(tmp_path):
         _load_config_from_file(bad_toml_path)
 
 
+# Issue #139 (B): canonical-label scorer が config/annotator_config.toml と template
+# (resources/system/annotator_config.toml) の間で capabilities drift を起こし、
+# predictor が生成する score_labels に対し SCORE_LABELS capability が欠落して
+# ValidationError になっていた。両ファイル間で drift しないことを固定する。
+_CANONICAL_LABEL_SCORERS = ["aesthetic_shadow_v1", "aesthetic_shadow_v2", "cafe_aesthetic"]
+
+
+@pytest.mark.fast
+def test_canonical_scorer_capabilities_declare_score_labels():
+    """Issue #139 (B) regression: canonical scorer の config が score_labels capability を持つ。
+
+    AestheticShadow / CafePredictor は _format_predictions で score_labels を返すため
+    (ADR 0002), 実 load される config の capabilities に "score_labels" が無いと
+    UnifiedAnnotationResult の validator が ValidationError を投げる。
+    """
+    project_config = toml.load(Path("config/annotator_config.toml"))
+    for model_name in _CANONICAL_LABEL_SCORERS:
+        capabilities = project_config[model_name]["capabilities"]
+        assert "score_labels" in capabilities, (
+            f"{model_name}: config/annotator_config.toml の capabilities に score_labels が無い "
+            f"(現状 {capabilities})。predictor の score_labels 生成と矛盾し ValidationError になる。"
+        )
+
+
+@pytest.mark.fast
+def test_scorer_capabilities_no_drift_between_config_and_template():
+    """Issue #139 (B) regression: scorer の capabilities が config と template で一致する。
+
+    drift すると実 load される config と ADR 0002/0009 の前提がずれる。
+    """
+    project_config = toml.load(Path("config/annotator_config.toml"))
+    template_config = toml.load(Path("src/image_annotator_lib/resources/system/annotator_config.toml"))
+    for model_name in [*_CANONICAL_LABEL_SCORERS, "ImprovedAesthetic", "WaifuAesthetic"]:
+        assert sorted(project_config[model_name]["capabilities"]) == sorted(
+            template_config[model_name]["capabilities"]
+        ), f"{model_name}: config と template で capabilities が drift している"
+
+
 # ADR 0023 Phase 1 (Issue #35, PR #40): `save_available_api_models` /
 # `load_available_api_models` および `AVAILABLE_API_MODELS_CONFIG_PATH` は廃止された。
 # WebAPI モデル一覧は LiteLLM 同梱 DB から runtime 取得するため、TOML cache の

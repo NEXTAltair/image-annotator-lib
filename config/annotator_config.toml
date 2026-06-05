@@ -4,7 +4,7 @@ device = "cuda"
 class = "AestheticShadow"
 estimated_size_gb = 4.065
 type = "scorer"
-capabilities = [ "scores",]
+capabilities = [ "scores", "score_labels",]
 
 [aesthetic_shadow_v2]
 model_path = "NEXTAltair/cache_aestheic-shadow-v2"
@@ -12,7 +12,7 @@ device = "cuda"
 class = "AestheticShadow"
 estimated_size_gb = 4.065
 type = "scorer"
-capabilities = [ "scores",]
+capabilities = [ "scores", "score_labels",]
 
 [cafe_aesthetic]
 model_path = "cafeai/cafe_aesthetic"
@@ -20,7 +20,7 @@ device = "cuda"
 class = "CafePredictor"
 estimated_size_gb = 0.32
 type = "scorer"
-capabilities = [ "scores",]
+capabilities = [ "scores", "score_labels",]
 
 [ImprovedAesthetic]
 model_path = "https://github.com/christophschuhmann/improved-aesthetic-predictor/raw/main/sac+logos+ava1-l14-linearMSE.pth"
