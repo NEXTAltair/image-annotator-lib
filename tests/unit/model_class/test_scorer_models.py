@@ -607,3 +607,49 @@ def test_clip_scorer_feature_normalization(
             assert raw_outputs.shape == torch.Size([1])
             assert not torch.isnan(raw_outputs).any()
             assert not torch.isinf(raw_outputs).any()
+
+
+@pytest.mark.unit
+def test_clip_scorer_handles_transformers5_pooled_output(
+    mock_clip_scorer_config, mock_clip_components, test_image, mock_capabilities_regression_scorer
+):
+    """Issue #139 (A-1) regression: transformers 5.x の get_image_features 戻り値型に追従する。
+
+    transformers 5.x で CLIPModel.get_image_features は tensor ではなく
+    BaseModelOutputWithPooling を返し、射影済み image embeds は .pooler_output に入る。
+    旧実装は戻り値を直接 .norm() していたため AttributeError で落ちていた。
+    本テストは get_image_features が pooler_output 付きオブジェクトを返しても
+    _run_inference が pooler_output を取り出して正常にスコアを計算することを固定する。
+    """
+    import torch
+    from transformers.modeling_outputs import BaseModelOutputWithPooling
+
+    with patch("image_annotator_lib.core.model_factory.ModelLoad.load_clip_components") as mock_load:
+        mock_clip_model = MagicMock()
+        mock_classifier = MagicMock()
+
+        # transformers 5.x の戻り値を忠実に再現 (.pooler_output に射影済み embeds、.norm は無い)
+        pooled = torch.randn(1, 512) * 10
+        mock_clip_model.get_image_features.return_value = BaseModelOutputWithPooling(pooler_output=pooled)
+        mock_classifier.return_value = torch.tensor([[7.5]])
+
+        mock_components = {
+            "clip_model": mock_clip_model,
+            "model": mock_classifier,
+            "processor": mock_clip_components["processor"],
+            "model_path": "/fake/clip/path",
+        }
+        mock_load.return_value = mock_components
+
+        scorer = ImprovedAesthetic(mock_clip_scorer_config)
+
+        with scorer:
+            processed = scorer._preprocess_images([test_image])
+            raw_outputs = scorer._run_inference(processed)
+
+            # pooler_output が取り出され classifier に渡り、スコアが計算されること
+            mock_classifier.assert_called_once()
+            normalized = mock_classifier.call_args[0][0]
+            assert torch.allclose(torch.norm(normalized, p=2, dim=-1), torch.tensor([1.0]), atol=1e-6)
+            assert raw_outputs.shape == torch.Size([1])
+            assert raw_outputs.item() == 7.5
