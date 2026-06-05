@@ -10,6 +10,7 @@ Dependencies:
 from __future__ import annotations
 
 import gc
+import re
 from typing import TYPE_CHECKING, Any, cast, override
 
 from ..types import CLIPComponents
@@ -59,6 +60,15 @@ class CLIPLoader(LoaderBase):
                 break
 
         hidden_sizes = hidden_features[:-1] if hidden_features else []
+
+        if not hidden_sizes:
+            fc_weight_keys = sorted(
+                [k for k in state_dict if re.match(r"^fc\d+\.weight$", k)],
+                key=lambda x: int(x[2 : x.index(".")]),
+            )
+            if len(fc_weight_keys) >= 2:
+                hidden_sizes = [state_dict[k].shape[0] for k in fc_weight_keys[:-1]]
+
         if not hidden_sizes:
             logger.warning(
                 f"CLIP分類器 '{self.model_name}' 構造推測失敗。デフォルト [1024, 128, 64, 16] 使用。"
@@ -66,6 +76,40 @@ class CLIPLoader(LoaderBase):
             hidden_sizes = [1024, 128, 64, 16]
         logger.info(f"推測された隠れ層サイズ: {hidden_sizes}")
         return hidden_sizes
+
+    def _remap_state_dict_keys(
+        self, state_dict: dict[str, Any], classifier: nn.Module
+    ) -> dict[str, Any]:
+        """fc{n} 形式のキーを classifier の layers.{n} 形式にリネームする。
+
+        WaifuAesthetic 等の fc{n}.weight/bias 命名の重みファイルに対応。
+        キー数が一致しない場合はリネームせずに元の state_dict を返す。
+        """
+        fc_weight_keys = sorted(
+            [k for k in state_dict if re.match(r"^fc\d+\.weight$", k)],
+            key=lambda x: int(x[2 : x.index(".")]),
+        )
+        if not fc_weight_keys:
+            return state_dict
+
+        clf_weight_keys = [k for k in classifier.state_dict() if k.endswith(".weight")]
+        if len(fc_weight_keys) != len(clf_weight_keys):
+            logger.warning(
+                f"fc キー数 ({len(fc_weight_keys)}) と分類器線形層数 ({len(clf_weight_keys)}) が不一致。"
+                " キーリネームをスキップします。"
+            )
+            return state_dict
+
+        remapped: dict[str, Any] = {}
+        for fc_w_key, clf_w_key in zip(fc_weight_keys, clf_weight_keys):
+            remapped[clf_w_key] = state_dict[fc_w_key]
+            fc_b_key = fc_w_key.replace(".weight", ".bias")
+            clf_b_key = clf_w_key.replace(".weight", ".bias")
+            if fc_b_key in state_dict:
+                remapped[clf_b_key] = state_dict[fc_b_key]
+
+        logger.debug(f"state_dict キーリネーム: {list(zip(fc_weight_keys, clf_weight_keys))}")
+        return remapped
 
     def _load_base_clip_components(self, base_model: str) -> tuple[CLIPProcessor, CLIPModel, int]:
         """CLIP プロセッサとベースモデルをロードし、特徴量次元を返す。"""
@@ -125,7 +169,8 @@ class CLIPLoader(LoaderBase):
             use_final_activation=use_final_activation,
             final_activation=final_activation_func,
         )
-        classifier_head.load_state_dict(state_dict, strict=False)
+        state_dict_to_load = self._remap_state_dict_keys(state_dict, classifier_head)
+        classifier_head.load_state_dict(state_dict_to_load, strict=False)
         classifier_head = classifier_head.to(self.device).eval()
         logger.debug(f"CLIP分類器ヘッド '{model_path_for_log}' ロード完了 (デバイス: {self.device})")
         return classifier_head
