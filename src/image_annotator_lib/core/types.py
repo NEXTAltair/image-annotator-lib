@@ -107,6 +107,25 @@ LoaderComponents = (
 )
 
 
+@dataclass(frozen=True)
+class ScoreScale:
+    """scorer の生値が取る値域メタデータ (ADR 0009)。
+
+    各 scorer の `scores` dict の key 単位で、その生値が取る理論値域と
+    「大きいほど良い」かを宣言する。正規化・スケール変換は consumer 責務であり、
+    lib はこのメタデータを提供するのみ。
+
+    Attributes:
+        range: 生値の理論値域 (min, max)。例: 確率は (0.0, 1.0)、
+            ImprovedAesthetic は (1.0, 10.0)。
+        higher_is_better: 値が大きいほど品質が高いか。
+            例: aesthetic_shadow の `lq` は値が小さいほど良いため False。
+    """
+
+    range: tuple[float, float]
+    higher_is_better: bool = True
+
+
 class RatingPrediction(BaseModel):
     """Model-native rating prediction.
 
@@ -270,6 +289,9 @@ class UnifiedAnnotationResult(BaseModel):
     tags: list[str] | None = None
     captions: list[str] | None = None
     scores: dict[str, float] | None = None
+    # ADR 0009: scores の各 key が取る値域メタデータ。正規化は consumer 責務で、
+    # lib は値域宣言のみを提供する。default 付き = 非破壊追加。
+    score_scales: dict[str, ScoreScale] | None = None
     # ADR 0002: scorer 由来の categorical label (例: "very aesthetic", "aesthetic")。
     # content tag (WDTagger 等) と field レベルで分離。
     score_labels: list[str] | None = None

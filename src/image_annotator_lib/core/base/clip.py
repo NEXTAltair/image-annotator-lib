@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Self, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Self, cast
 
 from PIL import Image
 
@@ -15,13 +15,17 @@ if TYPE_CHECKING:
 from ...exceptions.errors import ModelLoadError, OutOfMemoryError
 from ..config import config_registry
 from ..model_factory import ModelLoad
-from ..types import CLIPComponents, TaskCapability, UnifiedAnnotationResult
+from ..types import CLIPComponents, ScoreScale, TaskCapability, UnifiedAnnotationResult
 from ..utils import logger
 from .annotator import BaseAnnotator
 
 
 class ClipBaseAnnotator(BaseAnnotator):
     """CLIP モデルをベースとする Scorer 用の基底クラス。"""
+
+    # ADR 0009: subclass が `scores` の各 key の値域を宣言する。
+    # 基底クラスの default は空 dict (subclass で override する)。
+    SCORE_SCALE: ClassVar[dict[str, ScoreScale]] = {}
 
     def __init__(self, model_name: str, **kwargs: Any):
         super().__init__(model_name=model_name)
@@ -143,6 +147,10 @@ class ClipBaseAnnotator(BaseAnnotator):
             scores = raw_outputs.cpu().numpy().tolist()
             score_list = [float(s) for s in scores]
 
+            has_scores = TaskCapability.SCORES in capabilities
+            # ADR 0009: scores を返す場合のみ値域メタデータも添える (scores と整合)
+            score_scales = self.SCORE_SCALE if has_scores and self.SCORE_SCALE else None
+
             results = []
             for score in score_list:
                 results.append(
@@ -151,7 +159,8 @@ class ClipBaseAnnotator(BaseAnnotator):
                         capabilities=capabilities,
                         tags=None,  # CLIPスコアラーはタグ生成なし
                         captions=None,  # CLIPスコアラーはキャプション生成なし
-                        scores={"aesthetic": score} if TaskCapability.SCORES in capabilities else None,
+                        scores={"aesthetic": score} if has_scores else None,
+                        score_scales=score_scales,
                         framework="pytorch",
                         raw_output={
                             "tensor_shape": list(raw_outputs.shape),

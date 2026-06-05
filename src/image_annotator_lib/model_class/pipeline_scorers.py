@@ -1,13 +1,13 @@
 """Pipeline ベースの Aesthetic Score モデルの実装。"""
 
-from typing import Any
+from typing import Any, ClassVar
 
 from image_annotator_lib.core import utils
 
 # PipelineBaseAnnotator をインポート
 from image_annotator_lib.core.base import PipelineBaseAnnotator
 
-from ..core.types import UnifiedAnnotationResult
+from ..core.types import ScoreScale, UnifiedAnnotationResult
 from ..core.utils import logger
 
 
@@ -16,6 +16,12 @@ class AestheticShadow(PipelineBaseAnnotator):
 
     Hugging Face Pipeline を使用して美的スコアを計算します。
     """
+
+    # ADR 0009: hq/lq は softmax 確率 (各 0–1)。lq は値が小さいほど良い。
+    SCORE_SCALE: ClassVar[dict[str, ScoreScale]] = {
+        "hq": ScoreScale((0.0, 1.0), higher_is_better=True),
+        "lq": ScoreScale((0.0, 1.0), higher_is_better=False),
+    }
 
     def __init__(self, model_name: str):  # kwargs は不要
         """AestheticShadow を初期化します。"""
@@ -58,6 +64,7 @@ class AestheticShadow(PipelineBaseAnnotator):
                 model_name=self.model_name,
                 capabilities=capabilities,
                 scores=final_scores,
+                score_scales=self.SCORE_SCALE,
                 tags=None,
                 score_labels=score_labels,
                 framework="pipeline",
@@ -91,6 +98,13 @@ class CafePredictor(PipelineBaseAnnotator):
 
     Hugging Face Pipeline を使用して美的スコアを計算します。
     """
+
+    # ADR 0009: aesthetic/not_aesthetic は softmax 確率 (各 0–1、sum=1)。
+    # not_aesthetic は値が小さいほど良い。
+    SCORE_SCALE: ClassVar[dict[str, ScoreScale]] = {
+        "aesthetic": ScoreScale((0.0, 1.0), higher_is_better=True),
+        "not_aesthetic": ScoreScale((0.0, 1.0), higher_is_better=False),
+    }
 
     def __init__(self, model_name: str):
         """CafePredictor を初期化します。"""
@@ -143,6 +157,7 @@ class CafePredictor(PipelineBaseAnnotator):
                 model_name=self.model_name,
                 capabilities=capabilities,
                 scores=scores,
+                score_scales=self.SCORE_SCALE,
                 tags=None,
                 score_labels=[label],
                 framework="pipeline",

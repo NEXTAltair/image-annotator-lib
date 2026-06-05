@@ -11,6 +11,8 @@ image-annotator-lib の重要な設計判断を記録するドキュメント群
 | [0005](0005-provider-batch-api-contract.md) | Provider Batch API Contract | 2026-05-25 | Accepted |
 | [0006](0006-annotation-outcome-contract.md) | Annotation Outcome Contract | 2026-05-25 | Accepted |
 | [0007](0007-webapi-dual-endpoint-runtime.md) | WebAPI Dual-Endpoint Runtime (Chat + Responses) | 2026-06-01 | Accepted |
+| [0008](0008-webapi-bounded-image-concurrency.md) | WebAPI Bounded Image Concurrency | 2026-06-03 | Accepted |
+| [0009](0009-scorer-value-range-reference.md) | Scorer Raw Output and Value-Range Reference | 2026-06-05 | Accepted |
 
 ## ADR テンプレート
 

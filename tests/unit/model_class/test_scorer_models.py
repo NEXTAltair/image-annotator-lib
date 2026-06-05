@@ -14,9 +14,9 @@ import pytest
 import torch
 from PIL import Image
 
-from image_annotator_lib.core.types import UnifiedAnnotationResult
+from image_annotator_lib.core.types import ScoreScale, UnifiedAnnotationResult
 from image_annotator_lib.model_class.pipeline_scorers import AestheticShadow, CafePredictor
-from image_annotator_lib.model_class.scorer_clip import ImprovedAesthetic
+from image_annotator_lib.model_class.scorer_clip import ImprovedAesthetic, WaifuAesthetic
 
 
 @pytest.fixture
@@ -669,6 +669,7 @@ def test_infer_classifier_structure_fc_pattern():
     fc パターンへのフォールバックで [256, 128] が返ることを確認する。
     """
     import torch
+
     from image_annotator_lib.core.loaders.clip_loader import CLIPLoader
 
     loader = CLIPLoader("WaifuAesthetic", "cpu")
@@ -693,6 +694,7 @@ def test_remap_state_dict_fc_keys():
     """
     import torch
     import torch.nn as nn
+
     from image_annotator_lib.core.classifier import Classifier
     from image_annotator_lib.core.loaders.clip_loader import CLIPLoader
 
@@ -732,6 +734,7 @@ def test_waifuaesthetic_classifier_loads_fc_weights():
     修正後は fc{n} → layers.{n} のリネームが行われ、元の重みが反映されることを確認する。
     """
     import torch
+
     from image_annotator_lib.core.loaders.clip_loader import CLIPLoader
 
     loader = CLIPLoader("WaifuAesthetic", "cpu")
@@ -754,3 +757,113 @@ def test_waifuaesthetic_classifier_loads_fc_weights():
     )
     loaded_state = classifier_head.state_dict()
     assert torch.equal(loaded_state["layers.0.weight"], expected_weight)
+
+
+# ==============================================================================
+# Issue #144: score_scales メタデータ (ADR 0009)
+# ==============================================================================
+
+
+@pytest.mark.unit
+def test_aesthetic_shadow_format_predictions_score_scales(
+    mock_aesthetic_shadow_config, mock_pipeline, mock_capabilities_canonical_scorer
+):
+    """ADR 0009: AestheticShadow が hq/lq の値域メタデータを返す。
+
+    hq は higher_is_better=True、lq は値が小さいほど良いため False。
+    """
+    with patch(
+        "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_pipeline_components"
+    ) as mock_load:
+        mock_load.return_value = {"pipeline": mock_pipeline, "model_path": "/fake/path"}
+
+        scorer = AestheticShadow(mock_aesthetic_shadow_config)
+        with scorer:
+            raw_outputs = [[{"label": "hq", "score": 0.85}, {"label": "lq", "score": 0.15}]]
+            formatted = scorer._format_predictions(raw_outputs)
+
+        scales = formatted[0].score_scales
+        assert scales == {
+            "hq": ScoreScale((0.0, 1.0), higher_is_better=True),
+            "lq": ScoreScale((0.0, 1.0), higher_is_better=False),
+        }
+        assert scales["hq"].range == (0.0, 1.0)
+        assert scales["hq"].higher_is_better is True
+        assert scales["lq"].higher_is_better is False
+
+
+@pytest.mark.unit
+def test_cafe_format_predictions_score_scales(
+    mock_cafe_config, mock_cafe_pipeline, mock_capabilities_canonical_scorer
+):
+    """ADR 0009: CafePredictor が aesthetic/not_aesthetic の値域メタデータを返す。"""
+    with patch(
+        "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_pipeline_components"
+    ) as mock_load:
+        mock_load.return_value = {"pipeline": mock_cafe_pipeline, "model_path": "/fake/path"}
+
+        scorer = CafePredictor(mock_cafe_config)
+        with scorer:
+            raw_outputs = [
+                [{"label": "aesthetic", "score": 0.67}, {"label": "not_aesthetic", "score": 0.33}]
+            ]
+            formatted = scorer._format_predictions(raw_outputs)
+
+        scales = formatted[0].score_scales
+        assert scales == {
+            "aesthetic": ScoreScale((0.0, 1.0), higher_is_better=True),
+            "not_aesthetic": ScoreScale((0.0, 1.0), higher_is_better=False),
+        }
+
+
+@pytest.mark.unit
+def test_improved_aesthetic_format_predictions_score_scales(
+    mock_clip_scorer_config, mock_clip_components, test_image, mock_capabilities_regression_scorer
+):
+    """ADR 0009: ImprovedAesthetic は非有界 regression (1–10) の値域を返す。"""
+    import torch
+
+    with patch("image_annotator_lib.core.model_factory.ModelLoad.load_clip_components") as mock_load:
+        mock_clip_model = MagicMock()
+        mock_classifier = MagicMock()
+        mock_clip_model.get_image_features.return_value = torch.randn(1, 512) * 10
+        mock_classifier.return_value = torch.tensor([[7.5]])
+        mock_load.return_value = {
+            "clip_model": mock_clip_model,
+            "model": mock_classifier,
+            "processor": mock_clip_components["processor"],
+            "model_path": "/fake/clip/path",
+        }
+
+        scorer = ImprovedAesthetic(mock_clip_scorer_config)
+        with scorer:
+            processed = scorer._preprocess_images([test_image])
+            raw_outputs = scorer._run_inference(processed)
+            formatted = scorer._format_predictions(raw_outputs)
+
+        scales = formatted[0].score_scales
+        assert scales == {"aesthetic": ScoreScale((1.0, 10.0), higher_is_better=True)}
+        assert scales["aesthetic"].range == (1.0, 10.0)
+
+
+@pytest.mark.unit
+def test_waifu_aesthetic_score_scale_class_attr():
+    """ADR 0009: WaifuAesthetic は有界 regression (0–1) の値域を宣言する。
+
+    クラス属性 SCORE_SCALE を直接検証する (重みロードを伴わない軽量検証)。
+    """
+    assert WaifuAesthetic.SCORE_SCALE == {"aesthetic": ScoreScale((0.0, 1.0), higher_is_better=True)}
+    # 値域が衝突 key でも Improved と異なることを固定 (ADR 0009 の懸念点)
+    assert ImprovedAesthetic.SCORE_SCALE["aesthetic"].range == (1.0, 10.0)
+    assert WaifuAesthetic.SCORE_SCALE["aesthetic"].range == (0.0, 1.0)
+
+
+@pytest.mark.unit
+def test_score_scale_is_frozen():
+    """ScoreScale は frozen dataclass で不変であること。"""
+    import dataclasses
+
+    scale = ScoreScale((0.0, 1.0))
+    assert scale.higher_is_better is True  # default
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        scale.higher_is_better = False
