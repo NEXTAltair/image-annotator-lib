@@ -59,14 +59,15 @@ class TransformersBaseAnnotator(BaseAnnotator):
                 str(self.device),
             )
 
-            # Load Failure Detection (致命的エラー)
-            if not loaded_components:
+            # None = 既キャッシュ済み (self.components は前回 __exit__ で設定済み)。
+            # 空コンポーネント = ロード失敗。
+            if loaded_components is not None:
+                self.components = loaded_components
+                logger.info(f"モデルコンポーネントのロード成功: {self.model_name}")
+            elif not self.components:
                 error_msg = f"Failed to load components for model '{self.model_name}'."
                 logger.error(error_msg)
                 raise ModelLoadError(error_msg, model_path=self.model_path)
-
-            self.components = loaded_components  # ← 必ず有効な components が代入される
-            logger.info(f"モデルコンポーネントのロード成功: {self.model_name}")
 
             # --- CUDAへの復元処理 ---
             logger.debug(f"モデル {self.model_name} を {self.device} へ復元試行")
