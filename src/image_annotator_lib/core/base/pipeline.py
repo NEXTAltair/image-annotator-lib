@@ -46,13 +46,14 @@ class PipelineBaseAnnotator(BaseAnnotator):
             self.batch_size,
         )
 
-        # Load Failure Detection (致命的エラー)
-        if not loaded_components:
+        # None = 既キャッシュ済み (self.components は前回 __exit__ で設定済み)。
+        # 空コンポーネント = ロード失敗。
+        if loaded_components is not None:
+            self.components = loaded_components
+        elif not self.components:
             error_msg = f"Failed to load pipeline components for model '{self.model_name}'."
             logger.error(error_msg)
             raise ModelLoadError(error_msg, model_path=self.model_path)
-
-        self.components = loaded_components  # ← 必ず有効な components が代入される
 
         # Restoration Attempt (失敗しても継続可能)
         restored_components = ModelLoad.restore_model_to_cuda(
