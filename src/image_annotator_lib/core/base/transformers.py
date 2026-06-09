@@ -52,6 +52,11 @@ class TransformersBaseAnnotator(BaseAnnotator):
                 raise ConfigurationError(f"モデル '{self.model_name}' の model_path が設定されていません。")
 
             # --- モデルロード処理 ---
+            # ロード前にキャッシュ状態を確認する (Issue #146)。
+            # load_components() は「キャッシュ済み」と「ロード失敗」の両方で None を返すため、
+            # 呼び出し前の状態で2ケースを区別する。
+            had_cached_state = ModelLoad._get_model_state(self.model_name) is not None
+
             logger.info(f"モデルコンポーネントのロード試行: {self.model_name} をデバイス {self.device} へ")
             loaded_components = ModelLoad.load_transformers_components(
                 self.model_name,
@@ -65,9 +70,29 @@ class TransformersBaseAnnotator(BaseAnnotator):
                 self.components = loaded_components
                 logger.info(f"モデルコンポーネントのロード成功: {self.model_name}")
             elif not self.components:
-                error_msg = f"Failed to load components for model '{self.model_name}'."
-                logger.error(error_msg)
-                raise ModelLoadError(error_msg, model_path=self.model_path)
+                if had_cached_state:
+                    # モデル状態が「キャッシュ済み」(None 返却) だが、このインスタンスはコンポーネントを
+                    # 保持していない。api_keys={} 指定時の毎回インスタンス再生成などで発生 (Issue #146)。
+                    # 状態をリセットして強制再ロードする。
+                    logger.warning(
+                        f"モデル '{self.model_name}' は状態「キャッシュ済み」だが、"
+                        "このインスタンスはコンポーネントを保持していない。状態をリセットして再ロード。"
+                    )
+                    ModelLoad._release_model_state(self.model_name)
+                    loaded_components = ModelLoad.load_transformers_components(
+                        self.model_name, str(self.model_path), str(self.device)
+                    )
+                    if loaded_components is not None:
+                        self.components = loaded_components
+                        logger.info(f"モデルコンポーネントの再ロード成功: {self.model_name}")
+                    else:
+                        error_msg = f"Failed to load components for model '{self.model_name}'."
+                        logger.error(error_msg, exc_info=True)
+                        raise ModelLoadError(error_msg, model_path=self.model_path)
+                else:
+                    error_msg = f"Failed to load components for model '{self.model_name}'."
+                    logger.error(error_msg, exc_info=True)
+                    raise ModelLoadError(error_msg, model_path=self.model_path)
 
             # --- CUDAへの復元処理 ---
             logger.debug(f"モデル {self.model_name} を {self.device} へ復元試行")

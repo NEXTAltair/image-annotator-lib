@@ -134,8 +134,10 @@ def get_annotator_instance(model_name: str, api_keys: dict[str, str] | None = No
     Returns:
         アノテータインスタンス。
     """
-    # APIキー指定時はキャッシュを使用しない (設定が動的に変わるため)
-    if api_keys is not None:
+    # API キーが実際に指定されている場合のみキャッシュをバイパスする。
+    # api_keys={} (空 dict) は「未指定」と同義であり、ローカル ML モデルが毎回
+    # 新インスタンスを生成して 2 回目に ModelLoadError になるバグを防ぐ (Issue #146)。
+    if api_keys:
         logger.debug(f"APIキー指定のためモデル '{model_name}' の新しいインスタンスを作成")
         return _create_annotator_instance(model_name, api_keys=api_keys)
 

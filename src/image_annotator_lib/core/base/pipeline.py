@@ -38,6 +38,11 @@ class PipelineBaseAnnotator(BaseAnnotator):
         if self.batch_size is None:
             raise ValueError(f"モデル '{self.model_name}' の batch_size が設定されていません。")
 
+        # ロード前にキャッシュ状態を確認する (Issue #146)。
+        # load_components() は「キャッシュ済み」と「ロード失敗」の両方で None を返すため、
+        # 呼び出し前の状態で2ケースを区別する。
+        had_cached_state = ModelLoad._get_model_state(self.model_name) is not None
+
         loaded_components = ModelLoad.load_transformers_pipeline_components(
             self.task,
             self.model_name,
@@ -51,9 +56,28 @@ class PipelineBaseAnnotator(BaseAnnotator):
         if loaded_components is not None:
             self.components = loaded_components
         elif not self.components:
-            error_msg = f"Failed to load pipeline components for model '{self.model_name}'."
-            logger.error(error_msg)
-            raise ModelLoadError(error_msg, model_path=self.model_path)
+            if had_cached_state:
+                # モデル状態が「キャッシュ済み」(None 返却) だが、このインスタンスはコンポーネントを
+                # 保持していない。api_keys={} 指定時の毎回インスタンス再生成などで発生 (Issue #146)。
+                # 状態をリセットして強制再ロードする。
+                logger.warning(
+                    f"モデル '{self.model_name}' は状態「キャッシュ済み」だが、"
+                    "このインスタンスはコンポーネントを保持していない。状態をリセットして再ロード。"
+                )
+                ModelLoad._release_model_state(self.model_name)
+                loaded_components = ModelLoad.load_transformers_pipeline_components(
+                    self.task, self.model_name, self.model_path, self.device, self.batch_size
+                )
+                if loaded_components is not None:
+                    self.components = loaded_components
+                else:
+                    error_msg = f"Failed to load pipeline components for model '{self.model_name}'."
+                    logger.error(error_msg, exc_info=True)
+                    raise ModelLoadError(error_msg, model_path=self.model_path)
+            else:
+                error_msg = f"Failed to load pipeline components for model '{self.model_name}'."
+                logger.error(error_msg, exc_info=True)
+                raise ModelLoadError(error_msg, model_path=self.model_path)
 
         # Restoration Attempt (失敗しても継続可能)
         restored_components = ModelLoad.restore_model_to_cuda(
