@@ -49,6 +49,12 @@ class ClipBaseAnnotator(BaseAnnotator):
                 raise ValueError(f"モデル '{self.model_name}' の base_model が設定されていません。")
             if self.model_path is None:
                 raise ValueError(f"モデル '{self.model_name}' の model_path が設定されていません。")
+
+            # ロード前にキャッシュ状態を確認する (Issue #149)。
+            # load_clip_components() は「キャッシュ済み」と「ロード失敗」の両方で None/空を返すため、
+            # 呼び出し前の状態で2ケースを区別する。
+            had_cached_state = ModelLoad._get_model_state(self.model_name) is not None
+
             loaded_components = ModelLoad.load_clip_components(
                 model_name=self.model_name,
                 base_model=self.base_model,
@@ -59,6 +65,35 @@ class ClipBaseAnnotator(BaseAnnotator):
             )
             if loaded_components:
                 self.components = loaded_components
+            elif not self.components:
+                if had_cached_state:
+                    # モデル状態が「キャッシュ済み」(None/空返却) だが、このインスタンスはコンポーネントを
+                    # 保持していない。api_keys={} 指定時の毎回インスタンス再生成などで発生 (Issue #149)。
+                    # 状態をリセットして強制再ロードする。
+                    logger.warning(
+                        f"モデル '{self.model_name}' は状態「キャッシュ済み」だが、"
+                        "このインスタンスはコンポーネントを保持していない。状態をリセットして再ロード。"
+                    )
+                    ModelLoad._release_model_state(self.model_name)
+                    loaded_components = ModelLoad.load_clip_components(
+                        model_name=self.model_name,
+                        base_model=self.base_model,
+                        model_path=self.model_path,
+                        device=self.device,
+                        activation_type=config_registry.get(self.model_name, "activation_type"),
+                        final_activation_type=config_registry.get(self.model_name, "final_activation_type"),
+                    )
+                    if loaded_components:
+                        self.components = loaded_components
+                    else:
+                        error_msg = f"Failed to load CLIP components for model '{self.model_name}'."
+                        logger.error(error_msg, exc_info=True)
+                        raise ModelLoadError(error_msg, model_path=self.model_path)
+                else:
+                    error_msg = f"Failed to load CLIP components for model '{self.model_name}'."
+                    logger.error(error_msg, exc_info=True)
+                    raise ModelLoadError(error_msg, model_path=self.model_path)
+
             logger.info(f"CLIP Scorer '{self.model_name}' の準備完了。")
 
         except (ModelLoadError, OutOfMemoryError, FileNotFoundError, ValueError) as e:

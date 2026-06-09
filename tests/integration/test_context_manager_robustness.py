@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PIL import Image
 
+from image_annotator_lib.core.base.clip import ClipBaseAnnotator
 from image_annotator_lib.core.base.pipeline import PipelineBaseAnnotator
 from image_annotator_lib.core.base.transformers import TransformersBaseAnnotator
 from image_annotator_lib.exceptions.errors import ModelLoadError
@@ -26,6 +27,14 @@ class ConcreteTestPipelineAnnotator(PipelineBaseAnnotator):
 
 class ConcreteTestTransformersAnnotator(TransformersBaseAnnotator):
     """Concrete Transformers annotator for testing."""
+
+    def _generate_tags(self, formatted_output: Any) -> list[str]:
+        """Generate tags from formatted output."""
+        return []
+
+
+class ConcreteTestClipAnnotator(ClipBaseAnnotator):
+    """Concrete CLIP annotator for testing."""
 
     def _generate_tags(self, formatted_output: Any) -> list[str]:
         """Generate tags from formatted output."""
@@ -225,3 +234,107 @@ class TestContextManagerRobustness:
             # Verify both load and restore were called
             mock_load.assert_called_once()
             mock_restore.assert_called_once()
+
+
+class TestClipContextManagerRobustness:
+    """ClipBaseAnnotator の __enter__() エラーハンドリングと2回目ロードのリグレッションテスト (Issue #149)。"""
+
+    @pytest.fixture
+    def clip_model_config(self, managed_config_registry):
+        """CLIP モデルの最小 config を登録する。"""
+        config = {
+            "class": "ImprovedAesthetic",
+            "model_path": "/dummy/improved_aesthetic.pth",
+            "device": "cpu",
+            "estimated_size_gb": 0.5,
+            "base_model": "openai/clip-vit-large-patch14",
+        }
+        managed_config_registry.set("test_clip_model", config)
+        return config
+
+    @pytest.mark.integration
+    def test_clip_load_failure_raises_model_load_error(self, clip_model_config):
+        """初回ロード失敗 (had_cached_state=False) は即 ModelLoadError を上げる。
+
+        Regression: Issue #149 修正前は None 返却をサイレントに通過し、
+        後続の _preprocess_images() で RuntimeError になっていた。
+        """
+        # アノテータは patch 外で生成して __init__ に正しい config を渡す
+        annotator = ConcreteTestClipAnnotator(model_name="test_clip_model")
+
+        with (
+            patch("image_annotator_lib.core.base.clip.ModelLoad.load_clip_components") as mock_load,
+            patch(
+                "image_annotator_lib.core.base.clip.ModelLoad._get_model_state", return_value=None
+            ),
+        ):
+            mock_load.return_value = None
+
+            with pytest.raises(ModelLoadError) as exc_info:
+                with annotator:
+                    pass
+
+            assert "Failed to load CLIP components" in str(exc_info.value)
+            assert "test_clip_model" in str(exc_info.value)
+            mock_load.assert_called_once()
+
+    @pytest.mark.integration
+    def test_clip_second_call_new_instance_with_cached_state_reloads(self, clip_model_config):
+        """キャッシュ済み状態で新インスタンスが load_clip_components() から None を受けたとき、
+        状態をリセットして強制再ロードし、正常に components を設定する。
+
+        Regression: Issue #149 — ImprovedAesthetic / WaifuAesthetic の2バッチ目で
+        `RuntimeError: CLIP プロセッサがロードされていません。` になるバグ。
+        """
+        mock_components = {
+            "clip_model": MagicMock(),
+            "model": MagicMock(),
+            "processor": MagicMock(),
+        }
+
+        call_count: dict[str, int] = {"n": 0}
+
+        def _load_side_effect(**kwargs: Any) -> dict | None:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return None  # 1回目: キャッシュ済み扱いで None を返す
+            return mock_components  # 2回目: 強制再ロードで実コンポーネントを返す
+
+        annotator = ConcreteTestClipAnnotator(model_name="test_clip_model")
+
+        with (
+            patch("image_annotator_lib.core.base.clip.ModelLoad.load_clip_components") as mock_load,
+            patch(
+                "image_annotator_lib.core.base.clip.ModelLoad._get_model_state",
+                return_value="on_cpu",  # キャッシュ済み状態をシミュレート
+            ),
+            patch("image_annotator_lib.core.base.clip.ModelLoad._release_model_state") as mock_release,
+        ):
+            mock_load.side_effect = _load_side_effect
+
+            with annotator as ctx:
+                assert ctx.components is mock_components
+
+            mock_release.assert_called_once_with("test_clip_model")
+            assert mock_load.call_count == 2
+
+    @pytest.mark.integration
+    def test_clip_second_call_retry_also_fails_raises_model_load_error(self, clip_model_config):
+        """キャッシュ済み状態でリセット後の再ロードも失敗した場合は ModelLoadError を上げる。"""
+        annotator = ConcreteTestClipAnnotator(model_name="test_clip_model")
+
+        with (
+            patch("image_annotator_lib.core.base.clip.ModelLoad.load_clip_components") as mock_load,
+            patch(
+                "image_annotator_lib.core.base.clip.ModelLoad._get_model_state",
+                return_value="on_cpu",
+            ),
+            patch("image_annotator_lib.core.base.clip.ModelLoad._release_model_state"),
+        ):
+            mock_load.return_value = None  # 両回ともNone
+
+            with pytest.raises(ModelLoadError):
+                with annotator:
+                    pass
+
+            assert mock_load.call_count == 2
