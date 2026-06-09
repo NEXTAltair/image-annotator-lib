@@ -160,3 +160,57 @@ class TestCreateAnnotatorInstanceLookupOrder:
 
         with pytest.raises(KeyError, match="not found in registry"):
             annotation_runner._create_annotator_instance("just-a-name")
+
+
+class TestGetAnnotatorInstanceApiKeysCacheBehavior:
+    """get_annotator_instance の api_keys={} キャッシュバイパス問題のリグレッションテスト (Issue #146)。"""
+
+    @pytest.mark.unit
+    def test_empty_api_keys_uses_instance_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """api_keys={} (空 dict) はキャッシュを使い、毎回新インスタンスを生成しない。
+
+        Regression: api_keys={} を渡すと api_keys is not None が True になり、
+        ローカル ML モデルで毎回新インスタンスが生成されて 2 回目に ModelLoadError になる
+        バグを防ぐ (Issue #146 追加確認)。
+        """
+        annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
+
+        created: list[str] = []
+
+        def _fake_create(model_name: str, api_keys: dict | None = None) -> _StubLocalAnnotator:
+            created.append(model_name)
+            return _StubLocalAnnotator(model_name)
+
+        monkeypatch.setattr(annotation_runner, "_create_annotator_instance", _fake_create)
+
+        # 1 回目: インスタンスを生成してキャッシュに保存
+        inst1 = annotation_runner.get_annotator_instance("my_model", api_keys={})
+        # 2 回目: キャッシュから返すはず
+        inst2 = annotation_runner.get_annotator_instance("my_model", api_keys={})
+
+        assert inst1 is inst2, "api_keys={} でも同一インスタンスが返されるべき"
+        assert len(created) == 1, f"インスタンス生成は 1 回のみのはずだが {len(created)} 回生成された"
+
+        annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
+
+    @pytest.mark.unit
+    def test_non_empty_api_keys_bypasses_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """実際に API キーが指定された場合はキャッシュをバイパスして新インスタンスを生成する。"""
+        annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
+
+        created: list[str] = []
+
+        def _fake_create(model_name: str, api_keys: dict | None = None) -> _StubLocalAnnotator:
+            created.append(model_name)
+            return _StubLocalAnnotator(model_name)
+
+        monkeypatch.setattr(annotation_runner, "_create_annotator_instance", _fake_create)
+
+        api_keys = {"openai": "sk-test"}
+        inst1 = annotation_runner.get_annotator_instance("my_model", api_keys=api_keys)
+        inst2 = annotation_runner.get_annotator_instance("my_model", api_keys=api_keys)
+
+        assert inst1 is not inst2, "api_keys 指定時は新インスタンスが生成されるべき"
+        assert len(created) == 2
+
+        annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
