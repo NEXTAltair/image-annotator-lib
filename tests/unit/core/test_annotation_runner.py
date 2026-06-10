@@ -177,7 +177,9 @@ class TestGetAnnotatorInstanceApiKeysCacheBehavior:
 
         created: list[str] = []
 
-        def _fake_create(model_name: str, api_keys: dict | None = None) -> _StubLocalAnnotator:
+        def _fake_create(
+            model_name: str, api_keys: dict | None = None, additional_prompt: str | None = None
+        ) -> _StubLocalAnnotator:
             created.append(model_name)
             return _StubLocalAnnotator(model_name)
 
@@ -200,7 +202,9 @@ class TestGetAnnotatorInstanceApiKeysCacheBehavior:
 
         created: list[str] = []
 
-        def _fake_create(model_name: str, api_keys: dict | None = None) -> _StubLocalAnnotator:
+        def _fake_create(
+            model_name: str, api_keys: dict | None = None, additional_prompt: str | None = None
+        ) -> _StubLocalAnnotator:
             created.append(model_name)
             return _StubLocalAnnotator(model_name)
 

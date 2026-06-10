@@ -46,7 +46,11 @@ def _is_webapi_annotator_class(annotator_class: type) -> bool:
     return issubclass(annotator_class, WebApiAnnotator)
 
 
-def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None = None) -> BaseAnnotator:
+def _create_annotator_instance(
+    model_name: str,
+    api_keys: dict[str, str] | None = None,
+    additional_prompt: str | None = None,
+) -> BaseAnnotator:
     """モデル名から annotator インスタンスを生成する (registry のみ参照)。
 
     ADR 0023 / Issue #45: 探索は registry のみ。`_register_webapi_models_from_discovery()`
@@ -95,6 +99,7 @@ def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None 
                 model_name=actual_model_name,
                 capabilities=get_model_capabilities(actual_model_name),
                 mode=mode,
+                additional_prompt=additional_prompt,
             )
 
         # registry 登録 ローカル ML モデル: 直接インスタンス化
@@ -121,7 +126,11 @@ def _create_annotator_instance(model_name: str, api_keys: dict[str, str] | None 
     )
 
 
-def get_annotator_instance(model_name: str, api_keys: dict[str, str] | None = None) -> Any:
+def get_annotator_instance(
+    model_name: str,
+    api_keys: dict[str, str] | None = None,
+    additional_prompt: str | None = None,
+) -> Any:
     """モデル名からアノテータインスタンスを取得する (キャッシュあり)。
 
     モデルがすでにロードされている場合はキャッシュから返す。
@@ -139,13 +148,13 @@ def get_annotator_instance(model_name: str, api_keys: dict[str, str] | None = No
     # 新インスタンスを生成して 2 回目に ModelLoadError になるバグを防ぐ (Issue #146)。
     if api_keys:
         logger.debug(f"APIキー指定のためモデル '{model_name}' の新しいインスタンスを作成")
-        return _create_annotator_instance(model_name, api_keys=api_keys)
+        return _create_annotator_instance(model_name, api_keys=api_keys, additional_prompt=additional_prompt)
 
     if model_name in _MODEL_INSTANCE_REGISTRY:
         logger.debug(f"モデル '{model_name}' はキャッシュから取得されました")
         return _MODEL_INSTANCE_REGISTRY[model_name]
 
-    instance = _create_annotator_instance(model_name)
+    instance = _create_annotator_instance(model_name, additional_prompt=additional_prompt)
     _MODEL_INSTANCE_REGISTRY[model_name] = instance
     return instance
 
@@ -223,10 +232,11 @@ def _execute_model_annotation(
     phash_map: dict[int, str],
     results_by_phash: PHashAnnotationResults,
     api_keys: dict[str, str] | None,
+    additional_prompt: str | None = None,
 ) -> None:
     """単一モデルでのアノテーションを実行し、結果を `results_by_phash` に格納する。"""
     try:
-        annotator = get_annotator_instance(model_name, api_keys=api_keys)
+        annotator = get_annotator_instance(model_name, api_keys=api_keys, additional_prompt=additional_prompt)
         annotation_results = _annotate_model(annotator, images_list, phash_list)
         logger.debug(f"モデル '{model_name}' の評価完了。結果件数: {len(annotation_results)}")
 
@@ -288,6 +298,7 @@ def run_annotation(
     model_names: list[str],
     phash_list: list[str] | None = None,
     api_keys: dict[str, str] | None = None,
+    additional_prompt: str | None = None,
 ) -> PHashAnnotationResults:
     """複数モデルでの一括アノテーション実行 (内部実装)。
 
@@ -298,6 +309,8 @@ def run_annotation(
         model_names: 使用するモデル名のリスト (指定順に実行)。
         phash_list: 各画像に対応する pHash のリスト (None の場合は計算)。
         api_keys: WebAPI モデル用の provider -> API key 辞書 (オプション)。
+        additional_prompt: WebAPI モデルの BASE_PROMPT 末尾に追記するプロンプト。
+            None または空文字列の場合は追記しない。ローカル ML モデルには無視される。
 
     Returns:
         pHash をキーとし、その値がモデル名をキーとする `UnifiedAnnotationResult` の辞書。
@@ -318,7 +331,8 @@ def run_annotation(
     for model_name in model_names:
         logger.debug(f"モデル '{model_name}' の評価を開始...")
         _execute_model_annotation(
-            model_name, images, phash_list_final, phash_map, results_by_phash, api_keys
+            model_name, images, phash_list_final, phash_map, results_by_phash, api_keys,
+            additional_prompt=additional_prompt,
         )
 
     logger.info(f"全モデル ({len(model_names)}個) の評価完了。画像キー数: {len(results_by_phash)}")
