@@ -63,7 +63,7 @@ Score reference:
 Respond ONLY in this exact format -- no additional text:
 
 tags: [comma-separated descriptors, 20-50 items, always specify left/right for directional elements, no underscores]
-caption: [1-2 objective sentences emphasizing pose, lighting, and composition]
+captions: [1-2 objective sentences emphasizing pose, lighting, and composition]
 score: [X.XX]
 """
 
