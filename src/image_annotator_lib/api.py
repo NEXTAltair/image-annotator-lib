@@ -38,6 +38,7 @@ def annotate(
     model_name_list: list[str],
     phash_list: list[str] | None = None,
     api_keys: dict[str, str] | None = None,
+    additional_prompt: str | None = None,
 ) -> PHashAnnotationResults:
     """複数の画像を指定された複数のモデルで評価(アノテーション)する。
 
@@ -46,6 +47,8 @@ def annotate(
         model_name_list: 使用するモデル名のリスト。
         phash_list: 各画像に対応するpHashのリスト。
         api_keys: WebAPIモデル用のAPIキー辞書 (オプション)。
+        additional_prompt: WebAPI モデルの BASE_PROMPT 末尾に追記するプロンプト。
+            None または空文字列の場合は追記しない。ローカル ML モデルには無視される。
 
     Returns:
         結果を格納した PHashAnnotationResults 辞書。
@@ -55,6 +58,7 @@ def annotate(
         model_names=model_name_list,
         phash_list=phash_list,
         api_keys=api_keys,
+        additional_prompt=additional_prompt,
     )
 
 
