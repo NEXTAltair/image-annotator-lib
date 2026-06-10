@@ -78,7 +78,18 @@ def _build_system_prompt(
     capabilities: set[TaskCapability] | frozenset[TaskCapability] | None,
     additional_prompt: str | None = None,
 ) -> str:
-    """Build the WebAPI system prompt for the requested task capabilities."""
+    """Build the WebAPI system prompt for the requested task capabilities.
+
+    Args:
+        capabilities: Task capability set. If RATINGS is present, a rating instruction
+            block is appended before additional_prompt.
+        additional_prompt: Optional caller-supplied prompt text appended after
+            base/capability blocks. Whitespace-only values are ignored;
+            leading/trailing whitespace is stripped.
+
+    Returns:
+        Complete system prompt string.
+    """
     base = BASE_PROMPT
 
     if capabilities is not None and TaskCapability.RATINGS in capabilities:
