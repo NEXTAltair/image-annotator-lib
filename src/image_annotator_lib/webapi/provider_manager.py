@@ -74,18 +74,26 @@ def _resolve_max_concurrency(max_concurrency: int | None) -> int:
     return resolved
 
 
-def _build_system_prompt(capabilities: set[TaskCapability] | frozenset[TaskCapability] | None) -> str:
+def _build_system_prompt(
+    capabilities: set[TaskCapability] | frozenset[TaskCapability] | None,
+    additional_prompt: str | None = None,
+) -> str:
     """Build the WebAPI system prompt for the requested task capabilities."""
-    if capabilities is None or TaskCapability.RATINGS not in capabilities:
-        return BASE_PROMPT
+    base = BASE_PROMPT
 
-    return (
-        BASE_PROMPT
-        + "\n\n"
-        + "Rating task: return any requested content rating as a model-native label in the "
-        + "`rating` or `ratings` output field. Do not include rating labels in `tags` or "
-        + "`score_labels`, and do not map them to LoRAIro canonical ratings."
-    )
+    if capabilities is not None and TaskCapability.RATINGS in capabilities:
+        base = (
+            base
+            + "\n\n"
+            + "Rating task: return any requested content rating as a model-native label in the "
+            + "`rating` or `ratings` output field. Do not include rating labels in `tags` or "
+            + "`score_labels`, and do not map them to LoRAIro canonical ratings."
+        )
+
+    if additional_prompt and additional_prompt.strip():
+        base = base + "\n\n" + additional_prompt.strip()
+
+    return base
 
 
 def _format_exception_chain(exc: BaseException, *, max_depth: int = _EXCEPTION_CHAIN_MAX_DEPTH) -> str:
