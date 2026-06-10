@@ -166,6 +166,7 @@ class ProviderManager:
         capabilities: set[TaskCapability] | frozenset[TaskCapability] | None = None,
         mode: str = "chat",
         max_concurrency: int | None = None,
+        additional_prompt: str | None = None,
         _test_agent: Agent | None = None,
     ) -> dict[str, AnnotationResult]:
         """非同期推論の中核実装。
@@ -181,6 +182,8 @@ class ProviderManager:
                 OpenAI の responses 系モデル構築のため `resolve_model_ref` に伝播する。
             max_concurrency: 同一モデル内で並列実行する画像 API request の最大数。
                 None の場合は保守的な既定値を使う。
+            additional_prompt: BASE_PROMPT の末尾に追記するユーザー定義プロンプト。
+                None または空文字列の場合は追記しない。
             _test_agent: pytest fixture からの Agent 注入専用 (本番では None)。
 
         Returns:
@@ -215,7 +218,7 @@ class ProviderManager:
                 agent = Agent(
                     model=model,
                     output_type=build_annotation_output_normalizer(capabilities),
-                    system_prompt=_build_system_prompt(capabilities),
+                    system_prompt=_build_system_prompt(capabilities, additional_prompt),
                     retries={"output": _OUTPUT_RETRIES},
                 )
             except BaseException:
@@ -340,6 +343,7 @@ class ProviderManager:
         capabilities: set[TaskCapability] | frozenset[TaskCapability] | None = None,
         mode: str = "chat",
         max_concurrency: int | None = None,
+        additional_prompt: str | None = None,
         _test_agent: Agent | None = None,
     ) -> dict[str, AnnotationResult]:
         """`run_inference_with_model_async()` の sync wrapper。
@@ -366,6 +370,7 @@ class ProviderManager:
                 capabilities=capabilities,
                 mode=mode,
                 max_concurrency=max_concurrency,
+                additional_prompt=additional_prompt,
                 _test_agent=_test_agent,
             )
         )
