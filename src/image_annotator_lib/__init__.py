@@ -110,6 +110,7 @@ def annotate(
     model_name_list: list[str],
     phash_list: list[str] | None = None,
     api_keys: dict[str, str] | None = None,
+    additional_prompt: str | None = None,
 ) -> PHashAnnotationResults:
     """
     指定されたモデルを使用して画像のリストにアノテーションを付けます。
@@ -121,6 +122,8 @@ def annotate(
         api_keys: WebAPIモデル用のAPIキー辞書（オプション）。
                  例: {"openai": "sk-...", "anthropic": "sk-ant-..."}
                  指定された場合、環境変数より優先されます。
+        additional_prompt: WebAPI モデルの BASE_PROMPT 末尾に追記するプロンプト。
+                 None または空文字列の場合は追記しない。ローカル ML モデルには無視される。
 
     Returns:
         pHash をキーとし、その値がモデル名をキーとする ModelResultDict の辞書。
@@ -133,7 +136,9 @@ def annotate(
 
         _cached_annotate = _annotate_impl
 
-    return _cached_annotate(images_list, model_name_list, phash_list, api_keys)
+    return _cached_annotate(
+        images_list, model_name_list, phash_list, api_keys, additional_prompt
+    )
 
 
 # You might want to add version information here later
