@@ -253,3 +253,54 @@ class TestSnapshotProgressTqdm:
         cancel_event.set()
         with pytest.raises(ModelInstallCancelledError):
             bar.update(10)
+
+
+class TestCodexReviewFixes:
+    """PR #151 Codex P2 指摘への対応 (stale marker / local path / cancel 前倒し)"""
+
+    def test_stale_marker_with_different_model_path_returns_false(self, fake_paths):
+        """config の model_path 付け替え後は古い marker を stale として拒否する"""
+        config_v1 = {"m": {"model_path": "org/repo-v1", "class": "WDTagger"}}
+        config_v2 = {"m": {"model_path": "org/repo-v2", "class": "WDTagger"}}
+        with _patch_config(config_v1), patch("huggingface_hub.snapshot_download"):
+            install_model("m")
+            assert is_model_installed("m") is True
+        with _patch_config(config_v2):
+            assert is_model_installed("m") is False
+
+    def test_malformed_marker_returns_false(self, fake_paths):
+        """壊れた marker ファイルは未インストール扱いにする"""
+        config = {"m": {"model_path": "org/repo", "class": "WDTagger"}}
+        marker_dir = fake_paths["cache_dir"] / "install_markers"
+        marker_dir.mkdir(parents=True)
+        (marker_dir / "m.json").write_text("{not json", encoding="utf-8")
+        with _patch_config(config):
+            assert is_model_installed("m") is False
+
+    def test_local_path_model_skips_download(self, fake_paths, tmp_path):
+        """ローカルパス指定の model_path は DL せず marker のみ書く"""
+        local_model = tmp_path / "local_model.onnx"
+        local_model.write_bytes(b"onnx")
+        config = {"m": {"model_path": str(local_model), "class": "WDTagger"}}
+        with (
+            _patch_config(config),
+            patch("huggingface_hub.snapshot_download") as mock_snapshot,
+        ):
+            install_model("m")
+            assert mock_snapshot.call_count == 0
+            assert is_model_installed("m") is True
+
+    def test_cancel_prevents_repo_listing_for_transformers_class(self, fake_paths):
+        """キャンセル済みなら transformers 系の repo 一覧取得 (network) にも出ない"""
+        config = {"blip": {"model_path": "Salesforce/blip", "class": "BLIPTagger"}}
+        cancel_event = threading.Event()
+        cancel_event.set()
+        with (
+            _patch_config(config),
+            patch("huggingface_hub.list_repo_files") as mock_list,
+            patch("huggingface_hub.snapshot_download") as mock_snapshot,
+            pytest.raises(ModelInstallCancelledError),
+        ):
+            install_model("blip", cancel_event=cancel_event)
+        assert mock_list.call_count == 0
+        assert mock_snapshot.call_count == 0

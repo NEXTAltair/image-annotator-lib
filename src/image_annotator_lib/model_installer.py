@@ -216,9 +216,10 @@ def _model_config(model_name: str) -> dict[str, object] | None:
 def is_model_installed(model_name: str) -> bool:
     """モデルがインストール済み (明示ダウンロード完了済み) かを判定する。
 
-    install marker ファイルの有無で判定する高速・offline-safe な操作。
-    config registry に存在しないモデル (WebAPI モデル等、ダウンロード不要) は
-    常に True を返す。
+    install marker ファイルで判定する高速・offline-safe な操作。marker に
+    記録された model_path が現在の config と異なる場合 (config の付け替え) は
+    stale とみなし False を返す。config registry に存在しないモデル
+    (WebAPI モデル等、ダウンロード不要) は常に True を返す。
 
     Args:
         model_name: 判定対象のモデル名 (annotator_config.toml のセクション名)。
@@ -229,7 +230,16 @@ def is_model_installed(model_name: str) -> bool:
     config = _model_config(model_name)
     if config is None or not config.get("model_path"):
         return True
-    return _marker_path(model_name).exists()
+    marker = _marker_path(model_name)
+    try:
+        marker_data = json.loads(marker.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return False
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning(f"install marker の読み込み失敗 ({model_name}): {e} — 未インストール扱い")
+        return False
+    # Codex P2 (PR #151): config の model_path 付け替えで stale になった marker を拒否する
+    return marker_data.get("model_path") == str(config.get("model_path"))
 
 
 def install_model(
@@ -271,6 +281,10 @@ def install_model(
     parsed = urlparse(model_path)
     if parsed.scheme in ("http", "https"):
         _install_url_resource(model_path, aggregator)
+    elif Path(model_path).exists():
+        # Codex P2 (PR #151): ローカルファイル/ディレクトリ指定はダウンロード不要。
+        # 既存 loader (get_file_path / from_pretrained) がそのまま解決できる。
+        logger.debug(f"model_path はローカルパスのため DL をスキップ: {model_path}")
     else:
         _install_hf_repo(model_path, aggregator, _hf_patterns_for_class(config, model_class))
 
@@ -327,6 +341,10 @@ def _transformers_ignore_patterns(repo_id: str) -> list[str]:
 def _install_hf_repo(repo_id: str, aggregator: _ByteProgressAggregator, patterns: _HfPatterns) -> None:
     """HF repo を進捗付きで snapshot ダウンロードする。"""
     import huggingface_hub
+
+    # Codex P2 (PR #151): ignore patterns 計算 (list_repo_files の network call) の
+    # 前にキャンセルを確認し、キャンセル済みの場合に network へ出ないようにする
+    aggregator.check_cancelled()
 
     ignore_patterns: list[str] | None = None
     if patterns.allow_patterns is None and patterns.transformers_weights:
