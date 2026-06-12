@@ -22,7 +22,14 @@ from .core.registry import (
 )
 from .core.types import AnnotationResult, AnnotatorInfo, ModelType
 from .core.utils import init_logger
-from .exceptions.errors import AnnotatorError, ModelLoadError, ModelNotFoundError, OutOfMemoryError
+from .exceptions.errors import (
+    AnnotatorError,
+    ModelInstallCancelledError,
+    ModelLoadError,
+    ModelNotFoundError,
+    OutOfMemoryError,
+)
+from .model_installer import ModelInstallProgress, install_model, is_model_installed
 from .webapi.api_model_discovery import (
     discover_available_vision_models,
     get_available_models,
@@ -76,6 +83,8 @@ __all__ = [
     "BatchSubmitItem",
     "BatchSubmitRequest",
     "BatchSubmitResult",
+    "ModelInstallCancelledError",
+    "ModelInstallProgress",
     "ModelLoad",
     "ModelLoadError",
     "ModelNotFoundError",
@@ -88,7 +97,9 @@ __all__ = [
     "discover_available_vision_models",
     "fetch_batch_results",
     "get_available_models",
+    "install_model",
     "is_model_deprecated",
+    "is_model_installed",
     "list_all_models",
     "list_annotator_info",
     "list_available_annotators",
@@ -136,9 +147,7 @@ def annotate(
 
         _cached_annotate = _annotate_impl
 
-    return _cached_annotate(
-        images_list, model_name_list, phash_list, api_keys, additional_prompt
-    )
+    return _cached_annotate(images_list, model_name_list, phash_list, api_keys, additional_prompt)
 
 
 # You might want to add version information here later

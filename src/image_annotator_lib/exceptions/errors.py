@@ -115,6 +115,36 @@ class ModelNotFoundError(AnnotatorError):
         )
 
 
+class ModelInstallCancelledError(AnnotatorError):
+    """モデルの明示インストール (ダウンロード) がキャンセルされた場合の例外。
+
+    `model_installer.install_model()` に渡した cancel_event がセットされた際に
+    送出される。部分ダウンロードは Hugging Face cache の resume 機構により
+    次回インストールで再利用される。
+
+    Attributes:
+        model_name: インストールがキャンセルされたモデルの名前
+        details: 追加のエラーコンテキスト
+    """
+
+    def __init__(self, model_name: str, details: dict[str, Any] | None = None):
+        """ModelInstallCancelledError を初期化します。
+
+        Args:
+            model_name: インストールがキャンセルされたモデルの名前
+            details: 追加のエラーコンテキスト（オプション）
+        """
+        self.model_name = model_name
+        error_details = details or {}
+        error_details["model_name"] = model_name
+
+        super().__init__(
+            message=f"Model install cancelled: {model_name}",
+            details=error_details,
+            ja_message=f"モデルインストールがキャンセルされました: {model_name}",
+        )
+
+
 class OutOfMemoryError(AnnotatorError):
     """主に CUDA デバイスのメモリが不足した場合の例外。
 
