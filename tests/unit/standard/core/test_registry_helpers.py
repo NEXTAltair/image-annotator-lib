@@ -10,10 +10,12 @@ import datetime
 import pytest
 
 from image_annotator_lib.core.registry import (
+    _build_annotator_info_for_registry_model,
     _parse_discontinued_at,
     _safe_float,
     _safe_int,
 )
+from image_annotator_lib.webapi.annotator import WebApiAnnotator
 
 
 @pytest.mark.unit
@@ -106,3 +108,55 @@ class TestParseDiscontinuedAt:
         """int / list 等のサポート外型は warning + None フォールバック。"""
         assert _parse_discontinued_at(20251231, "model-x") is None
         assert _parse_discontinued_at([2025, 12, 31], "model-x") is None
+
+
+class _LocalStubAnnotator:
+    """`WebApiAnnotator` サブクラスでないローカル ML モデル相当のスタッブ。"""
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+class TestBuildAnnotatorInfoCostPropagation:
+    """Issue #747 (LoRAIro): litellm pricing が `AnnotatorInfo` に伝播することの検証。"""
+
+    def test_webapi_model_propagates_cost_from_metadata(self):
+        """WebAPI モデルの model_config の cost が AnnotatorInfo に載る。"""
+        model_config = {
+            "litellm_model_id": "openai/gpt-4o",
+            "provider": "openai",
+            "input_cost_per_token": 2.5e-06,
+            "output_cost_per_token": 1.0e-05,
+        }
+        info = _build_annotator_info_for_registry_model(
+            "openai/gpt-4o", WebApiAnnotator, model_config
+        )
+        assert info.is_api is True
+        assert info.input_cost_per_token == 2.5e-06
+        assert info.output_cost_per_token == 1.0e-05
+
+    def test_local_model_has_none_cost(self):
+        """ローカル ML モデルは cost キーがなく None フォールバックする。"""
+        info = _build_annotator_info_for_registry_model(
+            "local-tagger", _LocalStubAnnotator, {"model_path": "repo/name"}
+        )
+        assert info.is_local is True
+        assert info.input_cost_per_token is None
+        assert info.output_cost_per_token is None
+
+    def test_webapi_model_missing_cost_is_none(self):
+        """pricing 欠落の API モデルは cost None (litellm に単価がないケース)。"""
+        info = _build_annotator_info_for_registry_model(
+            "anthropic/claude-x", WebApiAnnotator, {"litellm_model_id": "anthropic/claude-x"}
+        )
+        assert info.is_api is True
+        assert info.input_cost_per_token is None
+        assert info.output_cost_per_token is None
+
+    def test_malformed_cost_falls_back_to_none(self):
+        """malformed な cost 値は warning + None フォールバック (listing を壊さない)。"""
+        info = _build_annotator_info_for_registry_model(
+            "openai/gpt-4o",
+            WebApiAnnotator,
+            {"litellm_model_id": "openai/gpt-4o", "input_cost_per_token": "not-a-number"},
+        )
+        assert info.input_cost_per_token is None

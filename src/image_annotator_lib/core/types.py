@@ -425,6 +425,10 @@ class AnnotatorInfo:
     """廃止日時。現役モデルは None (ADR 0021: LiteLLM 統合後は LiteLLM 由来に切替予定)。"""
     max_output_tokens: int | None = None
     """WebAPI 呼び出し時のトークン上限。API モデルのみ設定。ローカルモデルは None。"""
+    input_cost_per_token: float | None = None
+    """LiteLLM model_cost 由来の input トークン単価 (USD/token)。ローカル/未取得は None。"""
+    output_cost_per_token: float | None = None
+    """LiteLLM model_cost 由来の output トークン単価 (USD/token)。ローカル/未取得は None。"""
 
 
 # --- pHash ベースの結果コンテナ (Issue #9) ---

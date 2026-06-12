@@ -627,6 +627,15 @@ def _build_annotator_info_for_registry_model(
         ),
         discontinued_at=_parse_discontinued_at(model_config.get("discontinued_at"), model_name),
         max_output_tokens=_safe_int(model_config.get("max_output_tokens"), model_name, "max_output_tokens"),
+        # Issue #747 (LoRAIro): litellm pricing を AnnotatorInfo へ伝播。WebAPI モデルは
+        # `_WEBAPI_MODEL_METADATA` (SSoT) に discovery 由来 cost が格納済み。ローカル ML
+        # モデルの user TOML には cost キーがないため None フォールバックする。
+        input_cost_per_token=_safe_float(
+            model_config.get("input_cost_per_token"), model_name, "input_cost_per_token"
+        ),
+        output_cost_per_token=_safe_float(
+            model_config.get("output_cost_per_token"), model_name, "output_cost_per_token"
+        ),
     )
 
 
