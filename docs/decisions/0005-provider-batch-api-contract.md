@@ -72,6 +72,24 @@ Batch-capable model は以下を満たす model とする。
 `cache_read_input_token_cost_batches` は補助 metadata であり、単独では batch 対応判定に使わない。
 OpenRouter route は対象外である。
 
+#### 実装状況 / 設計からの逸脱 (2026-06-25 追記、#152)
+
+上記 eligibility 条件は本 ADR の設計意図であり、現行実装はこれをそのまま満たしていない。
+`list_batch_capable_models()` (`webapi/batch/service.py`) は **LiteLLM batch pricing field を見ず**、
+registry metadata の provider が **openai / anthropic** のモデルだけを返す (provider 名ハードコードの
+whitelist)。OpenAI は追加で **RATINGS capability 必須**。Google adapter と `gpt-5.5-pro` denylist は未実装。
+
+逸脱の理由 (経緯): eligibility の本質は「実際に dispatch できる」ことで、`submit_batch` →
+`_adapter_for_provider` は adapter 実装済み provider しか扱えない。pricing field があっても adapter が
+無ければ送信不能なため、MVP では「adapter が実装済みの provider か」を実質ゲートにした (送れないモデルを
+batch-capable と偽らない、という妥当な判断)。provider を 1 社ずつ追加 (Anthropic #103 → OpenAI
+moderation #128) したため whitelist のまま育ち、OpenAI は moderation endpoint 専用 adapter として
+追加された経緯から RATINGS を要求する (chat-completions 対応後も条件が残存し過剰気味)。
+
+「pricing field 有無 = batch 対応」へ寄せる移行・Google adapter・denylist・OpenAI RATINGS フィルタ
+見直しは follow-up とする (#152)。当面は本 ADR の eligibility 条件を「設計上の到達目標」、実装の
+adapter-availability gate を「現状の実態」として扱う。
+
 ### Provider transport
 
 Provider Batch API の transport は公式 SDK を優先する。
