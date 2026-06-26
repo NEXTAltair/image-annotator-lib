@@ -123,6 +123,46 @@ def test_list_batch_capable_models_includes_openai_non_ratings_model(monkeypatch
     assert models[0].metadata["provider_batch_api"] == "openai_batch"
 
 
+def test_list_batch_capable_models_excludes_openai_responses_mode(monkeypatch) -> None:
+    """#152 Codex P2: OpenAI の mode=="responses" モデルは eligibility から除外する。
+
+    OpenAI batch adapter は /v1/chat/completions / /v1/moderations のみ dispatch し
+    /v1/responses は非対応。LiteLLM discovery が返す gpt-5-pro / o1-pro / o3-pro 等
+    (mode=="responses") を一覧に出すと submit 時に unsupported_endpoint で失敗する。
+    mode 未指定 (既定 chat) と mode=="chat" は含み、mode=="responses" のみ除外する。
+    """
+    monkeypatch.setattr(
+        service, "list_available_annotators", lambda: ["o3-pro", "gpt-4o", "gpt-chat-explicit"]
+    )
+    monkeypatch.setattr(
+        service,
+        "get_webapi_metadata",
+        lambda name: {
+            "o3-pro": {
+                "provider": "openai",
+                "litellm_model_id": "openai/o3-pro",
+                "mode": "responses",
+                "capabilities": ["tags", "captions", "scores"],
+            },
+            "gpt-4o": {
+                "provider": "openai",
+                "litellm_model_id": "openai/gpt-4o",
+                "capabilities": ["tags", "captions", "scores"],
+            },
+            "gpt-chat-explicit": {
+                "provider": "openai",
+                "litellm_model_id": "openai/gpt-4.1",
+                "mode": "chat",
+                "capabilities": ["tags", "captions", "scores"],
+            },
+        }.get(name),
+    )
+
+    models = list_batch_capable_models()
+
+    assert {model.litellm_model_id for model in models} == {"openai/gpt-4o", "openai/gpt-4.1"}
+
+
 def test_list_batch_capable_models_excludes_gpt_5_5_pro_denylist(monkeypatch) -> None:
     """#152: `gpt-5.5-pro` family は cost-safety denylist で除外する (ADR 0005)。
 

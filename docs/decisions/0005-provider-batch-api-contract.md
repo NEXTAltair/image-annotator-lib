@@ -64,6 +64,10 @@ Batch-capable model は以下を満たす model とする (#152 で adapter-avai
 
 - direct provider route である
 - **batch adapter が実装済みの provider に属する** (現状: `anthropic` / `openai`)
+- **adapter がその model を実際に dispatch できる** (OpenAI は adapter が
+  `/v1/chat/completions` / `/v1/moderations` のみ対応のため、LiteLLM `mode` が
+  `chat` / `moderation` の model に限る。`mode == "responses"` の model
+  (`gpt-5-pro` / `o1-pro` / `o3-pro` 等) は除外する)
 - annotation に必要な vision / tool calling / structured output 相当の capability を満たす
 - OpenAI `gpt-5.5-pro` family denylist に含まれない
 
@@ -97,6 +101,14 @@ ADR accept 時点 (2026-05-25) の当初設計は「LiteLLM 同梱 DB に batch 
 旧実装にあった **OpenAI の RATINGS capability 必須フィルタは撤去した** (#152)。これは OpenAI adapter が
 当初 moderation endpoint 専用 (#128) として追加された経緯の残存で、chat-completions endpoint 対応後は
 過剰制約だった。adapter-availability gate では capability に依らず provider の adapter があれば返す。
+
+ただし adapter-availability gate は「adapter がその model を実際に dispatch できる」ことまで含む。
+OpenAI batch adapter は `/v1/chat/completions` / `/v1/moderations` のみ submit し `/v1/responses` は
+非対応のため、LiteLLM `mode == "responses"` の OpenAI model (`gpt-5-pro` / `o1-pro` / `o3-pro` 等) は
+eligibility で除外する (`_OPENAI_BATCH_DISPATCHABLE_MODES`、#152 Codex P2)。これは RATINGS 撤去で
+緩めた capability 制約とは別軸の「dispatch 可否」ゲートで、一覧には出るが submit 時に
+`unsupported_endpoint` で失敗する model を広告しないための制約。`/v1/responses` batch 対応を
+adapter に追加すればこの除外は不要になる。
 
 Google Vertex AI / Gemini batch adapter (Phase 3) は本 ADR では未実装で、#154 に defer する
 (`_BATCH_ADAPTERS` 未登録のため自動的に eligibility 対象外)。
