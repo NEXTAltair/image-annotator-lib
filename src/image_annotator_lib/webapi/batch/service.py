@@ -22,21 +22,41 @@ from .types import (
 
 BatchAdapter = AnthropicBatchAdapter | OpenAIBatchAdapter
 
+# adapter 実装済み provider の単一情報源 (SSoT)。eligibility gate と dispatch の両方が
+# この registry を参照するため、provider 名のハードコード重複が生じない。
+# ADR 0005 "Model eligibility": batch eligibility は LiteLLM batch pricing field ではなく
+# adapter 実装の有無を gate とする (LiteLLM 同梱 DB が direct anthropic route の
+# batch pricing field を持たないため、pricing-field を一律ゲートにすると Anthropic を
+# 誤って除外してしまう。実 dispatch 可否 = adapter 実装の有無)。
+_BATCH_ADAPTERS: dict[str, type[BatchAdapter]] = {
+    "anthropic": AnthropicBatchAdapter,
+    "openai": OpenAIBatchAdapter,
+}
+
+# OpenAI `gpt-5.5-pro` family cost-safety denylist (ADR 0005)。
+# `gpt-5.5-pro` / `gpt-5.5-pro-2026-04-23` 等を除外する。非 pro の `gpt-5.5` は対象外。
+_DENYLISTED_MODEL_SUBSTRINGS: frozenset[str] = frozenset({"gpt-5.5-pro"})
+
 
 def _adapter_for_provider(provider: str) -> BatchAdapter:
     normalized = provider.lower()
-    if normalized == "anthropic":
-        return AnthropicBatchAdapter()
-    if normalized == "openai":
-        return OpenAIBatchAdapter()
-    raise BatchJobError(
-        phase=BatchErrorPhase.PREPARE,
-        provider=normalized,
-        provider_job_id=None,
-        code="unsupported_provider",
-        message=f"Provider Batch API is not implemented for provider: {provider}",
-        retryable=False,
-    )
+    adapter_cls = _BATCH_ADAPTERS.get(normalized)
+    if adapter_cls is None:
+        raise BatchJobError(
+            phase=BatchErrorPhase.PREPARE,
+            provider=normalized,
+            provider_job_id=None,
+            code="unsupported_provider",
+            message=f"Provider Batch API is not implemented for provider: {provider}",
+            retryable=False,
+        )
+    return adapter_cls()
+
+
+def _is_denylisted(litellm_model_id: str) -> bool:
+    """ADR 0005 cost-safety denylist (`gpt-5.5-pro` family) に該当するか判定する。"""
+    lowered = litellm_model_id.lower()
+    return any(token in lowered for token in _DENYLISTED_MODEL_SUBSTRINGS)
 
 
 def _capabilities_from_metadata(value: object) -> frozenset[TaskCapability]:
@@ -52,38 +72,52 @@ def _capabilities_from_metadata(value: object) -> frozenset[TaskCapability]:
 
 
 def list_batch_capable_models() -> list[BatchModelInfo]:
-    """Return direct Anthropic and OpenAI models usable with the provider batch route."""
+    """Provider batch route で使える direct provider モデルを返す。
+
+    eligibility = adapter 実装済み provider か (`_BATCH_ADAPTERS`)。ADR 0005 の通り
+    LiteLLM batch pricing field は判定に使わない (direct anthropic route に同 field が
+    無く false negative を招くため)。`gpt-5.5-pro` family は cost-safety denylist で除外する。
+    """
     models: list[BatchModelInfo] = []
     for model_name in list_available_annotators():
         metadata = get_webapi_metadata(model_name)
         if metadata is None:
             continue
         provider = str(metadata.get("provider", "")).lower()
-        if provider not in {"anthropic", "openai"}:
+        adapter_cls = _BATCH_ADAPTERS.get(provider)
+        if adapter_cls is None:
             continue
         litellm_model_id = metadata.get("litellm_model_id")
         if not isinstance(litellm_model_id, str) or not litellm_model_id:
             continue
-        capabilities = _capabilities_from_metadata(metadata.get("capabilities"))
-        if provider == "openai" and TaskCapability.RATINGS not in capabilities:
+        if _is_denylisted(litellm_model_id):
             continue
+        capabilities = _capabilities_from_metadata(metadata.get("capabilities"))
         models.append(
             BatchModelInfo(
                 provider=provider,
                 litellm_model_id=litellm_model_id,
                 display_name=model_name,
                 capabilities=capabilities,
-                metadata=(
-                    OpenAIBatchAdapter.batch_metadata()
-                    if provider == "openai"
-                    else AnthropicBatchAdapter.batch_metadata()
-                ),
+                metadata=adapter_cls.batch_metadata(),
             )
         )
     return models
 
 
 def submit_batch(request: BatchSubmitRequest) -> BatchSubmitResult:
+    # cost-safety denylist は submit 経路でも強制する。list_batch_capable_models() から
+    # 隠すだけでは、BatchSubmitRequest を直接組み立てる呼び出しや、一覧更新前に選択を
+    # キャッシュした呼び出しが denylisted model を素通りで dispatch できてしまう。
+    if _is_denylisted(request.litellm_model_id):
+        raise BatchJobError(
+            phase=BatchErrorPhase.PREPARE,
+            provider=request.provider.lower(),
+            provider_job_id=None,
+            code="denylisted_model",
+            message=f"Model is denylisted for batch dispatch (cost-safety): {request.litellm_model_id}",
+            retryable=False,
+        )
     return _adapter_for_provider(request.provider).submit_batch(request)
 
 
