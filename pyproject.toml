@@ -109,10 +109,19 @@ exclude = [
 
 ignore = [
     "E501",   # Line too long (handled by formatter)
-    "RUF002", # docstring 内のカタカナ `ノ` 等 ambiguous unicode 警告を回避
-    "RUF003", # comment 内のカタカナ `ノ` / 全角括弧等 ambiguous unicode 警告を回避
 ]
+
+# confusable 警告を許可する文字。日本語表記のカタカナ ノ (U+30CE)・全角括弧 （ ）・
+# UI/乗算で使う × (U+00D7)。残る全角記号は RUF001/002/003 で検出・半角化させる。
+allowed-confusables = ["ノ", "（", "）", "×"]
+
 fixable = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+# 複雑度は高いが分割の費用対効果が低い既存関数を個別に除外 (C901)
+"prototypes/pydanticai_integration/pydantic_ai_agent.py" = ["C901"]
+"src/image_annotator_lib/core/base/tensorflow.py" = ["C901"]
+"src/image_annotator_lib/model_class/tagger_tensorflow.py" = ["C901"]
 
 [tool.ruff.format]
 quote-style = "double"

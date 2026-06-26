@@ -17,7 +17,7 @@ from ..core.utils import logger
 class ImprovedAesthetic(ClipBaseAnnotator):
     """Improved Aesthetic Predictor v2 モデル (1-10 系 regression)。"""
 
-    # ADR 0009: AVA MOS 訓練の非有界 regression。理論値域 1–10、clamp なし。
+    # ADR 0009: AVA MOS 訓練の非有界 regression。理論値域 1-10、clamp なし。
     SCORE_SCALE: ClassVar[dict[str, ScoreScale]] = {
         "aesthetic": ScoreScale((1.0, 10.0), higher_is_better=True),
     }
@@ -31,7 +31,7 @@ class ImprovedAesthetic(ClipBaseAnnotator):
 class WaifuAesthetic(ClipBaseAnnotator):
     """Waifu Diffusion Aesthetic Predictor v2 モデル (0-1 系 regression)。"""
 
-    # ADR 0009: Sigmoid 出力の有界 regression。値域 0–1。
+    # ADR 0009: Sigmoid 出力の有界 regression。値域 0-1。
     SCORE_SCALE: ClassVar[dict[str, ScoreScale]] = {
         "aesthetic": ScoreScale((0.0, 1.0), higher_is_better=True),
     }

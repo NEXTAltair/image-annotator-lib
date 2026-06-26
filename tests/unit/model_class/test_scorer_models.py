@@ -820,7 +820,7 @@ def test_cafe_format_predictions_score_scales(
 def test_improved_aesthetic_format_predictions_score_scales(
     mock_clip_scorer_config, mock_clip_components, test_image, mock_capabilities_regression_scorer
 ):
-    """ADR 0009: ImprovedAesthetic は非有界 regression (1–10) の値域を返す。"""
+    """ADR 0009: ImprovedAesthetic は非有界 regression (1-10) の値域を返す。"""
     import torch
 
     with patch("image_annotator_lib.core.model_factory.ModelLoad.load_clip_components") as mock_load:
@@ -848,7 +848,7 @@ def test_improved_aesthetic_format_predictions_score_scales(
 
 @pytest.mark.unit
 def test_waifu_aesthetic_score_scale_class_attr():
-    """ADR 0009: WaifuAesthetic は有界 regression (0–1) の値域を宣言する。
+    """ADR 0009: WaifuAesthetic は有界 regression (0-1) の値域を宣言する。
 
     クラス属性 SCORE_SCALE を直接検証する (重みロードを伴わない軽量検証)。
     """

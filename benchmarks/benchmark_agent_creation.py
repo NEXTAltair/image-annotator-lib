@@ -167,7 +167,7 @@ class TestAgentCreationBenchmark:
         """
         factory = PydanticAIProviderFactory()
 
-        # 初回：プロバイダー生成
+        # 初回:プロバイダー生成
         memory_tracker.start()
         start_time = time.perf_counter()
 
@@ -180,7 +180,7 @@ class TestAgentCreationBenchmark:
         elapsed_time_first = time.perf_counter() - start_time
         memory_info_first = memory_tracker.stop()
 
-        # 2回目：同じプロバイダー
+        # 2回目:同じプロバイダー
         memory_tracker.start()
         start_time = time.perf_counter()
 
