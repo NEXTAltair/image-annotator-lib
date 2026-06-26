@@ -60,35 +60,49 @@ metadata や deprecation metadata は stable contract に含めない。
 
 ### Model eligibility
 
-Batch-capable model は以下を満たす model とする。
+Batch-capable model は以下を満たす model とする (#152 で adapter-availability gate に確定)。
 
 - direct provider route である
+- **batch adapter が実装済みの provider に属する** (現状: `anthropic` / `openai`)
 - annotation に必要な vision / tool calling / structured output 相当の capability を満たす
-- LiteLLM 同梱 DB に batch pricing field がある
-  - `input_cost_per_token_batches`
-  - `output_cost_per_token_batches`
 - OpenAI `gpt-5.5-pro` family denylist に含まれない
 
-`cache_read_input_token_cost_batches` は補助 metadata であり、単独では batch 対応判定に使わない。
 OpenRouter route は対象外である。
 
-#### 実装状況 / 設計からの逸脱 (2026-06-25 追記、#152)
+#### eligibility を adapter-availability gate とする理由 (#152、2026-06-26 確定)
 
-上記 eligibility 条件は本 ADR の設計意図であり、現行実装はこれをそのまま満たしていない。
-`list_batch_capable_models()` (`webapi/batch/service.py`) は **LiteLLM batch pricing field を見ず**、
-registry metadata の provider が **openai / anthropic** のモデルだけを返す (provider 名ハードコードの
-whitelist)。OpenAI は追加で **RATINGS capability 必須**。Google adapter と `gpt-5.5-pro` denylist は未実装。
+ADR accept 時点 (2026-05-25) の当初設計は「LiteLLM 同梱 DB に batch pricing field
+(`input_cost_per_token_batches` / `output_cost_per_token_batches`) があるか」を eligibility 判定に
+使う方針だった。しかし実装と運用で次の 2 点が判明し、pricing-field 判定を撤回して
+**adapter 実装の有無を gate** とすることに確定した。
 
-逸脱の理由 (経緯): eligibility の本質は「実際に dispatch できる」ことで、`submit_batch` →
-`_adapter_for_provider` は adapter 実装済み provider しか扱えない。pricing field があっても adapter が
-無ければ送信不能なため、MVP では「adapter が実装済みの provider か」を実質ゲートにした (送れないモデルを
-batch-capable と偽らない、という妥当な判断)。provider を 1 社ずつ追加 (Anthropic #103 → OpenAI
-moderation #128) したため whitelist のまま育ち、OpenAI は moderation endpoint 専用 adapter として
-追加された経緯から RATINGS を要求する (chat-completions 対応後も条件が残存し過剰気味)。
+1. **eligibility の本質は「実際に dispatch できる」こと。** `submit_batch` → `_adapter_for_provider`
+   は adapter 実装済み provider しか扱えない。pricing field があっても adapter が無ければ送信不能なので、
+   pricing-field を gate にすると「送れないのに batch-capable」と偽る model を一覧に出してしまう。
+2. **LiteLLM 同梱 DB の batch pricing データが direct provider route で不完全。** 検証時点で
+   `litellm_provider == "anthropic"` の direct route 22 model は batch pricing field を 1 件も持たない
+   (`vertex_ai/claude-*` route のみ field 有り。Vertex は MVP 対象外)。Anthropic Message Batches API は
+   実在し `AnthropicBatchAdapter` も稼働するため、pricing-field を一律 gate にすると Anthropic を丸ごと
+   誤除外する (false negative)。OpenAI direct route は batch pricing を持つ model があるが、判定を
+   provider 間で非対称にするより adapter-availability に統一する方が単純で予測可能。
 
-「pricing field 有無 = batch 対応」へ寄せる移行・Google adapter・denylist・OpenAI RATINGS フィルタ
-見直しは follow-up とする (#152)。当面は本 ADR の eligibility 条件を「設計上の到達目標」、実装の
-adapter-availability gate を「現状の実態」として扱う。
+このため LiteLLM batch pricing field は今回**例外的に eligibility 判定に使わない**。判定は
+`webapi/batch/service.py` の `_BATCH_ADAPTERS` registry (adapter 実装済み provider の SSoT) を参照する。
+`_BATCH_ADAPTERS` は `list_batch_capable_models()` の gate と `_adapter_for_provider()` の dispatch の
+両方が共有し、provider 名ハードコードの重複を持たない。
+
+`gpt-5.5-pro` family は cost-safety denylist (`_DENYLISTED_MODEL_SUBSTRINGS`) として実装済み。
+`litellm_model_id` に `gpt-5.5-pro` を含む model を除外する (非 pro の `gpt-5.5` は対象外)。
+
+旧実装にあった **OpenAI の RATINGS capability 必須フィルタは撤去した** (#152)。これは OpenAI adapter が
+当初 moderation endpoint 専用 (#128) として追加された経緯の残存で、chat-completions endpoint 対応後は
+過剰制約だった。adapter-availability gate では capability に依らず provider の adapter があれば返す。
+
+Google Vertex AI / Gemini batch adapter (Phase 3) は本 ADR では未実装で、#154 に defer する
+(`_BATCH_ADAPTERS` 未登録のため自動的に eligibility 対象外)。
+
+将来 pricing-aware な選別 (コスト上限・割引率提示など) が必要になった場合は、eligibility gate ではなく
+表示・選択補助の別レイヤーとして追加する。
 
 ### Provider transport
 

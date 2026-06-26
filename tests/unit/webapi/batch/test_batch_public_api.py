@@ -44,7 +44,7 @@ def test_submit_rejects_unsupported_provider() -> None:
 
 
 def test_list_batch_capable_models_returns_anthropic_metadata(monkeypatch) -> None:
-    monkeypatch.setattr(service, "list_available_annotators", lambda: ["claude", "gpt"])
+    monkeypatch.setattr(service, "list_available_annotators", lambda: ["claude"])
     monkeypatch.setattr(
         service,
         "get_webapi_metadata",
@@ -53,11 +53,6 @@ def test_list_batch_capable_models_returns_anthropic_metadata(monkeypatch) -> No
                 "provider": "anthropic",
                 "litellm_model_id": "anthropic/claude-3-5-haiku-latest",
                 "capabilities": ["tags", "captions", "scores", "ratings"],
-            },
-            "gpt": {
-                "provider": "openai",
-                "litellm_model_id": "openai/gpt-4o",
-                "capabilities": ["tags"],
             },
         }.get(name),
     )
@@ -70,6 +65,71 @@ def test_list_batch_capable_models_returns_anthropic_metadata(monkeypatch) -> No
     assert TaskCapability.RATINGS in models[0].capabilities
     assert models[0].metadata["result_retention_days"] == 29
     assert models[0].metadata["zero_data_retention_eligible"] is False
+
+
+def test_list_batch_capable_models_includes_openai_non_ratings_model(monkeypatch) -> None:
+    """#152: RATINGS 必須フィルタ撤去後、chat-completions 系 OpenAI モデルも一覧に含む。
+
+    旧実装は OpenAI に RATINGS capability を要求し、tags/captions/scores しか持たない
+    chat-completions モデルを誤って除外していた (moderation endpoint 専用 adapter として
+    追加された経緯の残存)。adapter-availability gate では provider に adapter があれば
+    capability に依らず batch-capable として返す。
+    """
+    monkeypatch.setattr(service, "list_available_annotators", lambda: ["gpt"])
+    monkeypatch.setattr(
+        service,
+        "get_webapi_metadata",
+        lambda name: {
+            "gpt": {
+                "provider": "openai",
+                "litellm_model_id": "openai/gpt-4o",
+                "capabilities": ["tags", "captions", "scores"],
+            },
+        }.get(name),
+    )
+
+    models = list_batch_capable_models()
+
+    assert len(models) == 1
+    assert models[0].provider == "openai"
+    assert models[0].litellm_model_id == "openai/gpt-4o"
+    assert TaskCapability.RATINGS not in models[0].capabilities
+    assert models[0].metadata["provider_batch_api"] == "openai_batch"
+
+
+def test_list_batch_capable_models_excludes_gpt_5_5_pro_denylist(monkeypatch) -> None:
+    """#152: `gpt-5.5-pro` family は cost-safety denylist で除外する (ADR 0005)。
+
+    非 pro の `gpt-5.5` は対象外で一覧に残る。
+    """
+    monkeypatch.setattr(
+        service, "list_available_annotators", lambda: ["gpt-5.5-pro", "gpt-5.5-pro-dated", "gpt-5.5"]
+    )
+    monkeypatch.setattr(
+        service,
+        "get_webapi_metadata",
+        lambda name: {
+            "gpt-5.5-pro": {
+                "provider": "openai",
+                "litellm_model_id": "openai/gpt-5.5-pro",
+                "capabilities": ["tags", "captions", "scores"],
+            },
+            "gpt-5.5-pro-dated": {
+                "provider": "openai",
+                "litellm_model_id": "openai/gpt-5.5-pro-2026-04-23",
+                "capabilities": ["tags", "captions", "scores"],
+            },
+            "gpt-5.5": {
+                "provider": "openai",
+                "litellm_model_id": "openai/gpt-5.5",
+                "capabilities": ["tags", "captions", "scores"],
+            },
+        }.get(name),
+    )
+
+    models = list_batch_capable_models()
+
+    assert {model.litellm_model_id for model in models} == {"openai/gpt-5.5"}
 
 
 def test_list_batch_capable_models_skips_models_without_webapi_metadata(
