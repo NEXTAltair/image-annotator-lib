@@ -37,6 +37,15 @@ _BATCH_ADAPTERS: dict[str, type[BatchAdapter]] = {
 # `gpt-5.5-pro` / `gpt-5.5-pro-2026-04-23` 等を除外する。非 pro の `gpt-5.5` は対象外。
 _DENYLISTED_MODEL_SUBSTRINGS: frozenset[str] = frozenset({"gpt-5.5-pro"})
 
+# OpenAI batch adapter が dispatch できる LiteLLM `mode`。adapter は /v1/chat/completions と
+# /v1/moderations にのみ submit し、/v1/responses は非対応 (adapters/openai.py
+# `_SUPPORTED_ENDPOINTS`)。LiteLLM discovery が返す mode=="responses" の OpenAI モデル
+# (gpt-5-pro / o1-pro / o3-pro 等) を eligibility で弾かないと、一覧には出るが submit 時に
+# unsupported_endpoint で失敗する (#152 Codex P2)。adapter-availability gate は「provider に
+# adapter がある」だけでなく「adapter がその model を実際に dispatch できる」ことまで意味する。
+# Anthropic Message Batches は chat モデルを一律に扱うため mode 制約は課さない。
+_OPENAI_BATCH_DISPATCHABLE_MODES: frozenset[str] = frozenset({"chat", "moderation"})
+
 
 def _adapter_for_provider(provider: str) -> BatchAdapter:
     normalized = provider.lower()
@@ -77,6 +86,8 @@ def list_batch_capable_models() -> list[BatchModelInfo]:
     eligibility = adapter 実装済み provider か (`_BATCH_ADAPTERS`)。ADR 0005 の通り
     LiteLLM batch pricing field は判定に使わない (direct anthropic route に同 field が
     無く false negative を招くため)。`gpt-5.5-pro` family は cost-safety denylist で除外する。
+    OpenAI は adapter が dispatch できる mode (chat / moderation) のみ返す
+    (mode=="responses" の model は submit 時に失敗するため eligibility で除外、#152)。
     """
     models: list[BatchModelInfo] = []
     for model_name in list_available_annotators():
@@ -91,6 +102,11 @@ def list_batch_capable_models() -> list[BatchModelInfo]:
         if not isinstance(litellm_model_id, str) or not litellm_model_id:
             continue
         if _is_denylisted(litellm_model_id):
+            continue
+        if provider == "openai" and str(metadata.get("mode", "chat")).lower() not in (
+            _OPENAI_BATCH_DISPATCHABLE_MODES
+        ):
+            # mode=="responses" 等 OpenAI adapter が dispatch できない model は除外する (#152)。
             continue
         capabilities = _capabilities_from_metadata(metadata.get("capabilities"))
         models.append(
