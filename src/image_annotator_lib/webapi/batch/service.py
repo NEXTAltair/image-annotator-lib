@@ -106,6 +106,18 @@ def list_batch_capable_models() -> list[BatchModelInfo]:
 
 
 def submit_batch(request: BatchSubmitRequest) -> BatchSubmitResult:
+    # cost-safety denylist は submit 経路でも強制する。list_batch_capable_models() から
+    # 隠すだけでは、BatchSubmitRequest を直接組み立てる呼び出しや、一覧更新前に選択を
+    # キャッシュした呼び出しが denylisted model を素通りで dispatch できてしまう。
+    if _is_denylisted(request.litellm_model_id):
+        raise BatchJobError(
+            phase=BatchErrorPhase.PREPARE,
+            provider=request.provider.lower(),
+            provider_job_id=None,
+            code="denylisted_model",
+            message=f"Model is denylisted for batch dispatch (cost-safety): {request.litellm_model_id}",
+            retryable=False,
+        )
     return _adapter_for_provider(request.provider).submit_batch(request)
 
 

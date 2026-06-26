@@ -43,6 +43,32 @@ def test_submit_rejects_unsupported_provider() -> None:
         raise AssertionError("Expected BatchJobError")
 
 
+def test_submit_rejects_denylisted_model() -> None:
+    """#152: cost-safety denylist は submit 経路でも強制する (Codex P2)。
+
+    list_batch_capable_models() から隠すだけでは、BatchSubmitRequest を直接組み立てる
+    呼び出しや一覧更新前のキャッシュ選択が denylisted model を素通りで dispatch できる。
+    `gpt-5.5-pro` 系は submit_batch() でも PREPARE phase で拒否する。
+    """
+    request = BatchSubmitRequest(
+        provider="openai",
+        endpoint="/v1/chat/completions",
+        litellm_model_id="openai/gpt-5.5-pro",
+        prompt_profile="default",
+        description=None,
+        api_keys={"openai": "sk-test"},
+        items=[],
+    )
+
+    try:
+        submit_batch(request)
+    except BatchJobError as exc:
+        assert exc.phase is BatchErrorPhase.PREPARE
+        assert exc.code == "denylisted_model"
+    else:
+        raise AssertionError("Expected BatchJobError")
+
+
 def test_list_batch_capable_models_returns_anthropic_metadata(monkeypatch) -> None:
     monkeypatch.setattr(service, "list_available_annotators", lambda: ["claude"])
     monkeypatch.setattr(
