@@ -110,7 +110,7 @@ class TestMemoryBenchmark:
         """
         factory = PydanticAIProviderFactory()
 
-        # 初回：プロバイダー生成
+        # 初回:プロバイダー生成
         memory_tracker.start()
         agent_1 = factory.get_cached_agent(
             model_id="openai:model1",
@@ -119,7 +119,7 @@ class TestMemoryBenchmark:
         )
         memory_info_1 = memory_tracker.stop()
 
-        # 2回目以降：同じプロバイダー
+        # 2回目以降:同じプロバイダー
         memory_tracker.start()
         agent_2 = factory.get_cached_agent(
             model_id="openai:model2",
@@ -164,7 +164,7 @@ class TestMemoryBenchmark:
             f"\n  3番目（model3）: {memory_info_3['allocated_mb']:.2f}MB"
         )
 
-        # 共有効果：2回目以降はメモリ増加が少ないはず
+        # 共有効果:2回目以降はメモリ増加が少ないはず
         assert memory_info_2["allocated_mb"] < memory_info_1["allocated_mb"]
         assert memory_info_3["allocated_mb"] < memory_info_1["allocated_mb"]
 

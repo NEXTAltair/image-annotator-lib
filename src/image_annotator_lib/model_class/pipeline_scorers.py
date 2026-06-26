@@ -17,7 +17,7 @@ class AestheticShadow(PipelineBaseAnnotator):
     Hugging Face Pipeline を使用して美的スコアを計算します。
     """
 
-    # ADR 0009: hq/lq は softmax 確率 (各 0–1)。lq は値が小さいほど良い。
+    # ADR 0009: hq/lq は softmax 確率 (各 0-1)。lq は値が小さいほど良い。
     SCORE_SCALE: ClassVar[dict[str, ScoreScale]] = {
         "hq": ScoreScale((0.0, 1.0), higher_is_better=True),
         "lq": ScoreScale((0.0, 1.0), higher_is_better=False),
@@ -99,7 +99,7 @@ class CafePredictor(PipelineBaseAnnotator):
     Hugging Face Pipeline を使用して美的スコアを計算します。
     """
 
-    # ADR 0009: aesthetic/not_aesthetic は softmax 確率 (各 0–1、sum=1)。
+    # ADR 0009: aesthetic/not_aesthetic は softmax 確率 (各 0-1、sum=1)。
     # not_aesthetic は値が小さいほど良い。
     SCORE_SCALE: ClassVar[dict[str, ScoreScale]] = {
         "aesthetic": ScoreScale((0.0, 1.0), higher_is_better=True),
