@@ -1,7 +1,12 @@
+---
+type: ADR
+title: "WebAPI Dual-Endpoint Runtime (Chat + Responses)"
+status: Accepted
+timestamp: 2026-06-01
+tags: [webapi, annotation]
+depends_on: [openai-api, pydanticai]
+---
 # ADR 0007: WebAPI Dual-Endpoint Runtime (Chat + Responses)
-
-- **日付**: 2026-06-01
-- **ステータス**: Accepted
 
 > **Design Authority:**
 > WebAPI 推論経路の責務分離 (PydanticAI / LiteLLM / image-annotator-lib) の上位方針は

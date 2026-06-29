@@ -1,3 +1,11 @@
+---
+type: Reference
+title: PydanticAI Model Factory 実装評価基準
+status: Accepted
+timestamp: 2026-02-12
+tags: [webapi, validation]
+depends_on: [pydanticai]
+---
 # PydanticAI Model Factory 実装評価基準
 
 ## 概要

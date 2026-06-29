@@ -1,7 +1,12 @@
+---
+type: ADR
+title: "Score Model Output Contract"
+status: Accepted
+timestamp: 2026-05-17
+tags: [scoring, annotation]
+depends_on: [torch]
+---
 # ADR 0002: Score Model Output Contract
-
-- **日付**: 2026-05-17
-- **ステータス**: Accepted
 
 ## Context
 

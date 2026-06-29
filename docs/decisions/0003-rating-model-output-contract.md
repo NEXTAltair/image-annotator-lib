@@ -1,7 +1,12 @@
+---
+type: ADR
+title: "Rating Model Output Contract"
+status: Accepted
+timestamp: 2026-05-21
+tags: [rating, annotation]
+depends_on: [torch]
+---
 # ADR 0003: Rating Model Output Contract
-
-- **日付**: 2026-05-21
-- **ステータス**: Accepted
 
 ## Context
 

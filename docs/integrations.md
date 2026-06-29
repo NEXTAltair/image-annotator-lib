@@ -1,3 +1,11 @@
+---
+type: Guide
+title: LiteLLM 統合ガイド
+status: Accepted
+timestamp: 2026-05-26
+tags: [webapi, model-registry]
+depends_on: [litellm, pydanticai]
+---
 # LiteLLM 統合ガイド
 
 本ライブラリは [LiteLLM](https://github.com/BerriAI/litellm) を使用して WebAPI モデルを自動的に検出・管理します。

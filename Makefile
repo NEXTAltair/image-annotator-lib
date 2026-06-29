@@ -1,7 +1,7 @@
 # Image Annotator Lib Makefile
 # Development task automation
 
-.PHONY: help test lint format install install-dev clean run-example typecheck test-unit test-integration test-webapi test-scorer test-tagger test-cov setup
+.PHONY: help test lint format install install-dev clean run-example typecheck test-unit test-integration test-webapi test-scorer test-tagger test-cov setup adr-okf adr-index docs-okf
 
 # Default target
 help:
@@ -22,6 +22,9 @@ help:
 	@echo "  lint         Run code linting (ruff)"
 	@echo "  format       Format code (ruff format)"
 	@echo "  typecheck    Run type checking (mypy)"
+	@echo "  adr-okf      Validate ADR frontmatter + check index is up to date (ADR 0010)"
+	@echo "  adr-index    Regenerate ADR README table + index.md from frontmatter (ADR 0010)"
+	@echo "  docs-okf     Validate docs OKF frontmatter (lazy: --skip-missing, ADR 0010)"
 	@echo "  clean        Clean build artifacts"
 
 # Setup target
@@ -84,6 +87,35 @@ format:
 typecheck:
 	@echo "Running type checking..."
 	uv run mypy src/
+
+# OKF ドキュメント検証・索引生成 (ADR 0010)
+OKF := .agents/skills/okf-bundle/scripts
+DOCS_OKF_EXCLUDE := README.md,CHANGELOG.md,CLAUDE.md,AGENTS.md,GEMINI.md,SKILL.md
+
+adr-index:
+	@echo "Regenerating ADR index from frontmatter..."
+	python3 $(OKF)/okf_index.py --bundle-root docs/decisions \
+		--table --columns id,title,timestamp,status --headers "ADR,タイトル,日付,ステータス" \
+		--link-column id --exclude README.md --table-output docs/decisions/README.md
+	python3 $(OKF)/okf_index.py --bundle-root docs/decisions \
+		--index --index-output docs/decisions/index.md \
+		--index-title "Architecture Decision Records" --exclude README.md
+
+adr-okf:
+	@echo "Validating ADR frontmatter (OKF)..."
+	python3 $(OKF)/okf_validate.py --bundle-root docs/decisions \
+		--require type,title,status,timestamp --exclude README.md
+	python3 $(OKF)/okf_index.py --bundle-root docs/decisions \
+		--table --columns id,title,timestamp,status --headers "ADR,タイトル,日付,ステータス" \
+		--link-column id --exclude README.md --table-output docs/decisions/README.md --check
+	python3 $(OKF)/okf_index.py --bundle-root docs/decisions \
+		--index --index-output docs/decisions/index.md \
+		--index-title "Architecture Decision Records" --exclude README.md --check
+
+docs-okf:
+	@echo "Validating documentation OKF frontmatter (lazy migration, ADR 0010)..."
+	python3 $(OKF)/okf_validate.py --bundle-root docs \
+		--skip-missing --exclude $(DOCS_OKF_EXCLUDE)
 
 # Cleanup target
 clean:

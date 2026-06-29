@@ -1,7 +1,12 @@
+---
+type: ADR
+title: "Annotation Outcome Contract"
+status: Accepted
+timestamp: 2026-05-25
+tags: [annotation]
+depends_on: [pydantic]
+---
 # ADR 0006: Annotation Outcome Contract
-
-- **日付**: 2026-05-25
-- **ステータス**: Accepted
 
 ## Context
 

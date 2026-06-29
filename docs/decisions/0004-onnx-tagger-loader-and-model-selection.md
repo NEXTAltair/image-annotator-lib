@@ -1,7 +1,12 @@
+---
+type: ADR
+title: "ONNX Tagger Loader and Model Selection"
+status: Accepted
+timestamp: 2026-05-21
+tags: [tagging, model-selection]
+depends_on: [onnxruntime]
+---
 # ADR 0004: ONNX Tagger Loader and Model Selection
-
-- **日付**: 2026-05-21
-- **ステータス**: Accepted
 
 ## Context
 
