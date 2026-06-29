@@ -80,7 +80,10 @@ def validate(
             if not fm.get(key):
                 problems.append(f"{rel}: 必須キー '{key}' が無い")
         timestamp = fm.get("timestamp")
-        if isinstance(timestamp, str) and timestamp and not _is_iso8601(timestamp):
+        if isinstance(timestamp, list):
+            # timestamp は scalar (日付文字列) でなければならない。list は不正。
+            problems.append(f"{rel}: timestamp が scalar でない: {timestamp!r}")
+        elif isinstance(timestamp, str) and timestamp and not _is_iso8601(timestamp):
             problems.append(f"{rel}: timestamp '{timestamp}' が ISO 8601 でない")
     if count == 0:
         problems.append(f"{bundle_root}: 概念ドキュメント (*.md) が見つからない")
