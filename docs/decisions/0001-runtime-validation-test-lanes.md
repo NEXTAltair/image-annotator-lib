@@ -1,8 +1,11 @@
+---
+type: ADR
+title: "Runtime Validation Test Lanes"
+status: Accepted (amended 2026-05-18)
+timestamp: 2026-05-17
+tags: [validation]
+---
 # ADR 0001: Runtime Validation Test Lanes
-
-- **日付**: 2026-05-17
-- **Amended**: 2026-05-18
-- **ステータス**: Accepted (amended)
 
 ## Context
 

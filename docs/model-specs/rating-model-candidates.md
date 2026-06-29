@@ -1,3 +1,11 @@
+---
+type: Reference
+title: Rating Model Candidates
+status: Accepted
+timestamp: 2026-05-21
+tags: [rating, model-selection]
+depends_on: [torch]
+---
 # Rating Model Candidates
 
 This document records model-specific facts for rating-capable annotators. The output contract is

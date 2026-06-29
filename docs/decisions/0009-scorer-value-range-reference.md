@@ -1,7 +1,13 @@
+---
+type: ADR
+title: "Scorer Raw Output and Value-Range Reference"
+status: Accepted
+timestamp: 2026-06-05
+tags: [scoring, annotation]
+depends_on: [torch]
+---
 # ADR 0009: Scorer Raw Output and Value-Range Reference
 
-- **日付**: 2026-06-05
-- **ステータス**: Accepted
 - **関連 ADR**: [0002 Score Model Output Contract](0002-score-model-output-contract.md)
 - **関連 Issue**: NEXTAltair/LoRAIro#626 (スコア表示の尺度合わせ方針), NEXTAltair/image-annotator-lib#66 (scorer output contract), NEXTAltair/image-annotator-lib#144 (score_scales 実装)
 

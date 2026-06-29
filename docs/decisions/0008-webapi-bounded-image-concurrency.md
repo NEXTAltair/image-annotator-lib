@@ -1,10 +1,12 @@
-# 0008. WebAPI Bounded Image Concurrency
-
-Date: 2026-06-03
-
-## Status
-
-Accepted
+---
+type: ADR
+title: "WebAPI Bounded Image Concurrency"
+status: Accepted
+timestamp: 2026-06-03
+tags: [webapi, performance]
+depends_on: [openai-api]
+---
+# ADR 0008: WebAPI Bounded Image Concurrency
 
 ## Context
 

@@ -1,7 +1,12 @@
+---
+type: ADR
+title: "Provider Batch API Contract"
+status: Accepted
+timestamp: 2026-05-25
+tags: [provider-batch, webapi, annotation]
+depends_on: [openai-api, anthropic-api]
+---
 # ADR 0005: Provider Batch API Contract
-
-- **日付**: 2026-05-25
-- **ステータス**: Accepted
 
 ## Context
 
