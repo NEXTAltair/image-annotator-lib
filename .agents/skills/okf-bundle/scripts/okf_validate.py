@@ -66,7 +66,12 @@ def validate(
         count += 1
         rel = path.relative_to(bundle_root).as_posix()
         text = path.read_text(encoding="utf-8")
-        fm = parse_frontmatter(text)
+        try:
+            fm = parse_frontmatter(text)
+        except ValueError as e:
+            # 不正な YAML スカラー (クォート未終端等) は frontmatter があっても違反扱い。
+            problems.append(f"{rel}: frontmatter が不正: {e}")
+            continue
         if not fm:
             if not skip_missing:
                 problems.append(f"{rel}: frontmatter が無い")

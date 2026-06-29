@@ -49,10 +49,18 @@ def split_frontmatter(text: str) -> tuple[str, str]:
 
 
 def _strip_scalar(value: str) -> str:
-    """スカラー値の前後空白と一重/二重引用符を除去する。"""
+    """スカラー値の前後空白と一重/二重引用符を除去する。
+
+    クォートで始まるのに同じクォートで閉じていない値 (例: ``"Broken``) は
+    不正な YAML スカラーとして ``ValueError`` を送出する。frontmatter を契約とする
+    OKF バンドル (ADR 0010 / LoRAIro ADR 0082) で、検証が malformed scalar を
+    silently 通さないための guardrail。
+    """
     value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-        return value[1:-1]
+    if value and value[0] in "\"'":
+        if len(value) >= 2 and value[-1] == value[0]:
+            return value[1:-1]
+        raise ValueError(f"不正な quoted scalar (クォート未終端): {value!r}")
     return value
 
 
