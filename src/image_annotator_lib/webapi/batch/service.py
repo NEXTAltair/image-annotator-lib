@@ -8,6 +8,7 @@ from image_annotator_lib.core.registry import get_webapi_metadata, list_availabl
 from image_annotator_lib.core.types import TaskCapability
 
 from .adapters.anthropic import AnthropicBatchAdapter
+from .adapters.google import GoogleBatchAdapter
 from .adapters.openai import OpenAIBatchAdapter
 from .types import (
     BatchErrorPhase,
@@ -20,7 +21,7 @@ from .types import (
     BatchSubmitResult,
 )
 
-BatchAdapter = AnthropicBatchAdapter | OpenAIBatchAdapter
+BatchAdapter = AnthropicBatchAdapter | GoogleBatchAdapter | OpenAIBatchAdapter
 
 # adapter 実装済み provider の単一情報源 (SSoT)。eligibility gate と dispatch の両方が
 # この registry を参照するため、provider 名のハードコード重複が生じない。
@@ -30,6 +31,7 @@ BatchAdapter = AnthropicBatchAdapter | OpenAIBatchAdapter
 # 誤って除外してしまう。実 dispatch 可否 = adapter 実装の有無)。
 _BATCH_ADAPTERS: dict[str, type[BatchAdapter]] = {
     "anthropic": AnthropicBatchAdapter,
+    "google": GoogleBatchAdapter,
     "openai": OpenAIBatchAdapter,
 }
 
