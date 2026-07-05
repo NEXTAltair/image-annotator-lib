@@ -111,6 +111,13 @@ def list_batch_capable_models() -> list[BatchModelInfo]:
             # mode=="responses" 等 OpenAI adapter が dispatch できない model は除外する (#152)。
             continue
         capabilities = _capabilities_from_metadata(metadata.get("capabilities"))
+        # adapter が実際に生成できる capability に絞る (Google は ratings を生成しない
+        # ため、registry の RATINGS を広告すると submit は通るのに結果が欠ける。Codex P2)
+        supported = getattr(adapter_cls, "SUPPORTED_TASK_CAPABILITIES", None)
+        if supported is not None:
+            capabilities = capabilities & frozenset(supported)
+            if not capabilities:
+                continue
         models.append(
             BatchModelInfo(
                 provider=provider,

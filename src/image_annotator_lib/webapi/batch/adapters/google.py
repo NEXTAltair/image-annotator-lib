@@ -90,6 +90,11 @@ _TERMINAL_STATUSES = frozenset(
 class GoogleBatchAdapter:
     """Adapter for Gemini Developer API Batch (input file 方式)。"""
 
+    # Gemini function declaration は nested schema (`ratings`) を公開しないため、
+    # 本 adapter が実際に生成できる capability は tags/captions/scores のみ (Codex P2)。
+    # service.list_batch_capable_models はこの集合で registry capability を絞る。
+    SUPPORTED_TASK_CAPABILITIES = _DEFAULT_ANNOTATION_CAPABILITIES
+
     @staticmethod
     def batch_metadata() -> dict[str, Any]:
         return {
@@ -531,9 +536,23 @@ def _extract_function_call_args(candidate: Any) -> dict[str, Any] | None:
     return None
 
 
+# google.rpc.Status の canonical code (0-16)。per-item error line はこの体系を使う
+# (HTTP 429/5xx ではない、Codex P2)。transient なものだけ retryable とする。
+_RETRYABLE_CANONICAL_CODES = frozenset(
+    {4, 8, 13, 14}
+)  # DEADLINE_EXCEEDED/RESOURCE_EXHAUSTED/INTERNAL/UNAVAILABLE
+_RETRYABLE_STATUS_NAMES = frozenset({"DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED", "INTERNAL", "UNAVAILABLE"})
+
+
 def _provider_item_retryable(error: Any) -> bool:
     code = _get(error, "code")
-    return isinstance(code, int) and (code == 429 or code >= 500)
+    if isinstance(code, int):
+        if code == 429 or code >= 500:
+            return True
+        if code in _RETRYABLE_CANONICAL_CODES:
+            return True
+    status_name = str(_get(error, "status") or "").upper()
+    return status_name in _RETRYABLE_STATUS_NAMES
 
 
 def _failed_result_item(
@@ -618,15 +637,30 @@ def _parse_datetime(value: Any) -> datetime | None:
     return None
 
 
+def _batch_stat(job: Any, camel: str, snake: str) -> int | None:
+    """batchStats (camelCase / snake_case) から count を読む (Codex P2)。"""
+    stats = _get_either(job, "batchStats", "batch_stats")
+    if stats is None:
+        return None
+    value = _get_either(stats, camel, snake)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        # REST は int64 を文字列で返すことがある
+        return int(value)
+    return None
+
+
 def _to_status_result(job: Any, *, provider_job_id: str) -> BatchStatusResult:
     return BatchStatusResult(
         provider=_PROVIDER,
         provider_job_id=str(_get(job, "name") or provider_job_id),
         status=_status_from_job(job),
-        # Gemini Developer API Batch は request 単位の集計 count を返さない
-        request_count=None,
-        succeeded_count=None,
-        failed_count=None,
+        request_count=_batch_stat(job, "requestCount", "request_count"),
+        succeeded_count=_batch_stat(job, "successfulRequestCount", "successful_request_count"),
+        failed_count=_batch_stat(job, "failedRequestCount", "failed_request_count"),
         canceled_count=None,
         expired_count=None,
         submitted_at=_parse_datetime(_get_either(job, "createTime", "create_time")),

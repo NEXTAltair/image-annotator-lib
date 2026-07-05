@@ -388,3 +388,89 @@ def test_google_adapter_is_registered_in_batch_dispatch() -> None:
     metadata = GoogleBatchAdapter.batch_metadata()
     assert metadata["provider_batch_api"] == "gemini_developer_batch"
     assert metadata["library_max_items"] == 500
+
+
+def test_provider_item_error_with_canonical_status_is_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """google.rpc.Status の canonical code / status 名を retryable と判定する (Codex P2)。"""
+    files = FakeGoogleFiles(
+        download_payloads={
+            "files/output-001": _jsonl(
+                [
+                    {"key": "img-1", "error": {"code": 8, "message": "quota"}},
+                    {"key": "img-2", "error": {"status": "UNAVAILABLE", "message": "down"}},
+                    {"key": "img-3", "error": {"code": 3, "message": "invalid argument"}},
+                ]
+            )
+        }
+    )
+    batches = FakeGoogleBatches(
+        job={"state": "JOB_STATE_SUCCEEDED", "dest": {"file_name": "files/output-001"}}
+    )
+    install_fake_google(monkeypatch, files=files, batches=batches)
+
+    result = GoogleBatchAdapter().fetch_batch_results(make_handle())
+
+    by_id = {item.custom_id: item for item in result.items}
+    assert by_id["img-1"].error is not None and by_id["img-1"].error.retryable is True
+    assert by_id["img-2"].error is not None and by_id["img-2"].error.retryable is True
+    assert by_id["img-3"].error is not None and by_id["img-3"].error.retryable is False
+
+
+def test_retrieve_batch_populates_counts_from_batch_stats(monkeypatch: pytest.MonkeyPatch) -> None:
+    """batchStats の requestCount / successful / failed を status へ反映する (Codex P2)。"""
+    batches = FakeGoogleBatches(
+        job={
+            "state": "JOB_STATE_SUCCEEDED",
+            "batchStats": {
+                "requestCount": "3",
+                "successfulRequestCount": 2,
+                "failedRequestCount": 1,
+            },
+        }
+    )
+    install_fake_google(monkeypatch, files=FakeGoogleFiles(), batches=batches)
+
+    result = GoogleBatchAdapter().retrieve_batch(make_handle())
+
+    assert result.request_count == 3
+    assert result.succeeded_count == 2
+    assert result.failed_count == 1
+
+
+def test_gemini_schema_uses_shared_prompt_score_scale() -> None:
+    """score スケールは共有 prompt (1.00-10.00) と揃える (Codex P2)。"""
+    from image_annotator_lib.webapi.batch.preparation import (
+        build_google_annotation_function_declaration,
+    )
+
+    declaration = build_google_annotation_function_declaration()
+
+    assert "1.00 and 10.00" in declaration["parameters"]["properties"]["score"]["description"]
+
+
+def test_list_batch_capable_models_filters_google_capabilities_to_supported(monkeypatch) -> None:
+    """registry が RATINGS を持っていても Google は生成可能な capability に絞る (Codex P2)。"""
+    from image_annotator_lib.core.types import TaskCapability
+    from image_annotator_lib.webapi.batch import service
+
+    monkeypatch.setattr(service, "list_available_annotators", lambda: ["gemini"])
+    monkeypatch.setattr(
+        service,
+        "get_webapi_metadata",
+        lambda name: {
+            "gemini": {
+                "provider": "google",
+                "litellm_model_id": "gemini/gemini-2.5-flash",
+                "capabilities": ["tags", "captions", "scores", "ratings"],
+            },
+        }.get(name),
+    )
+
+    models = service.list_batch_capable_models()
+
+    assert len(models) == 1
+    assert models[0].provider == "google"
+    assert TaskCapability.RATINGS not in models[0].capabilities
+    assert TaskCapability.TAGS in models[0].capabilities

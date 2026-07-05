@@ -275,7 +275,9 @@ def build_google_annotation_function_declaration(
             },
             "score": {
                 "type": "number",
-                "description": "Overall aesthetic/quality score between 0.0 and 1.0.",
+                # 同期 WebAPI 経路の共有 prompt (webapi_shared.py "Scoring (1.00-10.00)")
+                # とスケールを揃える (Codex P2)
+                "description": "Overall aesthetic/quality score between 1.00 and 10.00.",
             },
         },
     }
