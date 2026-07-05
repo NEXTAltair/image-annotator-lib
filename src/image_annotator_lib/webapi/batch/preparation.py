@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import mimetypes
 from dataclasses import dataclass
@@ -146,9 +147,7 @@ def build_annotation_tool_schema(
 
     schema = AnnotationSchema.model_json_schema()
     required = sorted(
-        prop
-        for prop, capability in _PROPERTY_TO_CAPABILITY.items()
-        if capability in capabilities
+        prop for prop, capability in _PROPERTY_TO_CAPABILITY.items() if capability in capabilities
     )
     if required:
         schema["required"] = required
@@ -232,6 +231,130 @@ def build_openai_chat_completions_annotation_jsonl(
                     "url": endpoint,
                     "body": body,
                 },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+
+    return "\n".join(lines)
+
+
+def build_google_annotation_function_declaration(
+    capabilities: frozenset[TaskCapability] = _DEFAULT_ANNOTATION_CAPABILITIES,
+) -> dict[str, Any]:
+    """Build a Gemini function declaration for annotation output (#154).
+
+    Gemini の function declaration ``parameters`` は OpenAPI schema の限定 subset で、
+    Pydantic ``model_json_schema()`` が生成する ``$defs`` / ``$ref`` / ``anyOf`` を
+    受け付けない。``build_annotation_tool_schema`` を流用せず、Gemini-safe な
+    flat schema を明示的に構築する (``ratings`` は nested schema が必要なため
+    Google batch 経路では公開しない。ratings は best-effort optional なので
+    ``normalize_annotation_output`` 側の contract は満たす)。
+
+    Args:
+        capabilities: required にする core capability の集合。
+
+    Returns:
+        Gemini ``tools[].function_declarations[]`` 1 件分の dict。
+    """
+    required = sorted(
+        prop for prop, capability in _PROPERTY_TO_CAPABILITY.items() if capability in capabilities
+    )
+    parameters: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Content tags describing the image.",
+            },
+            "captions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Natural language captions for the image.",
+            },
+            "score": {
+                "type": "number",
+                # 同期 WebAPI 経路の共有 prompt (webapi_shared.py "Scoring (1.00-10.00)")
+                # とスケールを揃える (Codex P2)
+                "description": "Overall aesthetic/quality score between 1.00 and 10.00.",
+            },
+        },
+    }
+    if required:
+        parameters["required"] = required
+    return {
+        "name": _ANNOTATION_TOOL_NAME,
+        "description": _ANNOTATION_TOOL_DESCRIPTION,
+        "parameters": parameters,
+    }
+
+
+def build_google_generate_content_annotation_jsonl(
+    items: list[PreparedBatchItem],
+    *,
+    system_prompt: str,
+    capabilities: frozenset[TaskCapability] = _DEFAULT_ANNOTATION_CAPABILITIES,
+) -> str:
+    """Build Gemini Developer API Batch input JSONL (#154 / ADR 0005 Phase 3).
+
+    各 line は ``{"key": custom_id, "request": {GenerateContentRequest}}``。
+    structured output は function calling (``tool_config.mode == "ANY"`` で
+    ``normalize_annotation_output`` を強制) で得る。画像は ``inline_data``
+    (base64) で埋め込む。
+
+    Args:
+        items: ``prepare_items()`` の出力。
+        system_prompt: capability に応じた system prompt。
+        capabilities: 出力 schema 上で required にする core capability の集合。
+
+    Returns:
+        Gemini Batch input JSONL (各 line = 1 request)。
+
+    Raises:
+        BatchJobError: 画像読み込み失敗時。
+    """
+    function_declaration = build_google_annotation_function_declaration(capabilities)
+    lines: list[str] = []
+    for item in items:
+        try:
+            payload_bytes = item.image_path.read_bytes()
+        except OSError as exc:
+            raise BatchJobError(
+                phase=BatchErrorPhase.PREPARE,
+                provider="google",
+                provider_job_id=None,
+                code="image_read_failed",
+                message=f"Failed to read image for Google batch input: {item.image_path}: {exc}",
+                retryable=False,
+            ) from exc
+        request = {
+            "system_instruction": {"parts": [{"text": system_prompt}]},
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": _USER_PROMPT_TEXT},
+                        {
+                            "inline_data": {
+                                "mime_type": item.image_mime_type,
+                                "data": base64.b64encode(payload_bytes).decode("ascii"),
+                            }
+                        },
+                    ],
+                }
+            ],
+            "tools": [{"function_declarations": [function_declaration]}],
+            "tool_config": {
+                "function_calling_config": {
+                    "mode": "ANY",
+                    "allowed_function_names": [_ANNOTATION_TOOL_NAME],
+                }
+            },
+        }
+        lines.append(
+            json.dumps(
+                {"key": item.custom_id, "request": request},
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
