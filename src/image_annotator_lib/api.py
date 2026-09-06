@@ -85,7 +85,11 @@ def list_annotator_info() -> list[AnnotatorInfo]:
     See Also:
         list_available_annotators: モデル名のみのリスト。
     """
-    from .core.config import config_registry
+    from .config_policy import config_read_only_enabled
+    from .core.config import config_registry, get_config_registry
+
+    if config_read_only_enabled():
+        get_config_registry()
     from .core.registry import (
         _MODEL_CLASS_OBJ_REGISTRY,
         _REGISTRY_INITIALIZED,

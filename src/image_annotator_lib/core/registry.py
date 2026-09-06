@@ -826,6 +826,12 @@ def initialize_registry() -> None:
     """
     global _REGISTRY_INITIALIZED
 
+    from ..config_policy import config_read_only_enabled
+    from .config import get_config_registry
+
+    if config_read_only_enabled():
+        get_config_registry()
+
     from .utils import init_logger
 
     init_logger()

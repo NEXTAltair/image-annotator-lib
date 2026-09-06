@@ -118,6 +118,8 @@ class ModelConfigRegistry:
                 # Removal between validation and open must fail without template copying.
                 with self._system_config_path.open(encoding="utf-8") as stream:
                     self._system_config_data = dict(toml.load(stream))
+                if any(not isinstance(value, dict) for value in self._system_config_data.values()):
+                    raise ValueError("Each model configuration must be a table")
             except (OSError, ValueError, TypeError) as exc:
                 raise ReadOnlyConfigError(self._system_config_path, "system_config_unreadable") from exc
             return
@@ -222,6 +224,9 @@ class ModelConfigRegistry:
                 self._merged_config_data[model_name] = {}
             self._merged_config_data[model_name].update(copy.deepcopy(runtime_model_config))
         for model_name, user_model_config in self._user_config_data.items():
+            if not isinstance(user_model_config, dict):
+                logger.warning(f"Ignoring non-table user configuration for model {model_name}")
+                continue
             if model_name in self._merged_config_data:
                 merged_model_config = self._merged_config_data[model_name]
                 system_capabilities = merged_model_config.get("capabilities")

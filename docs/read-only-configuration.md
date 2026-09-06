@@ -2,7 +2,7 @@
 type: Reference
 title: Read-only model configuration policy
 status: Accepted
-tags: [configuration, read-only, public-api]
+tags: [model-registry, validation]
 ---
 
 # Read-only configuration initialization
@@ -19,20 +19,22 @@ from image_annotator_lib import list_annotator_info
 models = list_annotator_info()
 ```
 
-Cold public import requires the existing system model configuration at the normal
+Public type imports remain available without configuration. Explicit registry initialization
+or `list_annotator_info()` requires the existing system model configuration at the normal
 `SYSTEM_CONFIG_PATH` (the import-time CWD's `config/annotator_config.toml`). It loads
 that file without creating its directory, copying the template, or writing any
-configuration. Missing/unreadable/invalid required configuration raises public
+configuration. Missing/unreadable/invalid required configuration (including non-table model entries) raises public
 `ReadOnlyConfigError`. Prepare configuration with write permission using the usual
 writable initialization, then retry. The exception carries `details.config_path`
 and `details.action`; callers may map it to a precondition error.
 
-The policy is enforced inside `ModelConfigRegistry` as well as at public import.
+The policy is enforced inside `ModelConfigRegistry` at explicit public initialization/list calls.
 If the file disappears between existence validation and reading, loading fails
 without copying a replacement. `save_system_config`, `save_user_config`, and
 `save_runtime_cache` reject persistence while the policy is enabled, including
 registries initialized before the policy was enabled. Existing optional user and
-runtime-cache files are read normally. Model inference/downloads are separate APIs;
+runtime-cache files are read normally; malformed non-table user overrides are ignored,
+preserving valid system model entries. Model inference/downloads are separate APIs;
 this policy does not authorize or make those operations read-only.
 
 The environment variable name is also exported as `CONFIG_READ_ONLY_ENV`, and

@@ -1,14 +1,8 @@
 import os
 
-from .config_policy import CONFIG_READ_ONLY_ENV, ReadOnlyConfigError, config_read_only_enabled
-
-if config_read_only_enabled():
-    # Fail before registry initialization can swallow missing-config errors.
-    from .core.config import get_config_registry
-
-    get_config_registry()
-
 from PIL import Image
+
+from .config_policy import CONFIG_READ_ONLY_ENV, ReadOnlyConfigError, config_read_only_enabled
 
 # NOTE: TensorFlowの表示抑制用､見ててうざいだろ
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
@@ -123,7 +117,8 @@ __all__ = [
 _cached_annotate = None
 
 init_logger()
-initialize_registry()
+if not config_read_only_enabled():
+    initialize_registry()
 
 
 def annotate(

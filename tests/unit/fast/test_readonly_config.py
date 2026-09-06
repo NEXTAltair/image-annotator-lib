@@ -30,12 +30,12 @@ import json, socket
 from pathlib import Path
 from unittest.mock import patch
 with patch.object(socket.socket, 'connect', side_effect=AssertionError('network forbidden')):
+    from image_annotator_lib import ReadOnlyConfigError, list_annotator_info
     try:
-        from image_annotator_lib import list_annotator_info
         infos = list_annotator_info()
         result = {'ok': True, 'count': len(infos)}
-    except Exception as exc:
-        result = {'ok': False, 'error_type': type(exc).__name__}
+    except ReadOnlyConfigError as exc:
+        result = {'ok': False, 'action': exc.details['action']}
 print(json.dumps(result))
 """
     completed = subprocess.run(
@@ -47,7 +47,7 @@ print(json.dumps(result))
     if prepared:
         assert config.read_text() == "# Existing model configuration\n"
     else:
-        assert result["error_type"] == "ReadOnlyConfigError"
+        assert result["action"] == "existing_system_config_required"
         assert not config.parent.exists()
 
 
@@ -82,3 +82,26 @@ def test_readonly_blocks_all_configuration_persistence(tmp_path, monkeypatch, me
     with pytest.raises(ReadOnlyConfigError, match="write_forbidden"):
         getattr(registry, method)(target)
     assert not target.parent.exists()
+
+
+@pytest.mark.parametrize("content", ["broken = 1\n", "broken = [1]\n", "[invalid\n"])
+def test_readonly_rejects_invalid_required_model_configuration(tmp_path, monkeypatch, content):
+    monkeypatch.setenv(CONFIG_READ_ONLY_ENV, "1")
+    config = tmp_path / "required.toml"
+    config.write_text(content)
+    with pytest.raises(ReadOnlyConfigError, match="system_config_unreadable"):
+        ModelConfigRegistry().load(config_path=config)
+    assert config.read_text() == content
+
+
+@pytest.mark.parametrize("content", ["model = 1\n", "other = [1]\n", "[invalid\n"])
+def test_readonly_ignores_malformed_optional_user_configuration(tmp_path, monkeypatch, content):
+    monkeypatch.setenv(CONFIG_READ_ONLY_ENV, "1")
+    system = tmp_path / "system.toml"
+    system.write_text('[model]\nclass = "Dummy"\n')
+    user = tmp_path / "user.toml"
+    user.write_text(content)
+    registry = ModelConfigRegistry()
+    registry.load(config_path=system, user_config_path=user)
+    assert registry.get("model", "class") == "Dummy"
+    assert user.read_text() == content
