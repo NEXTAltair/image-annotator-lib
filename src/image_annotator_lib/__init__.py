@@ -2,6 +2,8 @@ import os
 
 from PIL import Image
 
+from .config_policy import CONFIG_READ_ONLY_ENV, ReadOnlyConfigError, config_read_only_enabled
+
 # NOTE: TensorFlowの表示抑制用､見ててうざいだろ
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
@@ -62,6 +64,7 @@ from .webapi.batch import (
 # ADR 0023 Phase 1: create_agent は廃止 (SimplifiedAgentFactory 全廃)。
 # get_available_models / list_all_models / is_model_deprecated は LiteLLM runtime call に切替。
 __all__ = [
+    "CONFIG_READ_ONLY_ENV",
     "DEFAULT_PATHS",
     "MODEL_RUNTIME_CACHE_PATH",
     "SYSTEM_CONFIG_PATH",
@@ -91,6 +94,7 @@ __all__ = [
     "ModelType",
     "OutOfMemoryError",
     "PHashAnnotationResults",
+    "ReadOnlyConfigError",
     "annotate",
     "cancel_batch",
     "config_registry",
@@ -113,7 +117,8 @@ __all__ = [
 _cached_annotate = None
 
 init_logger()
-initialize_registry()
+if not config_read_only_enabled():
+    initialize_registry()
 
 
 def annotate(

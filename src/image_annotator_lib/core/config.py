@@ -7,6 +7,12 @@ from typing import Any
 
 import toml
 
+from image_annotator_lib.config_policy import (
+    ReadOnlyConfigError,
+    config_read_only_enabled,
+    require_config_write_permission,
+)
+
 from .constants import (
     DEFAULT_PATHS,
     TEMPLATE_SYSTEM_CONFIG_PATH,
@@ -69,6 +75,10 @@ class ModelConfigRegistry:
 
     def _ensure_system_config_exists(self) -> None:
         """システム設定ファイルが存在しない場合、テンプレートからコピーする。"""
+        if config_read_only_enabled():
+            if self._system_config_path is None or not self._system_config_path.is_file():
+                raise ReadOnlyConfigError(self._system_config_path, "existing_system_config_required")
+            return
         if not self._system_config_path or not self._system_config_path.exists():
             logger.info(
                 f"システム設定ファイルが見つかりません: {self._system_config_path}。テンプレートからのコピーを試みます。"
@@ -100,6 +110,19 @@ class ModelConfigRegistry:
 
     def _load_and_set_system_config(self) -> None:
         """システム設定ファイルを読み込み、内部状態を更新する。"""
+        if config_read_only_enabled():
+            if self._system_config_path is None:
+                raise ReadOnlyConfigError(None, "existing_system_config_required")
+            try:
+                # Open directly, bypassing cached reads and existence-check fallbacks.
+                # Removal between validation and open must fail without template copying.
+                with self._system_config_path.open(encoding="utf-8") as stream:
+                    self._system_config_data = dict(toml.load(stream))
+                if any(not isinstance(value, dict) for value in self._system_config_data.values()):
+                    raise ValueError("Each model configuration must be a table")
+            except (OSError, ValueError, TypeError) as exc:
+                raise ReadOnlyConfigError(self._system_config_path, "system_config_unreadable") from exc
+            return
         if self._system_config_path and self._system_config_path.is_file():
             try:
                 self._system_config_data = _load_config_from_file(self._system_config_path)
@@ -201,6 +224,9 @@ class ModelConfigRegistry:
                 self._merged_config_data[model_name] = {}
             self._merged_config_data[model_name].update(copy.deepcopy(runtime_model_config))
         for model_name, user_model_config in self._user_config_data.items():
+            if not isinstance(user_model_config, dict):
+                logger.warning(f"Ignoring non-table user configuration for model {model_name}")
+                continue
             if model_name in self._merged_config_data:
                 merged_model_config = self._merged_config_data[model_name]
                 system_capabilities = merged_model_config.get("capabilities")
@@ -316,6 +342,7 @@ class ModelConfigRegistry:
     def save_user_config(self, user_config_path: str | Path | None = None) -> None:
         """現在のユーザー設定 (_user_config_data) を指定されたファイルパスに保存します。"""
         save_path = Path(user_config_path) if user_config_path else self._user_config_path
+        require_config_write_permission(save_path)
 
         if save_path is None:
             logger.error("ユーザー設定の保存パスが指定されていません。保存をスキップします。")
@@ -342,6 +369,7 @@ class ModelConfigRegistry:
     def save_runtime_cache(self, runtime_cache_path: str | Path | None = None) -> None:
         """現在の runtime-derived model metadata cache を指定されたファイルパスに保存します。"""
         save_path = Path(runtime_cache_path) if runtime_cache_path else self._runtime_cache_path
+        require_config_write_permission(save_path)
 
         if save_path is None:
             logger.error("モデル runtime cache の保存パスが指定されていません。保存をスキップします。")
@@ -367,6 +395,7 @@ class ModelConfigRegistry:
     def save_system_config(self, system_config_path: str | Path | None = None) -> None:
         """現在のシステム設定 (_system_config_data) を指定されたファイルパスに保存します。"""
         save_path = Path(system_config_path) if system_config_path else self._system_config_path
+        require_config_write_permission(save_path)
 
         if save_path is None:
             logger.error("システム設定の保存パスが指定されていません。保存をスキップします。")
@@ -404,15 +433,18 @@ def get_config_registry() -> ModelConfigRegistry:
     """設定レジストリのシングルトンインスタンスを取得（遅延初期化）"""
     global _config_registry
     if _config_registry is None:
-        _config_registry = ModelConfigRegistry()
+        registry = ModelConfigRegistry()
         # テスト環境以外では自動ロード
         import os
 
-        if not os.getenv("PYTEST_CURRENT_TEST"):
+        if config_read_only_enabled() or not os.getenv("PYTEST_CURRENT_TEST"):
             try:
-                _config_registry.load()
+                registry.load()
             except Exception:
+                if config_read_only_enabled():
+                    raise
                 logger.exception("共有設定レジストリの初期ロード中にエラーが発生しました。")
+        _config_registry = registry
     return _config_registry
 
 

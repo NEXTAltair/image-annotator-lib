@@ -394,6 +394,10 @@ def find_model_class_case_insensitive(model_name: str) -> tuple[str, ModelClass]
 # list_available_annotators のような統合されたリスト関数に変更 (あるいは既存を維持)
 def list_available_annotators() -> list[str]:
     """利用可能なアノテータモデルの名前のリストを返します。"""
+    from ..config_policy import config_read_only_enabled
+
+    if config_read_only_enabled():
+        initialize_registry()
     return list(_MODEL_CLASS_OBJ_REGISTRY.keys())
 
 
@@ -825,6 +829,12 @@ def initialize_registry() -> None:
     Web API モデル情報の取得と設定ファイルの自動更新も行う。
     """
     global _REGISTRY_INITIALIZED
+
+    from ..config_policy import config_read_only_enabled
+    from .config import get_config_registry
+
+    if config_read_only_enabled():
+        get_config_registry()
 
     from .utils import init_logger
 
