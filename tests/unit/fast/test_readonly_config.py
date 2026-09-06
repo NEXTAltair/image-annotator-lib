@@ -14,7 +14,8 @@ from image_annotator_lib.core.config import ModelConfigRegistry
 
 
 @pytest.mark.parametrize("prepared", [False, True])
-def test_cold_public_import_readonly_policy(tmp_path, prepared):
+@pytest.mark.parametrize("entrypoint", ["list_annotator_info", "list_available_annotators"])
+def test_cold_public_import_readonly_policy(tmp_path, prepared, entrypoint):
     cwd = tmp_path / "cold 日本語"
     cwd.mkdir()
     config = cwd / "config" / "annotator_config.toml"
@@ -38,6 +39,7 @@ with patch.object(socket.socket, 'connect', side_effect=AssertionError('network 
         result = {'ok': False, 'action': exc.details['action']}
 print(json.dumps(result))
 """
+    code = code.replace("list_annotator_info", entrypoint)
     completed = subprocess.run(
         [sys.executable, "-c", code], cwd=cwd, env=env, capture_output=True, text=True, timeout=90
     )
@@ -45,6 +47,7 @@ print(json.dumps(result))
     result = json.loads(completed.stdout.splitlines()[-1])
     assert result["ok"] is prepared, result
     if prepared:
+        assert result["count"] > 0
         assert config.read_text() == "# Existing model configuration\n"
     else:
         assert result["action"] == "existing_system_config_required"

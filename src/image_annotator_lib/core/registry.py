@@ -394,6 +394,10 @@ def find_model_class_case_insensitive(model_name: str) -> tuple[str, ModelClass]
 # list_available_annotators のような統合されたリスト関数に変更 (あるいは既存を維持)
 def list_available_annotators() -> list[str]:
     """利用可能なアノテータモデルの名前のリストを返します。"""
+    from ..config_policy import config_read_only_enabled
+
+    if config_read_only_enabled():
+        initialize_registry()
     return list(_MODEL_CLASS_OBJ_REGISTRY.keys())
 
 
