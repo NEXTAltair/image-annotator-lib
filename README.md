@@ -335,3 +335,6 @@ ruff format
 # 型チェック
 mypy src/
 ```
+
+Model metadata can be initialized without automatic configuration writes using the
+[read-only configuration policy](docs/read-only-configuration.md).
