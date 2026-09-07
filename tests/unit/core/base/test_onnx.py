@@ -455,3 +455,33 @@ def test_run_inference_session_not_initialized():
 
     with pytest.raises(RuntimeError, match="ONNX セッションがロードされていません"):
         annotator._run_inference(input_data)
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_onnx_annotator_invalidates_session_after_inference_oom():
+    """推論 OOM 後は保持セッションを無効化して次回再ロードさせる (Issue #162)。
+
+    `BaseAnnotator.predict()` は OutOfMemoryError をエラー結果に変換するため、
+    `__exit__` からは正常終了に見える。セッションを保持したままだと後続チャンクが
+    同じ逼迫したセッションを使い続け、以降が全滅しうる。
+    """
+    from image_annotator_lib.exceptions.errors import OutOfMemoryError
+
+    annotator = ConcreteONNXAnnotator("test-model")
+    annotator.model_path = "dummy/path"
+    session = MagicMock()
+    session.get_inputs.return_value = [MagicMock(name="input", shape=[1, 448, 448, 3])]
+    session.get_outputs.return_value = [MagicMock()]
+    session.run.side_effect = RuntimeError("Failed to allocate memory for requested buffer")
+    annotator.components = {"session": session}
+    annotator._prepared = True
+
+    with patch("image_annotator_lib.core.model_factory.ModelLoad.release_model") as mock_release:
+        with pytest.raises(OutOfMemoryError):
+            annotator._run_inference([MagicMock()])
+
+        mock_release.assert_called_once_with("test-model")
+
+    assert annotator.components is None
+    assert annotator._prepared is False

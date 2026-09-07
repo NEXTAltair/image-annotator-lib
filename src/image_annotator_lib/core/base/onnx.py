@@ -502,6 +502,12 @@ class ONNXBaseAnnotator(BaseAnnotator):
                     error_message = f"ONNX Runtime メモリ不足: モデル {self.model_name} の推論中"
                     logger.error(error_message)
                     logger.error(f"元のONNX Runtimeエラー: {e}")
+                    # Issue #162: `BaseAnnotator.predict()` は OutOfMemoryError を握って
+                    # エラー結果に変換するため、`__exit__` からは正常終了に見える。
+                    # セッションを保持したままだと後続チャンクが同じ逼迫した
+                    # セッションを再利用し続けるので、ここで明示的に無効化して
+                    # 次回クリーンに再ロードさせる (GC / CUDA キャッシュ解放も走る)。
+                    self._discard_components()
                     raise OutOfMemoryError(error_message) from e
                 else:
                     logger.exception(f"ONNX Runtime エラー: モデル {self.model_name} の推論中: {e}")
