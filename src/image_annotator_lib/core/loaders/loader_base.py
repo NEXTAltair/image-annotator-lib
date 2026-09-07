@@ -14,6 +14,7 @@ from __future__ import annotations
 import gc
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -42,6 +43,10 @@ class LoaderBase(ABC):
     _MODEL_LAST_USED: ClassVar[dict[str, float]] = {}
     _CACHE_RATIO: ClassVar[float] = 0.5
     _MODEL_SIZES: ClassVar[dict[str, float]] = {}
+    # Issue #162: コンテキストを抜けてもコンポーネントを保持する annotator が
+    # LRU 退避 / 明示解放と協調するためのコールバック登録簿。
+    # 登録が無いモデル (毎回解放する従来型) は影響を受けない。
+    _COMPONENT_RELEASERS: ClassVar[dict[str, Callable[[], None]]] = {}
 
     def __init__(self, model_name: str, device: str) -> None:
         """ベースローダーを初期化する。
@@ -508,8 +513,45 @@ class LoaderBase(ABC):
 
     @classmethod
     def _release_model_state(cls, model_name: str) -> None:
-        """モデルの状態情報のみを解放する。"""
+        """モデルの状態情報を解放し、保持中コンポーネントの解放も要求する。
+
+        Issue #162: セッションを保持する annotator (ONNX) は、状態だけ解放されると
+        会計上の使用量は減るのに実メモリ/VRAM が解放されず、後続ロードが上限を
+        超えて OOM しうる。LRU 退避 (`_clear_cache_internal`) と明示解放
+        (`_release_model_internal`) の共通経路である本メソッドから、登録済みの
+        releaser を呼んで実体も手放させる。
+        """
+        cls._invoke_component_releaser(model_name)
         cls._update_model_state(model_name, status="released")
+
+    @classmethod
+    def register_component_releaser(cls, model_name: str, releaser: Callable[[], None]) -> None:
+        """コンポーネントを保持する annotator の解放コールバックを登録する (Issue #162)。
+
+        Args:
+            model_name: 対象モデル名。
+            releaser: 呼ばれたら保持中コンポーネントを手放す callable。
+        """
+        cls._COMPONENT_RELEASERS[model_name] = releaser
+
+    @classmethod
+    def unregister_component_releaser(cls, model_name: str) -> None:
+        """解放コールバックの登録を解除する (Issue #162)。"""
+        cls._COMPONENT_RELEASERS.pop(model_name, None)
+
+    @classmethod
+    def _invoke_component_releaser(cls, model_name: str) -> None:
+        """登録済み releaser を 1 度だけ呼ぶ (Issue #162)。
+
+        releaser 内の例外で解放処理全体を止めないよう握って記録する。
+        """
+        releaser = cls._COMPONENT_RELEASERS.pop(model_name, None)
+        if releaser is None:
+            return
+        try:
+            releaser()
+        except Exception as e:
+            logger.error(f"コンポーネント解放コールバックでエラー ({model_name}): {e}", exc_info=True)
 
     @classmethod
     def _release_model_internal(cls, model_name: str, components: dict[str, Any] | None = None) -> None:

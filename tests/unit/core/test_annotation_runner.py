@@ -196,8 +196,14 @@ class TestGetAnnotatorInstanceApiKeysCacheBehavior:
         annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
 
     @pytest.mark.unit
-    def test_non_empty_api_keys_bypasses_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """実際に API キーが指定された場合はキャッシュをバイパスして新インスタンスを生成する。"""
+    def test_non_empty_api_keys_bypasses_cache_for_webapi_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """WebAPI モデルは api_keys 指定時にキャッシュをバイパスする。
+
+        api_keys / additional_prompt は呼び出しごとに変わりうるため、WebAPI モデルは
+        毎回新しいインスタンスを作る必要がある。
+        """
         annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
 
         created: list[str] = []
@@ -209,12 +215,168 @@ class TestGetAnnotatorInstanceApiKeysCacheBehavior:
             return _StubLocalAnnotator(model_name)
 
         monkeypatch.setattr(annotation_runner, "_create_annotator_instance", _fake_create)
+        monkeypatch.setattr(
+            annotation_runner,
+            "find_model_class_case_insensitive",
+            lambda name: (name, WebApiAnnotator),
+        )
 
         api_keys = {"openai": "sk-test"}
-        inst1 = annotation_runner.get_annotator_instance("my_model", api_keys=api_keys)
-        inst2 = annotation_runner.get_annotator_instance("my_model", api_keys=api_keys)
+        inst1 = annotation_runner.get_annotator_instance("openai/gpt-4o", api_keys=api_keys)
+        inst2 = annotation_runner.get_annotator_instance("openai/gpt-4o", api_keys=api_keys)
 
-        assert inst1 is not inst2, "api_keys 指定時は新インスタンスが生成されるべき"
+        assert inst1 is not inst2, "WebAPI モデルは api_keys 指定時に新インスタンスが生成されるべき"
         assert len(created) == 2
+
+        annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
+
+    @pytest.mark.unit
+    def test_non_empty_api_keys_still_caches_local_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ローカル ML モデルは api_keys が渡されてもキャッシュされる (Issue #162)。
+
+        api_keys は WebAPI 専用の引数であり、ローカル ML モデルは一切使わない。
+        旧実装は `if api_keys:` だけで判定していたため、API キーを設定している
+        ユーザーだけローカル ONNX/Transformers モデルが毎回作り直され、
+        annotate() 呼び出しごとにモデル再ロードが発生していた。
+        """
+        annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
+
+        created: list[str] = []
+
+        def _fake_create(
+            model_name: str, api_keys: dict | None = None, additional_prompt: str | None = None
+        ) -> _StubLocalAnnotator:
+            created.append(model_name)
+            return _StubLocalAnnotator(model_name)
+
+        monkeypatch.setattr(annotation_runner, "_create_annotator_instance", _fake_create)
+        monkeypatch.setattr(
+            annotation_runner,
+            "find_model_class_case_insensitive",
+            lambda name: (name, _StubLocalAnnotator),
+        )
+
+        api_keys = {"openai": "sk-test", "anthropic": "sk-ant-test"}
+        inst1 = annotation_runner.get_annotator_instance("wd-vit-tagger-v3", api_keys=api_keys)
+        inst2 = annotation_runner.get_annotator_instance("wd-vit-tagger-v3", api_keys=api_keys)
+
+        assert inst1 is inst2, "ローカル ML モデルは api_keys 指定時も同一インスタンスを返すべき"
+        assert len(created) == 1, f"インスタンス生成は 1 回のみのはずだが {len(created)} 回生成された"
+
+        annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
+
+    @pytest.mark.unit
+    def test_unregistered_model_is_not_treated_as_webapi(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """registry 未登録のモデル名は WebAPI 扱いにしない (キャッシュ経路を通る)。"""
+        annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
+        monkeypatch.setattr(annotation_runner, "find_model_class_case_insensitive", lambda name: None)
+
+        assert annotation_runner._is_webapi_model("no_such_model") is False
+
+        annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
+
+
+class _LoadCountingAnnotator:
+    """`__enter__` での実ロード回数を数えるローカル ML アノテータのスタブ。"""
+
+    def __init__(self, model_name: str) -> None:
+        self.model_name = model_name
+        self.load_count = 0
+        self._loaded = False
+
+    def __enter__(self) -> _LoadCountingAnnotator:
+        if not self._loaded:
+            self.load_count += 1
+            self._loaded = True
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        # Issue #162: コンテキストを抜けてもモデルは保持する
+        return None
+
+    def predict(self, images: list, phash_list: list) -> list:
+        return list(images)
+
+
+class TestLocalModelIsLoadedOnceAcrossCalls:
+    """ローカル ML モデルが annotate() 連続呼び出しで再ロードされないこと (Issue #162)。"""
+
+    @pytest.mark.unit
+    def test_local_model_loads_once_across_repeated_calls_with_api_keys(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """api_keys を渡してもローカルモデルは 1 回しかロードされない。
+
+        受け入れ条件 (Issue #162): 同一モデルで annotate() を連続呼び出ししても、
+        2 回目以降にモデルのロードが発生しない。
+        """
+        annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
+
+        created: list[str] = []
+
+        def _fake_create(
+            model_name: str, api_keys: dict | None = None, additional_prompt: str | None = None
+        ) -> _LoadCountingAnnotator:
+            created.append(model_name)
+            return _LoadCountingAnnotator(model_name)
+
+        monkeypatch.setattr(annotation_runner, "_create_annotator_instance", _fake_create)
+        monkeypatch.setattr(
+            annotation_runner,
+            "find_model_class_case_insensitive",
+            lambda name: (name, _LoadCountingAnnotator),
+        )
+
+        api_keys = {"openai": "sk-test"}
+        # チャンク 3 回ぶんの呼び出しを模す
+        for _ in range(3):
+            annotator = annotation_runner.get_annotator_instance("wd-vit-tagger-v3", api_keys=api_keys)
+            annotation_runner._annotate_model(annotator, ["img"], ["phash"])
+
+        assert len(created) == 1, f"インスタンス生成は 1 回のみのはずが {len(created)} 回"
+        cached = annotation_runner._MODEL_INSTANCE_REGISTRY["wd-vit-tagger-v3"]
+        assert cached.load_count == 1, f"モデルロードは 1 回のみのはずが {cached.load_count} 回"
+
+        annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
+
+
+class TestInstanceCacheKeyIsCanonical:
+    """キャッシュキーが registry の canonical 名に揃うこと (Issue #162)。"""
+
+    @pytest.mark.unit
+    def test_alias_spellings_share_one_cached_instance(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """表記ゆれで同一モデルの重い components が二重にロードされない。
+
+        registry lookup は大文字小文字などの表記ゆれを吸収するため、raw 入力を
+        キャッシュキーにすると 1 つの canonical モデルに対して複数インスタンスが
+        永続化され、保持中のセッションが重複する。
+        """
+        annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
+
+        created: list[str] = []
+
+        def _fake_create(
+            model_name: str, api_keys: dict | None = None, additional_prompt: str | None = None
+        ) -> _StubLocalAnnotator:
+            created.append(model_name)
+            return _StubLocalAnnotator(model_name)
+
+        monkeypatch.setattr(annotation_runner, "_create_annotator_instance", _fake_create)
+        monkeypatch.setattr(
+            annotation_runner,
+            "find_model_class_case_insensitive",
+            lambda name: ("wd-vit-tagger-v3", _StubLocalAnnotator),
+        )
+
+        inst1 = annotation_runner.get_annotator_instance("wd-vit-tagger-v3")
+        inst2 = annotation_runner.get_annotator_instance("WD-ViT-Tagger-v3")
+
+        assert inst1 is inst2, "表記違いでも同一 canonical モデルは同じインスタンスを返すべき"
+        assert len(created) == 1, f"インスタンス生成は 1 回のみのはずが {len(created)} 回"
+        assert list(annotation_runner._MODEL_INSTANCE_REGISTRY) == ["wd-vit-tagger-v3"]
 
         annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
