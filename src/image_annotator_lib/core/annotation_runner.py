@@ -46,6 +46,25 @@ def _is_webapi_annotator_class(annotator_class: type) -> bool:
     return issubclass(annotator_class, WebApiAnnotator)
 
 
+def _is_webapi_model(model_name: str) -> bool:
+    """registry 上で WebAPI モデルとして登録されているか判定する (Issue #162)。
+
+    registry 未登録の場合は False を返す (後段の `_create_annotator_instance` が
+    KeyError を送出して失敗理由を報告する)。
+
+    Args:
+        model_name: モデル名 (registry 登録名)。
+
+    Returns:
+        WebAPI annotator クラスに解決される場合 True。
+    """
+    model_result = find_model_class_case_insensitive(model_name)
+    if model_result is None:
+        return False
+    _, annotator_class = model_result
+    return _is_webapi_annotator_class(annotator_class)
+
+
 def _create_annotator_instance(
     model_name: str,
     api_keys: dict[str, str] | None = None,
@@ -143,11 +162,17 @@ def get_annotator_instance(
     Returns:
         アノテータインスタンス。
     """
-    # API キーが実際に指定されている場合のみキャッシュをバイパスする。
-    # api_keys={} (空 dict) は「未指定」と同義であり、ローカル ML モデルが毎回
-    # 新インスタンスを生成して 2 回目に ModelLoadError になるバグを防ぐ (Issue #146)。
-    if api_keys:
-        logger.debug(f"APIキー指定のためモデル '{model_name}' の新しいインスタンスを作成")
+    # キャッシュをバイパスするのは **WebAPI モデル** のみ (Issue #162)。
+    # WebAPI モデルは api_keys / additional_prompt が呼び出しごとに変わりうるため
+    # 毎回作り直す。ローカル ML モデルは api_keys を一切使わないので、呼び出し側が
+    # キーを設定しているかどうかでキャッシュ挙動が変わってはならない。
+    #
+    # 旧実装は `if api_keys:` で判定していたため、キーを設定したユーザーだけ
+    # ローカル ONNX/Transformers モデルが毎回作り直され、`_MODEL_INSTANCE_REGISTRY`
+    # が一度も使われずチャンクごとにモデルを再ロードしていた。
+    # (api_keys={} を「未指定」扱いにする Issue #146 の意図は維持される)
+    if api_keys and _is_webapi_model(model_name):
+        logger.debug(f"WebAPIモデル '{model_name}' はキャッシュせず新しいインスタンスを作成")
         return _create_annotator_instance(model_name, api_keys=api_keys, additional_prompt=additional_prompt)
 
     if model_name in _MODEL_INSTANCE_REGISTRY:

@@ -127,19 +127,57 @@ def test_onnx_annotator_context_manager_enter(mock_onnx_session, sample_tags):
 
 @pytest.mark.unit
 @pytest.mark.fast
-def test_onnx_annotator_context_manager_exit():
-    """Test __exit__ method cleans up resources."""
+def test_onnx_annotator_context_manager_exit_keeps_session():
+    """__exit__ はセッションを破棄せず保持する (Issue #162)。
+
+    旧実装は `release_model_components()` で InferenceSession を完全破棄していたため、
+    `annotate()` 呼び出しごとに CUDA EP を含むセッション再構築が走っていた
+    (実測 1 チャンク 3.842 秒のうちロード 1.704 秒 + 破棄 0.607 秒)。
+    解放は ModelLoad の LRU / 明示的な `release_model()` に委ねる。
+    """
     annotator = ConcreteONNXAnnotator("test-model")
-    annotator.components = {"session": MagicMock()}
+    session = MagicMock()
+    annotator.components = {"session": session}
 
     with patch("image_annotator_lib.core.model_factory.ModelLoad.release_model_components") as mock_release:
-        mock_release.return_value = {}
-
         annotator.__exit__(None, None, None)
 
-        # release_model_components returns empty dict, which is cast to ONNXComponents
-        assert annotator.components == {}
-        mock_release.assert_called_once()
+        mock_release.assert_not_called()
+        assert annotator.components is not None
+        assert annotator.components["session"] is session
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_onnx_annotator_reenter_reuses_loaded_session():
+    """ロード済みセッションを保持したまま再入場しても再ロードしない (Issue #162)。
+
+    `ModelLoad.load_onnx_components()` はロード済みの場合 `None` を返す。旧実装は
+    その戻り値をそのまま代入していたため、セッション保持後の再入場で
+    `self.components` が None になり `_load_tags()` が失敗した。
+    """
+    annotator = ConcreteONNXAnnotator("test-model")
+    annotator.model_path = "dummy/path"
+    session = MagicMock()
+    annotator.components = {"session": session}
+
+    with (
+        patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load,
+        patch.object(annotator, "_load_tags") as mock_load_tags,
+        patch.object(annotator, "_analyze_model_input_format") as mock_analyze,
+    ):
+        mock_load.return_value = None
+
+        with annotator:
+            pass
+
+        # LRU 更新のため 1 回だけ呼ぶが、components は保持したままにする
+        assert mock_load.call_count == 1
+        assert annotator.components is not None
+        assert annotator.components["session"] is session
+        # 再解析は不要
+        mock_load_tags.assert_not_called()
+        mock_analyze.assert_not_called()
 
 
 # ==============================================================================

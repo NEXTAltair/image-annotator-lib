@@ -1,7 +1,7 @@
 """ONNX Runtime を使用するモデル用の基底クラス。"""
 
 from abc import abstractmethod
-from typing import Any, ClassVar, Self, cast
+from typing import Any, ClassVar, Self
 
 import numpy as np
 from PIL import Image
@@ -34,14 +34,32 @@ class ONNXBaseAnnotator(BaseAnnotator):
         self.components: ONNXComponents | None = None
 
     def __enter__(self) -> Self:
-        """
-        ModelLoad を使用して ONNX モデルコンポーネントをロードします。
+        """ONNX モデルコンポーネントを準備する (ロード済みなら再利用する)。
+
+        Issue #162: `ModelLoad.load_onnx_components()` は既にロード済みの場合に `None` を
+        返す。旧実装はその戻り値をそのまま代入していたため、セッションを保持したまま
+        再入場すると `self.components` が None になり `_load_tags()` が失敗した。
+        保持済みコンポーネントがある場合はそれを再利用し、タグ/入力形式の再解析も省く。
         """
         try:
             if self.model_path is None:
                 raise ValueError(f"モデル '{self.model_name}' の model_path が設定されていません。")
+
+            if self.components and self.components.get("session") is not None:
+                logger.debug(f"ONNX components already loaded for '{self.model_name}'; reusing")
+                # LRU の最終使用時刻だけ更新して再利用する。
+                ModelLoad.load_onnx_components(
+                    self.model_name,
+                    self.model_path,
+                    self.device,
+                    model_filename=self.onnx_model_filename,
+                    metadata_filename=self.onnx_metadata_filename,
+                    metadata_extension=self.onnx_metadata_extension,
+                )
+                return self
+
             logger.info(f"Loading/Restoring ONNX components: model='{self.model_path}'")
-            self.components = ModelLoad.load_onnx_components(
+            loaded = ModelLoad.load_onnx_components(
                 self.model_name,
                 self.model_path,
                 self.device,
@@ -49,6 +67,23 @@ class ONNXBaseAnnotator(BaseAnnotator):
                 metadata_filename=self.onnx_metadata_filename,
                 metadata_extension=self.onnx_metadata_extension,
             )
+            if loaded is None:
+                # 状態は「ロード済み」だがこのインスタンスは components を持たない
+                # (別インスタンスがロードした等)。状態をリセットして強制再ロードする。
+                logger.warning(
+                    f"モデル '{self.model_name}' は状態「ロード済み」だが、"
+                    "このインスタンスはコンポーネントを保持していない。状態をリセットして再ロード。"
+                )
+                ModelLoad.release_model(self.model_name)
+                loaded = ModelLoad.load_onnx_components(
+                    self.model_name,
+                    self.model_path,
+                    self.device,
+                    model_filename=self.onnx_model_filename,
+                    metadata_filename=self.onnx_metadata_filename,
+                    metadata_extension=self.onnx_metadata_extension,
+                )
+            self.components = loaded
             self._load_tags()
             self._analyze_model_input_format()
 
@@ -63,13 +98,17 @@ class ONNXBaseAnnotator(BaseAnnotator):
     def __exit__(
         self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any
     ) -> None:
-        """ONNX モデルのリソースを解放します。"""
+        """コンテキストを抜ける。セッションは保持したままにする (Issue #162)。
+
+        旧実装はここで `ModelLoad.release_model_components()` を呼び InferenceSession を
+        完全破棄していたため、`annotate()` 呼び出しごとに CUDA EP を含むセッション再構築が
+        走っていた (実測 1 チャンク 3.842 秒のうちロード 1.704 秒 + 破棄 0.607 秒)。
+        Transformers 系が `cache_to_main_memory()` で退避に留めるのと非対称でもあった。
+
+        解放は `ModelLoad` の LRU、または呼び出し側の明示的な
+        `ModelLoad.release_model(model_name)` に委ねる。
+        """
         logger.debug(f"Exiting context for ONNX model '{self.model_name}' (exception: {exc_type})")
-        if self.components:
-            released_components = ModelLoad.release_model_components(
-                self.model_name, cast(dict[str, Any], self.components)
-            )
-            self.components = cast(ONNXComponents, released_components)
         if exc_type:
             logger.error(f"ONNX モデル '{self.model_name}' のコンテキスト内で例外発生: {exc_val}")
 
