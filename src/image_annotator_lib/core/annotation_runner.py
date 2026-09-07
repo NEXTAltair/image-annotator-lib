@@ -46,23 +46,28 @@ def _is_webapi_annotator_class(annotator_class: type) -> bool:
     return issubclass(annotator_class, WebApiAnnotator)
 
 
-def _is_webapi_model(model_name: str) -> bool:
-    """registry 上で WebAPI モデルとして登録されているか判定する (Issue #162)。
+def _resolve_registry_entry(model_name: str) -> tuple[str, bool]:
+    """registry を 1 度だけ引き、(canonical 名, WebAPI か) を返す (Issue #162)。
 
-    registry 未登録の場合は False を返す (後段の `_create_annotator_instance` が
-    KeyError を送出して失敗理由を報告する)。
+    registry 未登録の場合は入力名をそのまま返し WebAPI 扱いにしない
+    (後段の `_create_annotator_instance` が KeyError で失敗理由を報告する)。
 
     Args:
-        model_name: モデル名 (registry 登録名)。
+        model_name: 呼び出し側が指定したモデル名。
 
     Returns:
-        WebAPI annotator クラスに解決される場合 True。
+        (registry 上の canonical モデル名, WebAPI annotator なら True)。
     """
     model_result = find_model_class_case_insensitive(model_name)
     if model_result is None:
-        return False
-    _, annotator_class = model_result
-    return _is_webapi_annotator_class(annotator_class)
+        return model_name, False
+    canonical_name, annotator_class = model_result
+    return canonical_name, _is_webapi_annotator_class(annotator_class)
+
+
+def _is_webapi_model(model_name: str) -> bool:
+    """registry 上で WebAPI モデルとして登録されているか判定する (Issue #162)。"""
+    return _resolve_registry_entry(model_name)[1]
 
 
 def _create_annotator_instance(
@@ -171,16 +176,21 @@ def get_annotator_instance(
     # ローカル ONNX/Transformers モデルが毎回作り直され、`_MODEL_INSTANCE_REGISTRY`
     # が一度も使われずチャンクごとにモデルを再ロードしていた。
     # (api_keys={} を「未指定」扱いにする Issue #146 の意図は維持される)
-    if api_keys and _is_webapi_model(model_name):
+    canonical_name, is_webapi = _resolve_registry_entry(model_name)
+
+    if api_keys and is_webapi:
         logger.debug(f"WebAPIモデル '{model_name}' はキャッシュせず新しいインスタンスを作成")
         return _create_annotator_instance(model_name, api_keys=api_keys, additional_prompt=additional_prompt)
 
-    if model_name in _MODEL_INSTANCE_REGISTRY:
-        logger.debug(f"モデル '{model_name}' はキャッシュから取得されました")
-        return _MODEL_INSTANCE_REGISTRY[model_name]
+    # registry lookup は大文字小文字などの表記ゆれを吸収するため、キャッシュキーは
+    # canonical 名に揃える。表記違いで同一モデルの重い components が二重に
+    # ロード・保持されるのを防ぐ (Issue #162)。
+    if canonical_name in _MODEL_INSTANCE_REGISTRY:
+        logger.debug(f"モデル '{canonical_name}' はキャッシュから取得されました")
+        return _MODEL_INSTANCE_REGISTRY[canonical_name]
 
     instance = _create_annotator_instance(model_name, additional_prompt=additional_prompt)
-    _MODEL_INSTANCE_REGISTRY[model_name] = instance
+    _MODEL_INSTANCE_REGISTRY[canonical_name] = instance
     return instance
 
 

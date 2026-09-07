@@ -342,3 +342,41 @@ class TestLocalModelIsLoadedOnceAcrossCalls:
         assert cached.load_count == 1, f"モデルロードは 1 回のみのはずが {cached.load_count} 回"
 
         annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
+
+
+class TestInstanceCacheKeyIsCanonical:
+    """キャッシュキーが registry の canonical 名に揃うこと (Issue #162)。"""
+
+    @pytest.mark.unit
+    def test_alias_spellings_share_one_cached_instance(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """表記ゆれで同一モデルの重い components が二重にロードされない。
+
+        registry lookup は大文字小文字などの表記ゆれを吸収するため、raw 入力を
+        キャッシュキーにすると 1 つの canonical モデルに対して複数インスタンスが
+        永続化され、保持中のセッションが重複する。
+        """
+        annotation_runner._MODEL_INSTANCE_REGISTRY.clear()
+
+        created: list[str] = []
+
+        def _fake_create(
+            model_name: str, api_keys: dict | None = None, additional_prompt: str | None = None
+        ) -> _StubLocalAnnotator:
+            created.append(model_name)
+            return _StubLocalAnnotator(model_name)
+
+        monkeypatch.setattr(annotation_runner, "_create_annotator_instance", _fake_create)
+        monkeypatch.setattr(
+            annotation_runner,
+            "find_model_class_case_insensitive",
+            lambda name: ("wd-vit-tagger-v3", _StubLocalAnnotator),
+        )
+
+        inst1 = annotation_runner.get_annotator_instance("wd-vit-tagger-v3")
+        inst2 = annotation_runner.get_annotator_instance("WD-ViT-Tagger-v3")
+
+        assert inst1 is inst2, "表記違いでも同一 canonical モデルは同じインスタンスを返すべき"
+        assert len(created) == 1, f"インスタンス生成は 1 回のみのはずが {len(created)} 回"
+        assert list(annotation_runner._MODEL_INSTANCE_REGISTRY) == ["wd-vit-tagger-v3"]
+
+        annotation_runner._MODEL_INSTANCE_REGISTRY.clear()

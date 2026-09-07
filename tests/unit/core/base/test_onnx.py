@@ -160,6 +160,7 @@ def test_onnx_annotator_reenter_reuses_loaded_session():
     annotator.model_path = "dummy/path"
     session = MagicMock()
     annotator.components = {"session": session}
+    annotator._prepared = True
 
     with (
         patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load,
@@ -178,6 +179,65 @@ def test_onnx_annotator_reenter_reuses_loaded_session():
         # 再解析は不要
         mock_load_tags.assert_not_called()
         mock_analyze.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_onnx_annotator_failed_preparation_is_not_reused():
+    """ロード後の初期化に失敗した components を次回呼び出しで使い回さない (Issue #162)。
+
+    `_load_tags()` が失敗すると `self.components` は埋まっているがタグは未ロード。
+    そのまま再利用するとタグ空のまま推論してしまうため、破棄して再ロードさせる。
+    """
+    annotator = ConcreteONNXAnnotator("test-model")
+    annotator.model_path = "dummy/path"
+
+    with (
+        patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load,
+        patch("image_annotator_lib.core.model_factory.ModelLoad.release_model"),
+        patch.object(annotator, "_load_tags", side_effect=ValueError("broken metadata")),
+        patch.object(annotator, "_analyze_model_input_format"),
+    ):
+        mock_load.return_value = {"session": MagicMock()}
+
+        with pytest.raises(ValueError):
+            with annotator:
+                pass
+
+    assert annotator._prepared is False
+    assert annotator.components is None
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_onnx_annotator_releases_retained_session_on_state_release():
+    """LRU 退避 / 明示解放でセッションの実体も手放す (Issue #162 P1)。
+
+    `__exit__` が破棄しなくなったため、状態だけ解放されると会計上の使用量は減るのに
+    実メモリ/VRAM が解放されず、後続ロードが上限を超えうる。状態解放の共通経路から
+    登録済み releaser が呼ばれて components が落ちることを検証する。
+    """
+    from image_annotator_lib.core.model_factory import ModelLoad
+
+    annotator = ConcreteONNXAnnotator("test-model")
+    annotator.model_path = "dummy/path"
+
+    with (
+        patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load,
+        patch.object(annotator, "_load_tags"),
+        patch.object(annotator, "_analyze_model_input_format"),
+    ):
+        mock_load.return_value = {"session": MagicMock()}
+        with annotator:
+            pass
+
+    assert annotator.components is not None, "コンテキストを抜けても保持される"
+
+    # LRU 退避と同じ経路 (状態解放) を通す
+    ModelLoad._release_model_state("test-model")
+
+    assert annotator.components is None, "状態解放で実体も手放されるべき"
+    assert annotator._prepared is False
 
 
 # ==============================================================================

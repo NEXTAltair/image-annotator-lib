@@ -32,68 +32,102 @@ class ONNXBaseAnnotator(BaseAnnotator):
         self.is_nchw_expected: bool = False
         # components の型ヒントを具体的に指定
         self.components: ONNXComponents | None = None
+        # Issue #162: ロード後の初期化 (_load_tags / _analyze_model_input_format) まで
+        # 成功して初めて「再利用可能」とみなす。途中で失敗した components を
+        # 次回呼び出しで使い回さないためのフラグ。
+        self._prepared: bool = False
 
     def __enter__(self) -> Self:
-        """ONNX モデルコンポーネントを準備する (ロード済みなら再利用する)。
+        """ONNX モデルコンポーネントを準備する (準備済みなら再利用する)。
 
         Issue #162: `ModelLoad.load_onnx_components()` は既にロード済みの場合に `None` を
         返す。旧実装はその戻り値をそのまま代入していたため、セッションを保持したまま
         再入場すると `self.components` が None になり `_load_tags()` が失敗した。
-        保持済みコンポーネントがある場合はそれを再利用し、タグ/入力形式の再解析も省く。
+
+        再利用は `_prepared` が True のときだけ行う。ロードは成功したが `_load_tags()` /
+        `_analyze_model_input_format()` が失敗した場合に中途半端な components を
+        使い回すと、タグ未ロードや target_size 未設定のまま推論してしまうため。
         """
         try:
             if self.model_path is None:
                 raise ValueError(f"モデル '{self.model_name}' の model_path が設定されていません。")
 
-            if self.components and self.components.get("session") is not None:
-                logger.debug(f"ONNX components already loaded for '{self.model_name}'; reusing")
+            if self._prepared and self.components and self.components.get("session") is not None:
+                logger.debug(f"ONNX components already prepared for '{self.model_name}'; reusing")
                 # LRU の最終使用時刻だけ更新して再利用する。
-                ModelLoad.load_onnx_components(
-                    self.model_name,
-                    self.model_path,
-                    self.device,
-                    model_filename=self.onnx_model_filename,
-                    metadata_filename=self.onnx_metadata_filename,
-                    metadata_extension=self.onnx_metadata_extension,
-                )
+                self._load_components()
                 return self
 
+            # `load_components()` は「キャッシュ済み」と「ロード失敗」の両方で None を返す。
+            # 呼び出し前の状態で 2 ケースを区別する (Transformers 系と同じ対処)。
+            had_cached_state = ModelLoad._get_model_state(self.model_name) is not None
+
             logger.info(f"Loading/Restoring ONNX components: model='{self.model_path}'")
-            loaded = ModelLoad.load_onnx_components(
-                self.model_name,
-                self.model_path,
-                self.device,
-                model_filename=self.onnx_model_filename,
-                metadata_filename=self.onnx_metadata_filename,
-                metadata_extension=self.onnx_metadata_extension,
-            )
-            if loaded is None:
-                # 状態は「ロード済み」だがこのインスタンスは components を持たない
-                # (別インスタンスがロードした等)。状態をリセットして強制再ロードする。
+            loaded = self._load_components()
+
+            if loaded is None and had_cached_state:
+                # 状態は「ロード済み」だがこのインスタンスは components を保持していない。
+                # 状態をリセットして強制再ロードする。
                 logger.warning(
                     f"モデル '{self.model_name}' は状態「ロード済み」だが、"
                     "このインスタンスはコンポーネントを保持していない。状態をリセットして再ロード。"
                 )
                 ModelLoad.release_model(self.model_name)
-                loaded = ModelLoad.load_onnx_components(
-                    self.model_name,
-                    self.model_path,
-                    self.device,
-                    model_filename=self.onnx_model_filename,
-                    metadata_filename=self.onnx_metadata_filename,
-                    metadata_extension=self.onnx_metadata_extension,
-                )
+                loaded = self._load_components()
+
+            if loaded is None:
+                raise RuntimeError(f"ONNX モデル '{self.model_name}' のロードに失敗しました。")
+
             self.components = loaded
             self._load_tags()
             self._analyze_model_input_format()
+            self._prepared = True
+            # LRU 退避 / 明示解放から実体も解放できるようにする (Issue #162)。
+            ModelLoad.register_component_releaser(self.model_name, self._release_retained_components)
 
         except OutOfMemoryError as e:
+            self._discard_components()
             raise e
         except Exception as e:
             logger.exception(f"ONNXモデル {self.model_name} の準備中にエラーが発生: {e}")
+            self._discard_components()
             raise
 
         return self
+
+    def _load_components(self) -> ONNXComponents | None:
+        """`ModelLoad.load_onnx_components` を本クラスの設定で呼ぶ薄いヘルパー。"""
+        return ModelLoad.load_onnx_components(
+            self.model_name,
+            str(self.model_path),
+            self.device,
+            model_filename=self.onnx_model_filename,
+            metadata_filename=self.onnx_metadata_filename,
+            metadata_extension=self.onnx_metadata_extension,
+        )
+
+    def _discard_components(self) -> None:
+        """準備に失敗した components と状態を捨てて、次回クリーンに再ロードさせる。"""
+        self._prepared = False
+        self.components = None
+        ModelLoad.unregister_component_releaser(self.model_name)
+        try:
+            ModelLoad.release_model(self.model_name)
+        except Exception as e:  # 解放失敗で元の例外を隠さない
+            logger.error(f"準備失敗後の解放でエラー ({self.model_name}): {e}", exc_info=True)
+
+    def _release_retained_components(self) -> None:
+        """LRU 退避 / 明示解放から呼ばれ、保持中のセッションを手放す (Issue #162)。
+
+        `ModelLoad` 側の状態解放と同じ経路で呼ばれるため、ここから解放 API を
+        呼び返してはならない (再入する)。参照を落とすだけにする。
+        """
+        logger.debug(f"Releasing retained ONNX components for '{self.model_name}'")
+        self._prepared = False
+        components = self.components
+        self.components = None
+        if components:
+            components.pop("session", None)  # type: ignore[misc]
 
     def __exit__(
         self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any
@@ -105,7 +139,8 @@ class ONNXBaseAnnotator(BaseAnnotator):
         走っていた (実測 1 チャンク 3.842 秒のうちロード 1.704 秒 + 破棄 0.607 秒)。
         Transformers 系が `cache_to_main_memory()` で退避に留めるのと非対称でもあった。
 
-        解放は `ModelLoad` の LRU、または呼び出し側の明示的な
+        解放は `ModelLoad` の LRU (`_release_model_state` 経由で
+        `_release_retained_components` が呼ばれる)、または呼び出し側の明示的な
         `ModelLoad.release_model(model_name)` に委ねる。
         """
         logger.debug(f"Exiting context for ONNX model '{self.model_name}' (exception: {exc_type})")

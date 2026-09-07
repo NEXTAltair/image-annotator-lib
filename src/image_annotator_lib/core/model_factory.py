@@ -11,6 +11,7 @@ Dependencies:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, ClassVar, cast
 
 from .loaders import (
@@ -53,6 +54,7 @@ class ModelLoad:
     _MODEL_LAST_USED: ClassVar[dict[str, float]] = LoaderBase._MODEL_LAST_USED
     _CACHE_RATIO: ClassVar[float] = LoaderBase._CACHE_RATIO
     _MODEL_SIZES: ClassVar[dict[str, float]] = LoaderBase._MODEL_SIZES
+    _COMPONENT_RELEASERS: ClassVar[dict[str, Callable[[], None]]] = LoaderBase._COMPONENT_RELEASERS
 
     # --- 内部ヘルパーの後方互換委譲 ---
     # classmethod/staticmethod ディスクリプタを直接コピーし、
@@ -74,6 +76,7 @@ class ModelLoad:
     _get_model_state = LoaderBase.__dict__["_get_model_state"]
     _move_components_to_device = LoaderBase.__dict__["_move_components_to_device"]
     _release_model_state = LoaderBase.__dict__["_release_model_state"]
+    _invoke_component_releaser = LoaderBase.__dict__["_invoke_component_releaser"]
     _release_model_internal = LoaderBase.__dict__["_release_model_internal"]
     _handle_load_error = LoaderBase.__dict__["_handle_load_error"]
 
@@ -266,6 +269,24 @@ class ModelLoad:
                 logger.error(f"CPUフォールバック中にエラー ({model_name}): {fallback_e}", exc_info=True)
                 ModelLoad._release_model_state(model_name)
             return None
+
+    @staticmethod
+    def register_component_releaser(model_name: str, releaser: Callable[[], None]) -> None:
+        """コンポーネントを保持する annotator の解放コールバックを登録する (Issue #162)。
+
+        コンテキストを抜けてもセッションを保持する annotator (ONNX) は、LRU 退避や
+        明示解放のときに実体も手放す必要がある。
+
+        Args:
+            model_name: 対象モデル名。
+            releaser: 呼ばれたら保持中コンポーネントを手放す callable。
+        """
+        LoaderBase.register_component_releaser(model_name, releaser)
+
+    @staticmethod
+    def unregister_component_releaser(model_name: str) -> None:
+        """解放コールバックの登録を解除する (Issue #162)。"""
+        LoaderBase.unregister_component_releaser(model_name)
 
     @staticmethod
     def release_model(model_name: str) -> None:
