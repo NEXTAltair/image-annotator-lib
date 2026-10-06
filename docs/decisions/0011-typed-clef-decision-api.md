@@ -90,13 +90,25 @@ letters/digits/`_`/`.`/`-` and contain 1–100 characters; 2–255 choice option
 2–10 score levels; at most four PNG/JPEG/WebP images; at most 4 MiB and
 16 million pixels per image; 8 MiB of total image bytes; 13 MiB for the exact
 serialized request body. Remote image URLs are not accepted.
+PIL images are encoded as PNG without changing the supplied image; modes PNG
+cannot encode directly, such as CMYK, are converted to RGB or RGBA. Existing
+PNG-supported modes are encoded directly; RGBA pixels and transparency are
+preserved.
 
 Responses must match the entire question-ID set and each question's type.
 Probabilities and confidence must be finite numbers in `[0, 1]`; booleans and
 numeric strings are rejected. Option/level IDs must match the complete rubric.
-Probability sums may differ from one by at most 0.01 to permit provider rounding.
-Choice IDs must be in the rubric; scores must be in `[0, N-1]`. Values are
-preserved without rescaling, following [ADR 0009](0009-scorer-value-range-reference.md).
+Probability sums may differ from one by at most `max(0.01, N * 0.00005)`, where
+`N` is the option/level count. This preserves the original 0.01 tolerance while
+allowing four-decimal probability rounding across up to 255 choice options
+(at most 0.01275). Choice IDs must be maximum-probability options; any displayed
+tie is valid. Confidence must equal the maximum displayed probability for both
+choice and score. Scores must be in `[0, N-1]` and agree with the weighted level
+probabilities within `0.00005 * (1 + N * (N-1) / 2)`: one four-decimal rounding
+error for the score, plus each probability's rounding error weighted by its
+level. Numeric comparisons also allow floating-point representation noise.
+These rules follow Cloudflare's [official answer formatter](https://huggingface.co/Cloudflare/clef-flash/blob/main/joint_schema_model.py).
+Values are preserved without rescaling, following [ADR 0009](0009-scorer-value-range-reference.md).
 Failure remains separate from decision content, following the outcome boundary
 of [ADR 0006](0006-annotation-outcome-contract.md).
 

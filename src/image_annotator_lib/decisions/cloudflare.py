@@ -37,6 +37,8 @@ MAX_REQUEST_BYTES = 13 * 1024 * 1024
 _MODELS = {"@cf/cloudflare/clef", "@cf/cloudflare/clef-flash"}
 _QUESTION_ID = re.compile(r"[A-Za-z0-9_.-]{1,100}\Z")
 _IMAGE_MIME = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp"}
+_PNG_MODES = {"1", "L", "LA", "I", "I;16", "I;16B", "P", "RGB", "RGBA"}
+_FOUR_DECIMAL_ROUNDING_ERROR = 0.00005
 
 
 class _InvalidDecision(ValueError):
@@ -121,7 +123,11 @@ def _image_payload(image: Path | Image.Image) -> tuple[bytes, str]:
             )
         _image_dimensions(image)
         buffer = BytesIO()
-        image.save(buffer, format="PNG")
+        encoded_image = image
+        if image.mode not in _PNG_MODES:
+            alpha = "A" in image.getbands() or "a" in image.getbands()
+            encoded_image = image.convert("RGBA" if alpha else "RGB")
+        encoded_image.save(buffer, format="PNG")
         payload = buffer.getvalue()
         if len(payload) > MAX_IMAGE_BYTES:
             raise _InvalidDecision("Each image must be at most 4 MiB.", DecisionErrorCode.INVALID_IMAGE)
@@ -235,22 +241,44 @@ def _answer(raw: Any, question: dict[str, Any]) -> DecisionAnswer:
             "Answer probability IDs do not match its options.", DecisionErrorCode.INVALID_RESPONSE
         )
     values = {key: _number(value) for key, value in probabilities.items()}
-    # Sum accurately and allow one ULP of representation noise at the 0.01 boundary.
-    if not math.isclose(math.fsum(values.values()), 1.0, rel_tol=0.0, abs_tol=0.01 + math.ulp(1.0)):
+    # Each provider probability is rounded to four decimals. Preserve the legacy
+    # tolerance, allowing the larger rounding bound for choice's many options.
+    sum_tolerance = max(0.01, len(values) * _FOUR_DECIMAL_ROUNDING_ERROR)
+    if not math.isclose(
+        math.fsum(values.values()), 1.0, rel_tol=0.0, abs_tol=sum_tolerance + math.ulp(1.0)
+    ):
         raise _InvalidDecision(
             "Answer probabilities do not sum to one.", DecisionErrorCode.INVALID_RESPONSE
         )
     confidence = _number(raw.get("confidence"))
+    maximum = max(values.values())
+    if confidence != maximum:
+        raise _InvalidDecision(
+            "Answer confidence does not match its maximum probability.", DecisionErrorCode.INVALID_RESPONSE
+        )
     if question["type"] == "choice":
         choice = raw.get("choice")
         if not isinstance(choice, str) or choice not in keys:
             raise _InvalidDecision(
                 "Answer choice is not an allowed option.", DecisionErrorCode.INVALID_RESPONSE
             )
+        if values[choice] != maximum:
+            raise _InvalidDecision(
+                "Answer choice is not a maximum-probability option.", DecisionErrorCode.INVALID_RESPONSE
+            )
         return ChoiceAnswer(choice=choice, probabilities=values, confidence=confidence)
     high = float(len(keys) - 1)
+    score = _number(raw.get("score"), high=high)
+    weighted = math.fsum(int(level) * value for level, value in values.items())
+    # The returned score and each probability have at most 0.00005 rounding
+    # error. Probability errors are weighted by their level (0 through N-1).
+    score_tolerance = _FOUR_DECIMAL_ROUNDING_ERROR * (1 + len(values) * (len(values) - 1) // 2)
+    if not math.isclose(score, weighted, rel_tol=0.0, abs_tol=score_tolerance + math.ulp(high)):
+        raise _InvalidDecision(
+            "Answer score does not match its weighted probabilities.", DecisionErrorCode.INVALID_RESPONSE
+        )
     return ScoreAnswer(
-        score=_number(raw.get("score"), high=high),
+        score=score,
         probabilities=values,
         confidence=confidence,
         value_range=(0.0, high),
@@ -357,7 +385,7 @@ class CloudflareDecisionClient:
                 return self._failure(request, _http_error(response.status_code))
             try:
                 raw = response.json()
-            except (ValueError, UnicodeError):
+            except (ValueError, UnicodeError, RecursionError):
                 raise _InvalidDecision(
                     "Decision response is not valid JSON.", DecisionErrorCode.INVALID_RESPONSE
                 ) from None

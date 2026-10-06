@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 import subprocess
 import sys
 from dataclasses import replace
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -75,13 +77,13 @@ def test_all_answer_types_keep_reference_ids_probabilities_and_raw_score() -> No
         "crop": {
             "type": "choice",
             "choice": "face",
-            "confidence": 0.8,
+            "confidence": 0.9,
             "probabilities": {"whole": 0.1, "face": 0.9},
         },
         "severity": {
             "type": "score",
             "score": 1.4,
-            "confidence": 0.7,
+            "confidence": 0.5,
             "probabilities": {"0": 0.1, "1": 0.4, "2": 0.5},
         },
     }
@@ -92,8 +94,8 @@ def test_all_answer_types_keep_reference_ids_probabilities_and_raw_score() -> No
     assert result.model_name == "@cf/cloudflare/clef-flash"
     assert result.answers == {
         "tag_000": NoulAnswer(0.03),
-        "crop": ChoiceAnswer("face", {"whole": 0.1, "face": 0.9}, 0.8),
-        "severity": ScoreAnswer(1.4, {"0": 0.1, "1": 0.4, "2": 0.5}, 0.7, (0.0, 2.0)),
+        "crop": ChoiceAnswer("face", {"whole": 0.1, "face": 0.9}, 0.9),
+        "severity": ScoreAnswer(1.4, {"0": 0.1, "1": 0.4, "2": 0.5}, 0.5, (0.0, 2.0)),
     }
 
 
@@ -184,11 +186,39 @@ def test_local_image_mime_and_bytes_are_preserved(tmp_path: Path, image_format: 
     assert base64.b64decode(data) == path.read_bytes()
 
 
-def test_pil_image_encoded_as_png_without_mutating_input() -> None:
-    image = Image.new("RGB", (10, 20), "red")
+@pytest.mark.parametrize(
+    "mode,color,encoded_mode",
+    [
+        ("RGB", (12, 34, 56), "RGB"),
+        ("RGBA", (12, 34, 56, 78), "RGBA"),
+        ("LA", (31, 128), "LA"),
+        ("CMYK", (0, 255, 255, 0), "RGB"),
+        ("RGBa", (12, 34, 56, 78), "RGBA"),
+    ],
+)
+def test_pil_image_encoded_as_png_without_mutating_input(
+    mode: str, color: tuple[int, ...], encoded_mode: str
+) -> None:
+    image = Image.new(mode, (10, 20), color)
     pixels = image.tobytes()
-    wire, _ = cloudflare._body(_request(images=[image]), "@cf/cloudflare/clef-flash")
-    assert json.loads(wire)["images"][0].startswith("data:image/png;base64,")
+    captured: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return httpx.Response(200, json=_response())
+
+    result = CloudflareDecisionClient("account", "token", transport=httpx.MockTransport(handler)).evaluate(
+        _request(images=[image])
+    )
+    assert result.error is None
+    prefix, data = captured[0]["images"][0].split(",", 1)
+    assert prefix == "data:image/png;base64"
+    with Image.open(BytesIO(base64.b64decode(data))) as encoded:
+        assert encoded.format == "PNG"
+        assert encoded.mode == encoded_mode
+        assert encoded.size == image.size
+        assert encoded.tobytes() == image.convert(encoded_mode).tobytes()
+    assert image.mode == mode
     assert image.size == (10, 20)
     assert image.tobytes() == pixels
 
@@ -351,7 +381,7 @@ def test_invalid_noul_probabilities_are_rejected(value: Any) -> None:
     [
         (
             "choice",
-            {"type": "choice", "choice": "other", "confidence": 0.8, "probabilities": {"a": 0.4, "b": 0.6}},
+            {"type": "choice", "choice": "other", "confidence": 0.6, "probabilities": {"a": 0.4, "b": 0.6}},
         ),
         (
             "choice",
@@ -368,7 +398,7 @@ def test_invalid_noul_probabilities_are_rejected(value: Any) -> None:
         ),
         (
             "score",
-            {"type": "score", "score": 1.2, "confidence": 0.8, "probabilities": {"0": 0.4, "1": 0.6}},
+            {"type": "score", "score": 1.2, "confidence": 0.6, "probabilities": {"0": 0.4, "1": 0.6}},
         ),
         (
             "score",
@@ -376,7 +406,7 @@ def test_invalid_noul_probabilities_are_rejected(value: Any) -> None:
         ),
         (
             "score",
-            {"type": "score", "score": "0.6", "confidence": 0.8, "probabilities": {"0": 0.4, "1": 0.6}},
+            {"type": "score", "score": "0.6", "confidence": 0.6, "probabilities": {"0": 0.4, "1": 0.6}},
         ),
     ],
 )
@@ -391,6 +421,137 @@ def test_invalid_choice_and_score_answers_are_rejected(kind: str, answer: Any) -
     )
     assert result.error is not None and result.error.code == DecisionErrorCode.INVALID_RESPONSE
     assert result.answers == {}
+
+
+@pytest.mark.parametrize(
+    "kind,answer",
+    [
+        (
+            "choice",
+            {"type": "choice", "choice": "a", "confidence": 0.6, "probabilities": {"a": 0.4, "b": 0.6}},
+        ),
+        (
+            "choice",
+            {"type": "choice", "choice": "b", "confidence": 0.7, "probabilities": {"a": 0.4, "b": 0.6}},
+        ),
+        (
+            "score",
+            {"type": "score", "score": 0.3, "confidence": 0.6, "probabilities": {"0": 0.4, "1": 0.6}},
+        ),
+        (
+            "score",
+            {"type": "score", "score": 0.6, "confidence": 0.7, "probabilities": {"0": 0.4, "1": 0.6}},
+        ),
+    ],
+)
+def test_contradictory_choice_and_score_fields_are_rejected(kind: str, answer: dict[str, Any]) -> None:
+    question = (
+        ChoiceQuestion("Pick?", {"a": "First", "b": "Second"})
+        if kind == "choice"
+        else ScoreQuestion("Rate?", ["Low", "High"])
+    )
+    result = _client(_response(answers={"tag_000": answer})).evaluate(
+        _request(questions={"tag_000": question})
+    )
+    assert result.error is not None and result.error.code == DecisionErrorCode.INVALID_RESPONSE
+    assert result.answers == {}
+
+
+@pytest.mark.parametrize("selected", ["a", "b"])
+def test_choice_accepts_any_provider_rounded_maximum_tie(selected: str) -> None:
+    answer = {
+        "type": "choice",
+        "choice": selected,
+        "confidence": 0.5,
+        "probabilities": {"a": 0.5, "b": 0.5},
+    }
+    result = _client(_response(answers={"tag_000": answer})).evaluate(
+        _request(questions={"tag_000": ChoiceQuestion("Pick?", {"a": "First", "b": "Second"})})
+    )
+    assert result.error is None
+    assert result.answers["tag_000"] == ChoiceAnswer(selected, {"a": 0.5, "b": 0.5}, 0.5)
+
+
+def test_choice_accepts_provider_rounding_at_maximum_option_count() -> None:
+    # round(1 / 255, 4) is 0.0039: all displayed probabilities are tied.
+    probabilities = {str(i): 0.0039 for i in range(255)}
+    answer = {"type": "choice", "choice": "254", "confidence": 0.0039, "probabilities": probabilities}
+    result = _client(_response(answers={"tag_000": answer})).evaluate(
+        _request(questions={"tag_000": ChoiceQuestion("Pick?", {str(i): "Option" for i in range(255)})})
+    )
+    assert result.error is None
+    assert result.answers["tag_000"] == ChoiceAnswer("254", probabilities, 0.0039)
+
+
+def test_choice_accepts_four_decimal_rounding_above_legacy_sum_tolerance() -> None:
+    original = [0.0048499] * 205 + [0.0000499] * 49
+    original.append(1.0 - math.fsum(original))
+    probabilities = {str(i): round(value, 4) for i, value in enumerate(original)}
+    assert math.fsum(probabilities.values()) == pytest.approx(0.9873)
+    answer = {"type": "choice", "choice": "0", "confidence": 0.0048, "probabilities": probabilities}
+    result = _client(_response(answers={"tag_000": answer})).evaluate(
+        _request(questions={"tag_000": ChoiceQuestion("Pick?", {str(i): "Option" for i in range(255)})})
+    )
+    assert result.error is None
+    assert result.answers["tag_000"] == ChoiceAnswer("0", probabilities, 0.0048)
+
+
+@pytest.mark.parametrize("common,last", [(0.0039, 0.0005), (0.004, 0.0008)])
+def test_choice_rejects_sum_error_beyond_maximum_option_rounding_bound(common: float, last: float) -> None:
+    probabilities = {str(i): common for i in range(253)} | {"253": last, "254": 0.0}
+    answer = {"type": "choice", "choice": "0", "confidence": common, "probabilities": probabilities}
+    result = _client(_response(answers={"tag_000": answer})).evaluate(
+        _request(questions={"tag_000": ChoiceQuestion("Pick?", {str(i): "Option" for i in range(255)})})
+    )
+    assert result.error is not None and result.error.code == DecisionErrorCode.INVALID_RESPONSE
+    assert result.answers == {}
+
+
+@pytest.mark.parametrize(
+    "probabilities,score",
+    [
+        # Original probabilities 0.333349, 0.666651 yield score 0.6667.
+        ({"0": 0.3333, "1": 0.6667}, 0.6667),
+        # First five probabilities are 0.100049, last five 0.099951.
+        # Their weighted score is 4.498775, although rounded probabilities are 0.1.
+        ({str(i): 0.1 for i in range(10)}, 4.4988),
+    ],
+)
+def test_score_preserves_provider_rounded_weighted_levels(
+    probabilities: dict[str, float], score: float
+) -> None:
+    confidence = max(probabilities.values())
+    answer = {"type": "score", "score": score, "confidence": confidence, "probabilities": probabilities}
+    result = _client(_response(answers={"tag_000": answer})).evaluate(
+        _request(questions={"tag_000": ScoreQuestion("Rate?", ["Level"] * len(probabilities))})
+    )
+    assert result.error is None
+    assert result.answers["tag_000"] == ScoreAnswer(
+        score, probabilities, confidence, (0.0, float(len(probabilities) - 1))
+    )
+
+
+@pytest.mark.parametrize("levels,expected,tolerance", [(2, 0.5, 0.0001), (10, 4.5, 0.0023)])
+@pytest.mark.parametrize("direction", [-1, 1])
+@pytest.mark.parametrize("extra,accepted", [(0.0, True), (1e-8, False)])
+def test_score_rounding_error_bound_scales_with_levels_and_rejects_beyond_it(
+    levels: int, expected: float, tolerance: float, direction: int, extra: float, accepted: bool
+) -> None:
+    probabilities = {str(i): 1.0 / levels for i in range(levels)}
+    answer = {
+        "type": "score",
+        "score": expected + direction * (tolerance + extra),
+        "confidence": 1.0 / levels,
+        "probabilities": probabilities,
+    }
+    result = _client(_response(answers={"tag_000": answer})).evaluate(
+        _request(questions={"tag_000": ScoreQuestion("Rate?", ["Level"] * levels)})
+    )
+    if accepted:
+        assert result.error is None
+    else:
+        assert result.error is not None and result.error.code == DecisionErrorCode.INVALID_RESPONSE
+        assert result.answers == {}
 
 
 @pytest.mark.parametrize("kind", ["choice", "score"])
@@ -409,12 +570,12 @@ def test_probability_sum_tolerance_includes_only_the_rounding_boundaries(
     if kind == "choice":
         question: ChoiceQuestion | ScoreQuestion = ChoiceQuestion("Pick?", {"a": "First", "b": "Second"})
         probabilities = {"a": 0.5, "b": second}
-        answer: dict[str, Any] = {"type": "choice", "choice": "a"}
+        answer: dict[str, Any] = {"type": "choice", "choice": "b" if second > 0.5 else "a"}
     else:
         question = ScoreQuestion("Rate?", ["Low", "High"])
         probabilities = {"0": 0.5, "1": second}
-        answer = {"type": "score", "score": 0.5}
-    answer.update(confidence=0.8, probabilities=probabilities)
+        answer = {"type": "score", "score": second}
+    answer.update(confidence=max(probabilities.values()), probabilities=probabilities)
     result = _client(_response(answers={"tag_000": answer})).evaluate(
         _request(questions={"tag_000": question})
     )
@@ -438,6 +599,32 @@ def test_json_parse_error_is_sanitized() -> None:
     result = client.evaluate(_request())
     assert result.error is not None and result.error.code == DecisionErrorCode.INVALID_RESPONSE
     assert "private-api-token" not in repr(result)
+
+
+def test_actual_deeply_nested_json_returns_sanitized_invalid_response() -> None:
+    # Python 3.13's JSON C-stack guard is independent of the Python recursion limit.
+    depth = max(20_000, sys.getrecursionlimit() + 100)
+    content = b'{"private-api-token":' + b"[" * depth + b"0" + b"]" * depth + b"}"
+    with pytest.raises(RecursionError):
+        json.loads(content)
+    client = CloudflareDecisionClient(
+        "account",
+        "token",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, content=content)),
+    )
+    result = client.evaluate(_request())
+    assert result.error is not None and result.error.code == DecisionErrorCode.INVALID_RESPONSE
+    assert result.answers == {}
+    assert "private-api-token" not in repr(result)
+
+
+def test_recursion_error_outside_json_parsing_is_not_suppressed() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise RecursionError("Programming error in caller transport")
+
+    client = CloudflareDecisionClient("account", "token", transport=httpx.MockTransport(handler))
+    with pytest.raises(RecursionError, match="Programming error"):
+        client.evaluate(_request())
 
 
 @pytest.mark.parametrize(
