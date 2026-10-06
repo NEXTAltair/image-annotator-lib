@@ -577,6 +577,33 @@ def test_convert_unix_to_iso8601_edge_cases():
     assert result == "Invalid Timestamp"
 
 
+@pytest.mark.unit
+@pytest.mark.fast
+@pytest.mark.parametrize(
+    ("timestamp", "expected"),
+    [
+        (-0.5, "1969-12-31T23:59:59Z"),
+        (0.5, "1970-01-01T00:00:00Z"),
+        (-62135596800, "0001-01-01T00:00:00Z"),
+        (253402300799, "9999-12-31T23:59:59Z"),
+    ],
+)
+def test_convert_unix_to_iso8601_supported_range(timestamp, expected):
+    """UTC conversion supports fractional seconds and the full datetime range."""
+    assert utils.convert_unix_to_iso8601(timestamp) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+@pytest.mark.parametrize(
+    "timestamp",
+    [-62135596801, 253402300800, 10**20, float("inf"), float("-inf"), float("nan")],
+)
+def test_convert_unix_to_iso8601_invalid_numeric_timestamp(timestamp):
+    """Out-of-range and non-finite values retain the invalid-timestamp result."""
+    assert utils.convert_unix_to_iso8601(timestamp, "test_model") == "Invalid Timestamp"
+
+
 # ==============================================================================
 # Phase C Week 2: Utils Edge Cases Tests (2025-12-07)
 # ==============================================================================

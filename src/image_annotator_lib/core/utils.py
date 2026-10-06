@@ -1,7 +1,7 @@
 import hashlib
 import sys
 import zipfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -445,10 +445,11 @@ def convert_unix_to_iso8601(timestamp: int | float | None, model_id_for_log: str
 
     if isinstance(timestamp, int | float):
         try:
-            dt_object = datetime.fromtimestamp(timestamp, tz=UTC)
+            # UTC epoch arithmetic also supports pre-1970 timestamps on Windows.
+            dt_object = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=timestamp)
             # ISO 8601 形式 (秒まで) + Z (UTCを示す) に変換
             return dt_object.isoformat(timespec="seconds").replace("+00:00", "Z")
-        except (ValueError, OSError) as e:
+        except (ValueError, OverflowError, OSError) as e:
             log_prefix = f"モデル {model_id_for_log} の " if model_id_for_log else ""
             logger.warning(
                 f"{log_prefix}created タイムスタンプ ({timestamp}) を ISO8601 に変換できませんでした: {e}"
