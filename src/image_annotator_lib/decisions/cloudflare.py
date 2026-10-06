@@ -45,6 +45,19 @@ class _InvalidDecision(ValueError):
         self.code = code
 
 
+class _BorrowedTransport(httpx.BaseTransport):
+    """Forward requests without entering or closing the caller's transport."""
+
+    def __init__(self, transport: httpx.BaseTransport) -> None:
+        self._transport = transport
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        return self._transport.handle_request(request)
+
+    def close(self) -> None:
+        """The caller owns the wrapped transport's lifetime."""
+
+
 def _text(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
@@ -222,7 +235,8 @@ def _answer(raw: Any, question: dict[str, Any]) -> DecisionAnswer:
             "Answer probability IDs do not match its options.", DecisionErrorCode.INVALID_RESPONSE
         )
     values = {key: _number(value) for key, value in probabilities.items()}
-    if not math.isclose(sum(values.values()), 1.0, rel_tol=0.0, abs_tol=0.01):
+    # Sum accurately and allow one ULP of representation noise at the 0.01 boundary.
+    if not math.isclose(math.fsum(values.values()), 1.0, rel_tol=0.0, abs_tol=0.01 + math.ulp(1.0)):
         raise _InvalidDecision(
             "Answer probabilities do not sum to one.", DecisionErrorCode.INVALID_RESPONSE
         )
@@ -282,6 +296,9 @@ class CloudflareDecisionClient:
     Credentials are explicit and are never read from, or written to, the
     environment. Redirects are disabled so authorization stays at Cloudflare.
     ``transport`` allows deterministic offline tests with ``httpx.MockTransport``.
+    An injected transport is borrowed: the caller manages its context and closes
+    it when all evaluations are finished. Default transports are closed after
+    each evaluation.
     """
 
     def __init__(
@@ -326,9 +343,8 @@ class CloudflareDecisionClient:
             url = (
                 f"https://api.cloudflare.com/client/v4/accounts/{self._account_id}/ai/run/{self.model_name}"
             )
-            with httpx.Client(
-                timeout=self._timeout, transport=self._transport, follow_redirects=False
-            ) as client:
+            transport = _BorrowedTransport(self._transport) if self._transport is not None else None
+            with httpx.Client(timeout=self._timeout, transport=transport, follow_redirects=False) as client:
                 response = client.post(
                     url,
                     content=payload,

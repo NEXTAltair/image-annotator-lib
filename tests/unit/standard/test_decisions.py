@@ -97,6 +97,42 @@ def test_all_answer_types_keep_reference_ids_probabilities_and_raw_score() -> No
     }
 
 
+def test_injected_stateful_transport_remains_owned_by_the_caller() -> None:
+    class StatefulTransport(httpx.BaseTransport):
+        def __init__(self) -> None:
+            self.closed = False
+            self.requests = 0
+            self.close_calls = 0
+
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            if self.closed:
+                raise httpx.ConnectError("Transport is closed", request=request)
+            self.requests += 1
+            return httpx.Response(200, json=_response())
+
+        def close(self) -> None:
+            self.closed = True
+            self.close_calls += 1
+
+    transport = StatefulTransport()
+    client = CloudflareDecisionClient("account", "token", transport=transport)
+    for request_id in ("first", "second"):
+        result = client.evaluate(_request(request_id=request_id))
+        assert result.error is None
+        assert result.request_id == request_id
+        assert result.answers == {"tag_000": NoulAnswer(0.03)}
+    assert transport.requests == 2
+    assert not transport.closed
+    assert transport.close_calls == 0
+
+    transport.close()
+    result = client.evaluate(_request())
+    assert result.error is not None and result.error.code == DecisionErrorCode.TRANSPORT
+    assert transport.requests == 2
+    assert transport.closed
+    assert transport.close_calls == 1
+
+
 @pytest.mark.parametrize(
     "state", ["plain state", ["record", {"ready": True}], {"nested": {"value": None}, "finite": 1.5}]
 )
@@ -355,6 +391,40 @@ def test_invalid_choice_and_score_answers_are_rejected(kind: str, answer: Any) -
     )
     assert result.error is not None and result.error.code == DecisionErrorCode.INVALID_RESPONSE
     assert result.answers == {}
+
+
+@pytest.mark.parametrize("kind", ["choice", "score"])
+@pytest.mark.parametrize(
+    "second,accepted",
+    [
+        (0.49, True),
+        (0.51, True),
+        (0.489999999999, False),
+        (0.510000000001, False),
+    ],
+)
+def test_probability_sum_tolerance_includes_only_the_rounding_boundaries(
+    kind: str, second: float, accepted: bool
+) -> None:
+    if kind == "choice":
+        question: ChoiceQuestion | ScoreQuestion = ChoiceQuestion("Pick?", {"a": "First", "b": "Second"})
+        probabilities = {"a": 0.5, "b": second}
+        answer: dict[str, Any] = {"type": "choice", "choice": "a"}
+    else:
+        question = ScoreQuestion("Rate?", ["Low", "High"])
+        probabilities = {"0": 0.5, "1": second}
+        answer = {"type": "score", "score": 0.5}
+    answer.update(confidence=0.8, probabilities=probabilities)
+    result = _client(_response(answers={"tag_000": answer})).evaluate(
+        _request(questions={"tag_000": question})
+    )
+    if accepted:
+        assert result.error is None
+        assert isinstance(result.answers["tag_000"], (ChoiceAnswer, ScoreAnswer))
+        assert result.answers["tag_000"].probabilities == probabilities
+    else:
+        assert result.error is not None and result.error.code == DecisionErrorCode.INVALID_RESPONSE
+        assert result.answers == {}
 
 
 def test_json_parse_error_is_sanitized() -> None:

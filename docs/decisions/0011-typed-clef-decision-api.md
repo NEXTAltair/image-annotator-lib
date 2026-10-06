@@ -79,6 +79,9 @@ Transport, HTTP 429, HTTP 408 and server failures are retryable by caller choice
 The client never retries automatically. Error messages exclude provider bodies,
 credentials, file paths and exception details. Secrets are supplied explicitly,
 not read from or written to environment variables. HTTP redirects are disabled.
+The client borrows an explicitly injected HTTP transport; its caller manages
+the transport context and closes it after all evaluations. Default transports
+are owned and closed by the client after each evaluation.
 
 ### Validation and limits
 
