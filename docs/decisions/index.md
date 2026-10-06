@@ -10,3 +10,4 @@
 * [WebAPI Bounded Image Concurrency](0008-webapi-bounded-image-concurrency.md)
 * [Scorer Raw Output and Value-Range Reference](0009-scorer-value-range-reference.md)
 * [OKF YAML Frontmatter for Documentation](0010-okf-frontmatter-for-docs.md)
+* [Typed Clef Decision API and Consumer Responsibilities](0011-typed-clef-decision-api.md)
