@@ -89,8 +89,6 @@ class DecisionErrorCode(StrEnum):
     CONFIGURATION = "configuration"
     INVALID_REQUEST = "invalid_request"
     INVALID_IMAGE = "invalid_image"
-    AUTHENTICATION = "authentication"
-    RATE_LIMIT = "rate_limit"
     TRANSPORT = "transport"
     PROVIDER = "provider"
     INVALID_RESPONSE = "invalid_response"
@@ -117,4 +115,4 @@ class DecisionResult:
     model_name: str
     answers: dict[str, DecisionAnswer]
     error: DecisionError | None = None
-    provider: str = "cloudflare"
+    provider: str = "llamacpp"
