@@ -74,9 +74,11 @@ def _mock_http(monkeypatch: pytest.MonkeyPatch, handler: Any) -> list[dict[str, 
     return options
 
 
+@pytest.mark.parametrize("n_gpu_layers", [0, 10])
 def test_runtime_launch_is_hidden_loopback_and_ready_before_use(
-    settings: RuntimeSettings, monkeypatch: pytest.MonkeyPatch
+    settings: RuntimeSettings, monkeypatch: pytest.MonkeyPatch, n_gpu_layers: int
 ) -> None:
+    settings = replace(settings, n_gpu_layers=n_gpu_layers)
     calls: list[tuple[list[str], dict[str, Any]]] = []
     process = FakeProcess()
 
@@ -98,10 +100,15 @@ def test_runtime_launch_is_hidden_loopback_and_ready_before_use(
     args, kwargs = calls[0]
     assert args[0] == str(settings.server_path)
     assert args[args.index("--host") + 1] == "127.0.0.1"
-    assert args[args.index("-ngl") + 1] == "10"
+    assert args[args.index("-ngl") + 1] == str(n_gpu_layers)
     assert args[args.index("-ub") + 1] == "4096"
     assert args[args.index("--parallel") + 1] == "1"
     assert "--no-context-shift" in args and "--offline" in args
+    if n_gpu_layers == 0:
+        assert args[args.index("--device") + 1] == "none"
+        assert "--no-mmproj-offload" in args
+    else:
+        assert "--device" not in args and "--no-mmproj-offload" not in args
     assert kwargs["shell"] is False
     assert kwargs["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW", 0)
     assert kwargs["stdin"] == kwargs["stdout"] == kwargs["stderr"] == subprocess.DEVNULL

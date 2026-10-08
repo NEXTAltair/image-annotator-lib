@@ -78,6 +78,7 @@ class _LocalRuntime:
                     "--no-webui",
                     "--no-context-shift",
                     "--offline",
+                    *(["--device", "none", "--no-mmproj-offload"] if settings.n_gpu_layers == 0 else []),
                 ],
                 cwd=settings.server_path.parent,
                 stdin=subprocess.DEVNULL,
