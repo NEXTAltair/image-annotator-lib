@@ -7,6 +7,8 @@ import os
 import secrets
 import socket
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 from collections.abc import Iterator
@@ -53,11 +55,15 @@ class _LocalRuntime:
         self.base_url = ""
         self.api_key = secrets.token_urlsafe(32)
         self.ready = False
+        self._owner_pid = os.getpid()
+        self._key_directory: Path | None = None
+        self._key_file: Path | None = None
 
     def start(self, timeout: float) -> None:
         """Start a loopback server and wait for readiness within the time budget."""
         started = time.monotonic()
         try:
+            self._create_key_file()
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
                 listener.bind(("127.0.0.1", 0))
                 port = listener.getsockname()[1]
@@ -89,8 +95,8 @@ class _LocalRuntime:
                     "--no-webui",
                     "--no-context-shift",
                     "--offline",
-                    "--api-key",
-                    self.api_key,
+                    "--api-key-file",
+                    str(self._key_file),
                     "--cors-origins",
                     "http://127.0.0.1",
                     "--no-cors-credentials",
@@ -119,6 +125,27 @@ class _LocalRuntime:
         except BaseException:
             self.close()
             raise
+
+    def _create_key_file(self) -> None:
+        """Store the key under a private directory without placing it in argv."""
+        if sys.platform == "win32" and sys.version_info < (3, 12, 4):
+            raise LocalRuntimeError(
+                "Local Clef requires Python 3.12.4 or newer on Windows for private temporary files.",
+                DecisionErrorCode.CONFIGURATION,
+            )
+        self._key_directory = Path(tempfile.mkdtemp(prefix="lorairo-clef-"))
+        self._key_file = self._key_directory / "api-key"
+        descriptor = os.open(self._key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="ascii") as key_file:
+            key_file.write(self.api_key + "\n")
+
+    def _remove_key_file(self) -> None:
+        if self._key_file is not None:
+            self._key_file.unlink(missing_ok=True)
+            self._key_file = None
+        if self._key_directory is not None:
+            self._key_directory.rmdir()
+            self._key_directory = None
 
     def _wait_ready(self, deadline: float) -> None:
         assert self.process is not None
@@ -176,10 +203,14 @@ class _LocalRuntime:
     def close(self) -> None:
         """Terminate only the subprocess owned by this runtime, then reap it."""
         self.ready = False
-        if self.process is None:
+        if self._owner_pid != os.getpid():
+            # An inherited reference never owns the parent's process or key file.
+            self.process = None
+            self._key_file = None
+            self._key_directory = None
             return
         try:
-            if self.process.poll() is None:
+            if self.process is not None and self.process.poll() is None:
                 try:
                     self.process.terminate()
                 except OSError:
@@ -196,6 +227,12 @@ class _LocalRuntime:
                 "The owned local Clef process could not be stopped. Close it before evaluating again."
             ) from None
         self.process = None
+        try:
+            self._remove_key_file()
+        except OSError:
+            raise LocalRuntimeError(
+                "The local Clef temporary credential could not be removed. Try shutting it down again."
+            ) from None
 
 
 _runtime_lock = threading.Lock()
@@ -206,7 +243,9 @@ _active_runtime: _LocalRuntime | None = None
 def runtime_session(settings: RuntimeSettings, timeout: float) -> Iterator[ManagedEndpoint]:
     """Serialize loading and inference; replace obsolete settings before loading."""
     global _active_runtime
-    if not _runtime_lock.acquire(timeout=timeout):
+    owner_pid = os.getpid()
+    lock = _runtime_lock
+    if not lock.acquire(timeout=timeout):
         raise LocalRuntimeError(
             "Another local Clef evaluation is still running. Try again when it finishes."
         )
@@ -226,11 +265,13 @@ def runtime_session(settings: RuntimeSettings, timeout: float) -> Iterator[Manag
             yield ManagedEndpoint(_active_runtime.base_url, _active_runtime.api_key)
         except BaseException:
             # A timed-out request may still consume VRAM/compute in the server.
-            _active_runtime.close()
-            _active_runtime = None
+            if owner_pid == os.getpid():
+                _active_runtime.close()
+                _active_runtime = None
             raise
     finally:
-        _runtime_lock.release()
+        if owner_pid == os.getpid():
+            lock.release()
 
 
 def shutdown_local_runtime() -> None:
@@ -242,4 +283,13 @@ def shutdown_local_runtime() -> None:
             _active_runtime = None
 
 
+def _reset_after_fork() -> None:
+    """Give a child fresh ownership without touching the parent's resources."""
+    global _runtime_lock, _active_runtime
+    _runtime_lock = threading.Lock()
+    _active_runtime = None
+
+
 atexit.register(shutdown_local_runtime)
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_after_fork)

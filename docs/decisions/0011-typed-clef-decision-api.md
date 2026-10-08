@@ -78,7 +78,8 @@ Error codes are `configuration`, `invalid_request`, `invalid_image`,
 `transport`, `provider` and `invalid_response`. Startup errors distinguish
 invalid executable/model configuration from timeout/transport failure. HTTP
 400/413 errors suggest reducing input or increasing context; HTTP 404 identifies
-a server missing Clef support. The client does not retry inference automatically.
+a server missing Clef support; HTTP 501 identifies a model/projector configuration
+that does not support the requested decision or image input. The client does not retry inference automatically.
 Messages exclude response bodies and exception details.
 
 ### Managed local runtime
@@ -110,7 +111,25 @@ Both readiness and inference HTTP clients disable environment proxies and
 redirects. The child does not inherit `LLAMA_*`, `MTMD_*`, `GGML_*` or `AIP_*`
 settings, which could otherwise change its endpoint, authentication or model.
 Each runtime generates a temporary key for its owned local server; the user
-does not configure or store it. After health is ready, an authenticated `/props`
+does not configure or store it. The key lives in a mode-0600 file inside a
+private `tempfile.mkdtemp()` directory. Only `--api-key-file` and its path are
+passed in argv; the secret is absent from argv, logs and endpoint repr.
+On Windows, Python 3.12.4 or newer is required because its mode-0700 directory
+creation grants access only to the current user and administrators, as specified
+by [Python's directory creation contract](https://docs.python.org/3.12/library/os.html#os.mkdir).
+Older Windows Python versions fail before writing a credential. No custom ACL
+implementation is needed.
+
+The runtime removes its key file and directory after the owned server stops,
+including startup/inference failure cleanup. Failed cleanup retains its path
+for another shutdown attempt. Abrupt OS termination cannot run Python cleanup.
+An `after_in_child` fork hook replaces the inherited lock and discards the
+parent's runtime reference without stopping the parent server or deleting its
+credential. Runtime objects also retain their creating PID, and both close and
+session cleanup protect parent-owned resources when a fork continues inside an
+existing session. A child starts its own runtime on a subsequent evaluation.
+
+After health is ready, an authenticated `/props`
 handshake rejects both a wrong key and a wrong model before any input is sent.
 This prevents an unrelated service that claims the selected port from receiving
 images/questions. CORS is restricted and the key is supplied on inference calls.

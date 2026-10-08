@@ -449,6 +449,12 @@ class LocalDecisionClient:
 
 
 def _http_error(status: int) -> DecisionError:
+    if status == 501:
+        return DecisionError(
+            code=DecisionErrorCode.CONFIGURATION,
+            message="The selected model or projector does not support Clef decisions. "
+            "Select a Clef GGUF and its matching vision projector.",
+        )
     if status == 404:
         return DecisionError(
             code=DecisionErrorCode.CONFIGURATION,

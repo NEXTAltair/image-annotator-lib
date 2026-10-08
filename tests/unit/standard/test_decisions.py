@@ -316,6 +316,7 @@ def test_configuration_errors_are_sanitized(changes: dict[str, Any]) -> None:
         (400, DecisionErrorCode.PROVIDER, False),
         (413, DecisionErrorCode.PROVIDER, False),
         (404, DecisionErrorCode.CONFIGURATION, False),
+        (501, DecisionErrorCode.CONFIGURATION, False),
         (302, DecisionErrorCode.PROVIDER, False),
     ],
 )

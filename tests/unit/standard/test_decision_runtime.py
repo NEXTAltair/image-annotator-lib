@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import copy
 import os
 import subprocess
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -127,7 +129,14 @@ def test_runtime_launch_is_hidden_loopback_and_ready_before_use(
     assert args[args.index("-ub") + 1] == "4096"
     assert args[args.index("--parallel") + 1] == "1"
     assert "--no-context-shift" in args and "--offline" in args
-    assert args[args.index("--api-key") + 1] == runtime.api_key
+    key_file, key_directory = runtime._key_file, runtime._key_directory
+    assert key_file is not None and key_directory is not None
+    assert args[args.index("--api-key-file") + 1] == str(key_file)
+    assert "--api-key" not in args and runtime.api_key not in repr(args)
+    assert key_file.read_text(encoding="ascii").strip() == runtime.api_key
+    if os.name == "posix":
+        assert key_file.stat().st_mode & 0o777 == 0o600
+        assert key_directory.stat().st_mode & 0o777 == 0o700
     assert len(runtime.api_key) >= 32
     assert "--no-cors-credentials" in args
     assert args[args.index("--cors-origins") + 1] == "http://127.0.0.1"
@@ -145,6 +154,8 @@ def test_runtime_launch_is_hidden_loopback_and_ready_before_use(
     assert requests[0].url.host == "127.0.0.1" and requests[0].url.path == "/health"
     runtime.close()
     assert process.terminated and runtime.process is None
+    assert not key_file.exists() and not key_directory.exists()
+    assert runtime._key_file is runtime._key_directory is None
     runtime.close()
 
 
@@ -153,8 +164,11 @@ def test_startup_failures_are_bounded_typed_and_cleaned_up(
     settings: RuntimeSettings, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     process = FakeProcess()
+    created: list[Path] = []
 
     def popen(*args: Any, **kwargs: Any) -> FakeProcess:
+        assert runtime._key_directory is not None
+        created.append(runtime._key_directory)
         if failure == "spawn":
             raise OSError("private system details")
         if failure == "exit":
@@ -171,6 +185,8 @@ def test_startup_failures_are_bounded_typed_and_cleaned_up(
     )
     assert "private system details" not in str(caught.value)
     assert runtime.process is None
+    assert runtime._key_file is runtime._key_directory is None
+    assert created and not created[0].exists()
     if failure == "timeout":
         assert process.terminated
 
@@ -259,6 +275,180 @@ def test_runtime_keys_are_unique_and_not_part_of_endpoint_repr(settings: Runtime
     first, second = _LocalRuntime(settings), _LocalRuntime(settings)
     assert first.api_key != second.api_key
     assert first.api_key not in repr(ManagedEndpoint("http://127.0.0.1:11437", first.api_key))
+
+
+def test_key_file_creation_failure_cleans_up_directory(
+    settings: RuntimeSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _LocalRuntime(settings)
+    created: list[Path] = []
+    original_open = runtime_module.os.open
+
+    def fail_key_open(path: Any, *args: Any, **kwargs: Any) -> int:
+        if Path(path).name == "api-key":
+            created.append(Path(path).parent)
+            raise PermissionError("cannot create credential")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(runtime_module.os, "open", fail_key_open)
+    with pytest.raises(LocalRuntimeError) as caught:
+        runtime.start(1)
+    assert caught.value.code == DecisionErrorCode.CONFIGURATION
+    assert created and not created[0].exists()
+    assert runtime._key_file is runtime._key_directory is None
+
+
+def test_older_windows_python_rejects_insecure_temporary_directory_support(
+    settings: RuntimeSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _LocalRuntime(settings)
+    with monkeypatch.context() as scoped:
+        scoped.setattr(runtime_module.sys, "platform", "win32")
+        scoped.setattr(runtime_module.sys, "version_info", (3, 12, 3))
+        with pytest.raises(LocalRuntimeError, match=r"Python 3\.12\.4") as caught:
+            runtime.start(1)
+    assert caught.value.code == DecisionErrorCode.CONFIGURATION
+    assert runtime._key_file is runtime._key_directory is None
+
+
+def test_failed_key_cleanup_keeps_path_for_a_later_shutdown(
+    settings: RuntimeSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = _LocalRuntime(settings)
+    runtime._create_key_file()
+    key_file, key_directory = runtime._key_file, runtime._key_directory
+    assert key_file is not None and key_directory is not None
+    original_unlink = Path.unlink
+
+    def fail_key_unlink(path: Path, *args: Any, **kwargs: Any) -> None:
+        if path == key_file:
+            raise PermissionError("file is temporarily locked")
+        original_unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(Path, "unlink", fail_key_unlink)
+        with pytest.raises(LocalRuntimeError, match="temporary credential"):
+            runtime.close()
+        assert runtime._key_file == key_file and key_file.exists()
+    runtime.close()
+    assert not key_file.exists() and not key_directory.exists()
+
+
+def test_inherited_runtime_reference_never_deletes_parent_key_or_stops_parent(
+    settings: RuntimeSettings,
+) -> None:
+    runtime = _LocalRuntime(settings)
+    runtime._create_key_file()
+    key_file = runtime._key_file
+    assert key_file is not None
+    process = FakeProcess()
+    runtime.process = process  # type: ignore[assignment]
+    inherited = copy.copy(runtime)
+    inherited._owner_pid = os.getpid() + 1
+    inherited.close()
+    assert key_file.exists() and not process.terminated
+    assert inherited.process is inherited._key_file is inherited._key_directory is None
+    runtime.close()
+    assert not key_file.exists() and process.terminated
+
+
+def test_fork_hook_discards_state_without_closing_parent_resources(
+    settings: RuntimeSettings,
+) -> None:
+    runtime = _LocalRuntime(settings)
+    runtime._create_key_file()
+    key_file = runtime._key_file
+    assert key_file is not None
+    runtime_module._active_runtime = runtime
+    inherited_lock = runtime_module._runtime_lock
+    inherited_lock.acquire()
+    try:
+        runtime_module._reset_after_fork()
+        assert runtime_module._active_runtime is None
+        assert runtime_module._runtime_lock is not inherited_lock
+        assert runtime_module._runtime_lock.acquire(blocking=False)
+        runtime_module._runtime_lock.release()
+        runtime_module.shutdown_local_runtime()
+        assert key_file.exists()
+    finally:
+        inherited_lock.release()
+        runtime.close()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX fork lifecycle")
+@pytest.mark.parametrize("scenario", ["other-thread", "session"])
+def test_posix_fork_child_has_independent_ownership(scenario: str) -> None:
+    script = """
+import os, signal, sys, threading, time
+from pathlib import Path
+from image_annotator_lib.decisions import runtime as module
+
+settings = module.RuntimeSettings(Path(sys.executable), Path(sys.executable), Path(sys.executable), "clef-flash", 0, 4096, ())
+runtime = module._LocalRuntime(settings)
+runtime._create_key_file()
+key_file = runtime._key_file
+directory = runtime._key_directory
+class Process:
+    def poll(self): return None
+    def terminate(self): raise AssertionError("inherited process must not be terminated")
+runtime.process = Process()
+runtime.ready = True
+module._active_runtime = runtime
+release, held = threading.Event(), threading.Event()
+def child_check():
+    try:
+        assert module._active_runtime is None
+        assert module._runtime_lock.acquire(blocking=False)
+        module._runtime_lock.release()
+        module.shutdown_local_runtime()
+        runtime.close()
+        assert key_file.exists()
+        return 0
+    except BaseException:
+        return 1
+def lock_holder():
+    with module._runtime_lock:
+        held.set()
+        release.wait(10)
+thread = None
+pid = -1
+try:
+    if sys.argv[1] == "other-thread":
+        thread = threading.Thread(target=lock_holder)
+        thread.start()
+        assert held.wait(5)
+        pid = os.fork()
+        if pid == 0: os._exit(child_check())
+    else:
+        with module.runtime_session(settings, 1):
+            pid = os.fork()
+            if pid == 0: code = child_check()
+        if pid == 0: os._exit(code)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        waited, status = os.waitpid(pid, os.WNOHANG)
+        if waited:
+            pid = -1
+            assert os.waitstatus_to_exitcode(status) == 0
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("fork child hung")
+    assert key_file.exists()
+finally:
+    if pid > 0:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+    release.set()
+    if thread is not None: thread.join(5)
+    runtime.process = None
+    module.shutdown_local_runtime()
+assert not key_file.exists() and not directory.exists()
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script, scenario], capture_output=True, text=True, timeout=30
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def _fake_runtime(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
