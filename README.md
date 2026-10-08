@@ -51,16 +51,21 @@ result = discover_available_vision_models(force_refresh=True)
 
 ## Clef による既存タグ・キャプションの判定
 
-`image_annotator_lib.decisions` は、Cloudflare Workers AI の Clef に画像・状態と
-型付き質問を渡し、質問 ID ごとに判定を返します。
+`image_annotator_lib.decisions` は、ローカルの Clef に画像・状態と型付き質問を渡し、
+質問 ID ごとに判定を返します。llama.cpp の `llama-server` と Clef の GGUF モデル・
+vision projector を指定します。API キーや外部サービスへの送信は不要です。
 
 ```python
 from pathlib import Path
 from image_annotator_lib.decisions import (
-    CloudflareDecisionClient, DecisionRequest, NoulQuestion,
+    LocalDecisionClient, DecisionRequest, NoulQuestion,
 )
 
-client = CloudflareDecisionClient(account_id="...", api_token="...")
+client = LocalDecisionClient(
+    server_path="models/llama/llama-server.exe",
+    model_path="models/clef/Clef-Flash-Q4_K_M.gguf",
+    mmproj_path="models/clef/mmproj-Clef-Flash-BF16.gguf",
+)
 result = client.evaluate(DecisionRequest(
     request_id="image-42-review",
     state={"tag": "dog"},
@@ -78,7 +83,15 @@ else:
 `NoulQuestion` は質問が真である確率、`ChoiceQuestion` は候補 ID と各候補の確率、
 `ScoreQuestion` は順序付き段階の値・値域と各段階の確率を返します。呼出元が
 `request_id` と質問 ID を既存注釈へ対応付け、警告の基準と手動修正の導線を決めます。
-通信・解析失敗は型付き `error` として返り、未評価や「警告なし」と区別できます。
+読み込み・推論・解析失敗は型付き `error` として返り、未評価や「警告なし」と区別できます。
+
+`/v1/systemone` 対応の llama.cpp (検証済み: b11435) が必要です。最初の判定時に
+サーバーを自動起動し、同じ設定のクライアント間でモデルを共有します。設定やファイルが
+変わると旧モデルを終了してから読み込み直します。終了時は所有するサーバーを停止します。
+既定は GPU 10 層、コンテキスト 4096、待ち時間 300 秒です。`n_gpu_layers=0` で CPU を
+使用できます。コンテキストの自動切り詰めを無効にしているため、大きな画像・長文・多数の
+質問が収まらない場合は質問を分割するか `context_size` を増やしてください。
+モデルを先に解放する場合は `image_annotator_lib.decisions.shutdown_local_runtime()` を呼びます。
 
 タグ・キャプション生成の `annotate()` と判定の API は別です。詳細な契約、画像制限、
 タグ一件・キャプション一件の例、LoRAIro との分担は

@@ -1,4 +1,4 @@
-"""Offline tests for the public decision boundary and Cloudflare wire contract."""
+"""Offline tests for the public decision boundary and local llama.cpp wire contract."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ import math
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
@@ -20,17 +22,31 @@ from PIL import Image
 from image_annotator_lib.decisions import (
     ChoiceAnswer,
     ChoiceQuestion,
-    CloudflareDecisionClient,
     DecisionErrorCode,
     DecisionRequest,
+    LocalDecisionClient,
     NoulAnswer,
     NoulQuestion,
     ScoreAnswer,
     ScoreQuestion,
-    cloudflare,
+    local,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.standard, pytest.mark.webapi]
+pytestmark = [pytest.mark.unit, pytest.mark.standard]
+
+
+@pytest.fixture(autouse=True)
+def mock_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    @contextmanager
+    def session(settings: Any, timeout: float) -> Iterator[str]:
+        yield "http://127.0.0.1:11437"
+
+    monkeypatch.setattr(local, "runtime_session", session)
+
+
+def _local_client(**changes: Any) -> LocalDecisionClient:
+    options = {"server_path": __file__, "model_path": __file__, "mmproj_path": __file__, **changes}
+    return LocalDecisionClient(**options)
 
 
 def _request(**changes: Any) -> DecisionRequest:
@@ -48,13 +64,11 @@ def _response(answers: Any = None, **changes: Any) -> dict[str, Any]:
         "answers": {"tag_000": {"type": "noul", "noul": 0.03}} if answers is None else answers,
     }
     result.update(changes)
-    return {"success": True, "result": result}
+    return result
 
 
-def _client(response: Any = None, *, status: int = 200, **changes: Any) -> CloudflareDecisionClient:
-    return CloudflareDecisionClient(
-        "account-123",
-        "private-api-token",
+def _client(response: Any = None, *, status: int = 200, **changes: Any) -> LocalDecisionClient:
+    return _local_client(
         transport=httpx.MockTransport(
             lambda request: httpx.Response(
                 status, content=json.dumps(_response() if response is None else response).encode("utf-8")
@@ -90,8 +104,8 @@ def test_all_answer_types_keep_reference_ids_probabilities_and_raw_score() -> No
     result = _client(_response(answers)).evaluate(request)
     assert result.error is None
     assert result.request_id == "image-42-review"
-    assert result.provider == "cloudflare"
-    assert result.model_name == "@cf/cloudflare/clef-flash"
+    assert result.provider == "llamacpp"
+    assert result.model_name == "clef-flash"
     assert result.answers == {
         "tag_000": NoulAnswer(0.03),
         "crop": ChoiceAnswer("face", {"whole": 0.1, "face": 0.9}, 0.9),
@@ -117,7 +131,7 @@ def test_injected_stateful_transport_remains_owned_by_the_caller() -> None:
             self.close_calls += 1
 
     transport = StatefulTransport()
-    client = CloudflareDecisionClient("account", "token", transport=transport)
+    client = _local_client(transport=transport)
     for request_id in ("first", "second"):
         result = client.evaluate(_request(request_id=request_id))
         assert result.error is None
@@ -138,8 +152,10 @@ def test_injected_stateful_transport_remains_owned_by_the_caller() -> None:
 @pytest.mark.parametrize(
     "state", ["plain state", ["record", {"ready": True}], {"nested": {"value": None}, "finite": 1.5}]
 )
-def test_wire_body_and_credentials_are_explicit(state: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "unrelated-env-token")
+def test_wire_body_stays_on_loopback_without_credentials(
+    state: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid")
     before = dict(os.environ)
     captured: list[httpx.Request] = []
 
@@ -147,17 +163,12 @@ def test_wire_body_and_credentials_are_explicit(state: Any, monkeypatch: pytest.
         captured.append(request)
         return httpx.Response(200, json=_response())
 
-    client = CloudflareDecisionClient(
-        "account-123", "private-api-token", transport=httpx.MockTransport(handler)
-    )
+    client = _local_client(transport=httpx.MockTransport(handler))
     assert client.evaluate(_request(state=state)).error is None
     assert len(captured) == 1
     wire = captured[0]
-    assert (
-        str(wire.url)
-        == "https://api.cloudflare.com/client/v4/accounts/account-123/ai/run/@cf/cloudflare/clef-flash"
-    )
-    assert wire.headers["Authorization"] == "Bearer private-api-token"
+    assert str(wire.url) == "http://127.0.0.1:11437/v1/systemone"
+    assert "Authorization" not in wire.headers
     assert json.loads(wire.content) == {
         "model": "clef-flash",
         "state": state,
@@ -179,7 +190,7 @@ def test_local_image_mime_and_bytes_are_preserved(tmp_path: Path, image_format: 
         captured.append(json.loads(request.content))
         return httpx.Response(200, json=_response())
 
-    client = CloudflareDecisionClient("account", "token", transport=httpx.MockTransport(handler))
+    client = _local_client(transport=httpx.MockTransport(handler))
     assert client.evaluate(_request(images=[path])).error is None
     prefix, data = captured[0]["images"][0].split(",", 1)
     assert prefix == f"data:{mime};base64"
@@ -207,9 +218,7 @@ def test_pil_image_encoded_as_png_without_mutating_input(
         captured.append(json.loads(request.content))
         return httpx.Response(200, json=_response())
 
-    result = CloudflareDecisionClient("account", "token", transport=httpx.MockTransport(handler)).evaluate(
-        _request(images=[image])
-    )
+    result = _local_client(transport=httpx.MockTransport(handler)).evaluate(_request(images=[image]))
     assert result.error is None
     prefix, data = captured[0]["images"][0].split(",", 1)
     assert prefix == "data:image/png;base64"
@@ -251,9 +260,7 @@ def test_invalid_input_never_reaches_network(changes: dict[str, Any]) -> None:
     def no_network(request: httpx.Request) -> httpx.Response:
         pytest.fail("Invalid input sent to provider")
 
-    result = CloudflareDecisionClient(
-        "account", "token", transport=httpx.MockTransport(no_network)
-    ).evaluate(_request(**changes))
+    result = _local_client(transport=httpx.MockTransport(no_network)).evaluate(_request(**changes))
     assert result.error is not None
     assert result.error.code == DecisionErrorCode.INVALID_REQUEST
     assert result.answers == {}
@@ -267,28 +274,31 @@ def test_maximum_question_and_option_limits_are_accepted(kind: str) -> None:
         "score": ScoreQuestion("Rate?", ["Level"] * 10),
         "noul": NoulQuestion("Valid?"),
     }[kind]
-    body, _ = cloudflare._body(
-        _request(questions={str(i): question for i in range(64)}), "@cf/cloudflare/clef-flash"
-    )
+    body, _ = local._body(_request(questions={str(i): question for i in range(64)}), "clef-flash")
     assert len(json.loads(body)["questions"]) == 64
 
 
 @pytest.mark.parametrize(
     "changes",
     [
-        {"account_id": "../wrong"},
-        {"api_token": ""},
-        {"api_token": "token\nsecret"},
-        {"api_token": "token\x00secret"},
-        {"model_name": "clef-flash"},
+        {"server_path": ""},
+        {"model_path": "missing.gguf"},
+        {"mmproj_path": "missing-projector.gguf"},
+        {"server_path": Path(__file__).parent},
+        {"model_name": "remote-clef"},
+        {"n_gpu_layers": True},
+        {"n_gpu_layers": -1},
+        {"n_gpu_layers": 1000},
+        {"context_size": 511},
+        {"context_size": 131073},
+        {"context_size": 4096.0},
         {"timeout": float("inf")},
         {"timeout": 0},
         {"timeout": True},
     ],
 )
 def test_configuration_errors_are_sanitized(changes: dict[str, Any]) -> None:
-    options = {"account_id": "account", "api_token": "private-api-token", **changes}
-    result = CloudflareDecisionClient(**options).evaluate(_request())
+    result = _local_client(**changes).evaluate(_request())
     assert result.error is not None and result.error.code == DecisionErrorCode.CONFIGURATION
     assert "private-api-token" not in result.error.message
     assert result.answers == {}
@@ -297,9 +307,9 @@ def test_configuration_errors_are_sanitized(changes: dict[str, Any]) -> None:
 @pytest.mark.parametrize(
     "status,code,retryable",
     [
-        (401, DecisionErrorCode.AUTHENTICATION, False),
-        (403, DecisionErrorCode.AUTHENTICATION, False),
-        (429, DecisionErrorCode.RATE_LIMIT, True),
+        (401, DecisionErrorCode.PROVIDER, False),
+        (403, DecisionErrorCode.PROVIDER, False),
+        (429, DecisionErrorCode.PROVIDER, True),
         (500, DecisionErrorCode.PROVIDER, True),
         (400, DecisionErrorCode.PROVIDER, False),
         (302, DecisionErrorCode.PROVIDER, False),
@@ -318,19 +328,17 @@ def test_http_failures_have_typed_errors_without_provider_body(
     assert result.request_id == "image-42-review" and result.answers == {}
 
 
-def test_redirects_never_forward_bearer_token_and_requests_are_not_retried() -> None:
+def test_redirects_never_send_images_off_loopback_and_requests_are_not_retried() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         return httpx.Response(302, headers={"Location": "https://other.example/steal"})
 
-    result = CloudflareDecisionClient("account", "token", transport=httpx.MockTransport(handler)).evaluate(
-        _request()
-    )
+    result = _local_client(transport=httpx.MockTransport(handler)).evaluate(_request())
     assert result.error is not None
     assert len(requests) == 1
-    assert requests[0].url.host == "api.cloudflare.com"
+    assert requests[0].url.host == "127.0.0.1"
 
 
 @pytest.mark.parametrize("error", [httpx.ReadTimeout, httpx.ConnectError])
@@ -338,9 +346,7 @@ def test_transport_failures_sanitize_exception_messages(error: type[httpx.Reques
     def handler(request: httpx.Request) -> httpx.Response:
         raise error("private-api-token confidential detail", request=request)
 
-    result = CloudflareDecisionClient("account", "token", transport=httpx.MockTransport(handler)).evaluate(
-        _request()
-    )
+    result = _local_client(transport=httpx.MockTransport(handler)).evaluate(_request())
     assert result.error is not None
     assert result.error.code == DecisionErrorCode.TRANSPORT and result.error.retryable
     assert "private-api-token" not in repr(result)
@@ -350,8 +356,7 @@ def test_transport_failures_sanitize_exception_messages(error: type[httpx.Reques
     "response",
     [
         [],
-        {"success": False, "errors": ["private-api-token"]},
-        {"success": "true"},
+        {"error": {"message": "invalid local request"}},
         _response(answers={}),
         _response(answers={"other": {"type": "noul", "noul": 0.5}}),
         _response(answers={"tag_000": {"type": "choice", "noul": 0.5}}),
@@ -589,9 +594,7 @@ def test_probability_sum_tolerance_includes_only_the_rounding_boundaries(
 
 
 def test_json_parse_error_is_sanitized() -> None:
-    client = CloudflareDecisionClient(
-        "account",
-        "token",
+    client = _local_client(
         transport=httpx.MockTransport(
             lambda request: httpx.Response(200, content=b"private-api-token invalid JSON")
         ),
@@ -607,9 +610,7 @@ def test_actual_deeply_nested_json_returns_sanitized_invalid_response() -> None:
     content = b'{"private-api-token":' + b"[" * depth + b"0" + b"]" * depth + b"}"
     with pytest.raises(RecursionError):
         json.loads(content)
-    client = CloudflareDecisionClient(
-        "account",
-        "token",
+    client = _local_client(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, content=content)),
     )
     result = client.evaluate(_request())
@@ -622,7 +623,7 @@ def test_recursion_error_outside_json_parsing_is_not_suppressed() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise RecursionError("Programming error in caller transport")
 
-    client = CloudflareDecisionClient("account", "token", transport=httpx.MockTransport(handler))
+    client = _local_client(transport=httpx.MockTransport(handler))
     with pytest.raises(RecursionError, match="Programming error"):
         client.evaluate(_request())
 
@@ -638,7 +639,7 @@ def test_bad_images_are_rejected_before_network(tmp_path: Path, image_kind: str)
     elif image_kind == "gif":
         image.save(path, format="GIF")
     elif image_kind == "too_large":
-        path.write_bytes(b"x" * (cloudflare.MAX_IMAGE_BYTES + 1))
+        path.write_bytes(b"x" * (local.MAX_IMAGE_BYTES + 1))
     images: Any = {
         "too_many": [image] * 5,
         "too_many_pixels": [Image.new("1", (4001, 4000))],
@@ -648,9 +649,7 @@ def test_bad_images_are_rejected_before_network(tmp_path: Path, image_kind: str)
     def no_network(request: httpx.Request) -> httpx.Response:
         pytest.fail("Bad image sent to provider")
 
-    result = CloudflareDecisionClient(
-        "account", "token", transport=httpx.MockTransport(no_network)
-    ).evaluate(_request(images=images))
+    result = _local_client(transport=httpx.MockTransport(no_network)).evaluate(_request(images=images))
     assert result.error is not None and result.error.code == DecisionErrorCode.INVALID_IMAGE
     assert "confidential" not in result.error.message
 
@@ -661,13 +660,13 @@ def test_exact_image_limit_total_limit_and_body_limit(
     path = tmp_path / "image.png"
     Image.new("RGB", (4, 4)).save(path)
     original = path.read_bytes()
-    path.write_bytes(original + b"\0" * (cloudflare.MAX_IMAGE_BYTES - len(original)))
+    path.write_bytes(original + b"\0" * (local.MAX_IMAGE_BYTES - len(original)))
     assert _client().evaluate(_request(images=[path, path])).error is None
     result = _client().evaluate(_request(images=[path, path, path]))
     assert result.error is not None and result.error.code == DecisionErrorCode.INVALID_IMAGE
-    result = _client().evaluate(_request(state="x" * cloudflare.MAX_REQUEST_BYTES))
+    result = _client().evaluate(_request(state="x" * local.MAX_REQUEST_BYTES))
     assert result.error is not None and result.error.code == DecisionErrorCode.INVALID_REQUEST
-    monkeypatch.setattr(cloudflare, "MAX_IMAGE_PIXELS", 16)
+    monkeypatch.setattr(local, "MAX_IMAGE_PIXELS", 16)
     assert _client().evaluate(_request(images=[Image.new("RGB", (4, 4))])).error is None
     assert _client().evaluate(_request(images=[Image.new("RGB", (5, 4))])).error is not None
 
@@ -676,9 +675,14 @@ def test_public_import_and_mock_transport_in_fresh_process() -> None:
     source = Path(__file__).resolve().parents[3] / "src"
     script = """
 import sys, httpx
-from image_annotator_lib.decisions import CloudflareDecisionClient, DecisionRequest, NoulQuestion
+from contextlib import contextmanager
+from image_annotator_lib.decisions import LocalDecisionClient, DecisionRequest, NoulQuestion, local
+@contextmanager
+def mock_session(settings, timeout):
+    yield "http://127.0.0.1:11437"
+local.runtime_session = mock_session
 assert not any(name in sys.modules for name in ('torch', 'tensorflow', 'onnxruntime', 'transformers'))
-client = CloudflareDecisionClient('account', 'token', transport=httpx.MockTransport(lambda request: httpx.Response(200, json={'success': True, 'result': {'model': 'clef-flash', 'answers': {'caption_000': {'type': 'noul', 'noul': 0.91}}}})))
+client = LocalDecisionClient(sys.executable, sys.executable, sys.executable, transport=httpx.MockTransport(lambda request: httpx.Response(200, json={'model': 'clef-flash', 'answers': {'caption_000': {'type': 'noul', 'noul': 0.91}}})))
 result = client.evaluate(DecisionRequest('image-1', {'caption': 'a dog'}, {'caption_000': NoulQuestion('Supported?')}))
 assert result.error is None
 assert result.answers['caption_000'].probability == 0.91

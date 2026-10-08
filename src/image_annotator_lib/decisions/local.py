@@ -1,4 +1,4 @@
-"""Cloudflare Workers AI Clef transport and strict decision normalization."""
+"""Local llama.cpp Clef transport and strict decision normalization."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from PIL import Image, UnidentifiedImageError
 
 from image_annotator_lib.webapi.image_payload import build_base64_data_url
 
+from .runtime import LocalRuntimeError, RuntimeSettings, runtime_session
 from .types import (
     ChoiceAnswer,
     ChoiceQuestion,
@@ -34,7 +35,7 @@ MAX_IMAGE_BYTES = 4 * 1024 * 1024
 MAX_TOTAL_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_IMAGE_PIXELS = 16_000_000
 MAX_REQUEST_BYTES = 13 * 1024 * 1024
-_MODELS = {"@cf/cloudflare/clef", "@cf/cloudflare/clef-flash"}
+_MODELS = {"clef", "clef-flash"}
 _QUESTION_ID = re.compile(r"[A-Za-z0-9_.-]{1,100}\Z")
 _IMAGE_MIME = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp"}
 _PNG_MODES = {"1", "L", "LA", "I", "I;16", "I;16B", "P", "RGB", "RGBA"}
@@ -172,7 +173,7 @@ def _body(request: DecisionRequest, model_name: str) -> tuple[bytes, dict[str, A
         raise _InvalidDecision("State must be text, a JSON object or a JSON array.")
     questions = _questions(request.questions)
     body: dict[str, Any] = {
-        "model": model_name.rsplit("/", 1)[-1],
+        "model": model_name,
         "state": request.state,
         "questions": questions,
     }
@@ -288,13 +289,7 @@ def _answer(raw: Any, question: dict[str, Any]) -> DecisionAnswer:
 def _result(response: Any, questions: dict[str, Any], request_id: str) -> DecisionResult:
     if not isinstance(response, dict):
         raise _InvalidDecision("Decision response must be an object.", DecisionErrorCode.INVALID_RESPONSE)
-    if response.get("success") is False:
-        raise _InvalidDecision("Cloudflare reported a failed decision request.", DecisionErrorCode.PROVIDER)
-    if "success" in response and response["success"] is not True:
-        raise _InvalidDecision(
-            "Decision response has an invalid success flag.", DecisionErrorCode.INVALID_RESPONSE
-        )
-    raw = response.get("result", response)
+    raw = response
     if not isinstance(raw, dict) or not isinstance(raw.get("answers"), dict):
         raise _InvalidDecision(
             "Decision response has no answers object.", DecisionErrorCode.INVALID_RESPONSE
@@ -305,8 +300,6 @@ def _result(response: Any, questions: dict[str, Any], request_id: str) -> Decisi
             "Answer question IDs do not match the request.", DecisionErrorCode.INVALID_RESPONSE
         )
     model = raw.get("model")
-    if model in ("clef", "clef-flash"):
-        model = f"@cf/cloudflare/{model}"
     if not isinstance(model, str) or model not in _MODELS:
         raise _InvalidDecision(
             "Decision response has no recognized model identifier.", DecisionErrorCode.INVALID_RESPONSE
@@ -318,43 +311,38 @@ def _result(response: Any, questions: dict[str, Any], request_id: str) -> Decisi
     )
 
 
-class CloudflareDecisionClient:
-    """Evaluate typed questions through Workers AI, without automatic retries.
+class LocalDecisionClient:
+    """Evaluate typed questions using an automatically managed local llama.cpp server.
 
-    Credentials are explicit and are never read from, or written to, the
-    environment. Redirects are disabled so authorization stays at Cloudflare.
-    ``transport`` allows deterministic offline tests with ``httpx.MockTransport``.
-    An injected transport is borrowed: the caller manages its context and closes
-    it when all evaluations are finished. Default transports are closed after
-    each evaluation.
+    Model loading happens on the first valid evaluation. Clients share one
+    runtime per Python process; inference is serialized, and changed settings
+    replace the previous model. Only loopback traffic is sent; environment
+    proxies and redirects are disabled. No remote service or credentials exist.
+    An injected ``transport`` is borrowed, and does not bypass model startup.
     """
 
     def __init__(
         self,
-        account_id: str,
-        api_token: str,
-        model_name: str = "@cf/cloudflare/clef-flash",
-        timeout: float = 60.0,
+        server_path: str | Path,
+        model_path: str | Path,
+        mmproj_path: str | Path,
         *,
+        model_name: str = "clef-flash",
+        n_gpu_layers: int = 10,
+        context_size: int = 4096,
+        timeout: float = 300.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        self._account_id = account_id
-        self._api_token = api_token
+        self._paths = (server_path, model_path, mmproj_path)
         self.model_name = model_name
+        self._n_gpu_layers = n_gpu_layers
+        self._context_size = context_size
         self._timeout = timeout
         self._transport = transport
 
-    def _configuration(self) -> None:
-        if not isinstance(self._account_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", self._account_id):
-            raise _InvalidDecision(
-                "Cloudflare account ID is missing or invalid.", DecisionErrorCode.CONFIGURATION
-            )
-        if not isinstance(self._api_token, str) or not re.fullmatch(r"[\x21-\x7e]+", self._api_token):
-            raise _InvalidDecision(
-                "Cloudflare API token is missing or invalid.", DecisionErrorCode.CONFIGURATION
-            )
+    def _configuration(self) -> RuntimeSettings:
         if not isinstance(self.model_name, str) or self.model_name not in _MODELS:
-            raise _InvalidDecision("Select Cloudflare Clef or Clef-flash.", DecisionErrorCode.CONFIGURATION)
+            raise _InvalidDecision("Select local Clef or Clef-flash.", DecisionErrorCode.CONFIGURATION)
         if (
             isinstance(self._timeout, bool)
             or not isinstance(self._timeout, (int, float))
@@ -362,24 +350,59 @@ class CloudflareDecisionClient:
             or self._timeout <= 0
         ):
             raise _InvalidDecision("Timeout must be finite and positive.", DecisionErrorCode.CONFIGURATION)
+        for value, low, high, label in (
+            (self._n_gpu_layers, 0, 999, "GPU layers"),
+            (self._context_size, 512, 131072, "Context size"),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+                raise _InvalidDecision(
+                    f"{label} must be an integer between {low} and {high}.",
+                    DecisionErrorCode.CONFIGURATION,
+                )
+        paths: list[Path] = []
+        versions: list[tuple[int, int, int]] = []
+        for path_value, label in zip(
+            self._paths, ("llama-server executable", "Clef GGUF model", "vision projector"), strict=True
+        ):
+            try:
+                if not isinstance(path_value, (str, Path)) or not str(path_value).strip():
+                    raise ValueError
+                path = Path(path_value).resolve(strict=True)
+                if not path.is_file():
+                    raise ValueError
+                stat = path.stat()
+            except (OSError, ValueError, RuntimeError):
+                raise _InvalidDecision(
+                    f"Select an existing local {label} file.", DecisionErrorCode.CONFIGURATION
+                ) from None
+            paths.append(path)
+            versions.append((stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+        return RuntimeSettings(
+            server_path=paths[0],
+            model_path=paths[1],
+            mmproj_path=paths[2],
+            model_name=self.model_name,
+            n_gpu_layers=self._n_gpu_layers,
+            context_size=self._context_size,
+            file_versions=tuple(versions),
+        )
 
     def evaluate(self, request: DecisionRequest) -> DecisionResult:
         """Return validated answers, or an explicit sanitized typed failure."""
         try:
-            self._configuration()
+            settings = self._configuration()
             payload, questions = _body(request, self.model_name)
-            url = (
-                f"https://api.cloudflare.com/client/v4/accounts/{self._account_id}/ai/run/{self.model_name}"
-            )
             transport = _BorrowedTransport(self._transport) if self._transport is not None else None
-            with httpx.Client(timeout=self._timeout, transport=transport, follow_redirects=False) as client:
+            with (
+                runtime_session(settings, self._timeout) as base_url,
+                httpx.Client(
+                    timeout=self._timeout, transport=transport, follow_redirects=False, trust_env=False
+                ) as client,
+            ):
                 response = client.post(
-                    url,
+                    f"{base_url}/v1/systemone",
                     content=payload,
-                    headers={
-                        "Authorization": f"Bearer {self._api_token}",
-                        "Content-Type": "application/json",
-                    },
+                    headers={"Content-Type": "application/json"},
                 )
             if not 200 <= response.status_code < 300:
                 return self._failure(request, _http_error(response.status_code))
@@ -389,15 +412,28 @@ class CloudflareDecisionClient:
                 raise _InvalidDecision(
                     "Decision response is not valid JSON.", DecisionErrorCode.INVALID_RESPONSE
                 ) from None
-            return _result(raw, questions, request.request_id)
-        except _InvalidDecision as exc:
-            return self._failure(request, DecisionError(code=exc.code, message=str(exc)))
+            result = _result(raw, questions, request.request_id)
+            if result.model_name != self.model_name:
+                raise _InvalidDecision(
+                    "Local Clef response model does not match the requested model.",
+                    DecisionErrorCode.INVALID_RESPONSE,
+                )
+            return result
+        except (_InvalidDecision, LocalRuntimeError) as exc:
+            return self._failure(
+                request,
+                DecisionError(
+                    code=exc.code,
+                    message=str(exc),
+                    retryable=exc.code == DecisionErrorCode.TRANSPORT,
+                ),
+            )
         except httpx.RequestError:
             return self._failure(
                 request,
                 DecisionError(
                     code=DecisionErrorCode.TRANSPORT,
-                    message="Decision request failed or timed out.",
+                    message="Local Clef evaluation failed or timed out.",
                     retryable=True,
                 ),
             )
@@ -409,17 +445,19 @@ class CloudflareDecisionClient:
 
 
 def _http_error(status: int) -> DecisionError:
-    if status in (401, 403):
+    if status == 404:
         return DecisionError(
-            code=DecisionErrorCode.AUTHENTICATION,
-            message="Cloudflare rejected the credentials or account permissions.",
+            code=DecisionErrorCode.CONFIGURATION,
+            message="This llama-server does not support Clef /v1/systemone. Select a compatible build.",
         )
-    if status == 429:
+    if status in (400, 413):
         return DecisionError(
-            code=DecisionErrorCode.RATE_LIMIT, message="Cloudflare rate limit was reached.", retryable=True
+            code=DecisionErrorCode.PROVIDER,
+            message=f"Local Clef rejected the input (HTTP {status}). "
+            "Reduce the questions/image size or increase the context size.",
         )
     return DecisionError(
         code=DecisionErrorCode.PROVIDER,
-        message=f"Cloudflare decision request failed (HTTP {status}).",
-        retryable=status >= 500 or status == 408,
+        message=f"Local Clef evaluation failed (HTTP {status}).",
+        retryable=status >= 500 or status in (408, 429),
     )

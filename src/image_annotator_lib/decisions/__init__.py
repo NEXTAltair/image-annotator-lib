@@ -1,6 +1,7 @@
 """Typed decision API, separate from generation through :func:`annotate`."""
 
-from .cloudflare import CloudflareDecisionClient
+from .local import LocalDecisionClient
+from .runtime import shutdown_local_runtime
 from .types import (
     ChoiceAnswer,
     ChoiceQuestion,
@@ -19,15 +20,16 @@ from .types import (
 __all__ = [
     "ChoiceAnswer",
     "ChoiceQuestion",
-    "CloudflareDecisionClient",
     "DecisionAnswer",
     "DecisionError",
     "DecisionErrorCode",
     "DecisionQuestion",
     "DecisionRequest",
     "DecisionResult",
+    "LocalDecisionClient",
     "NoulAnswer",
     "NoulQuestion",
     "ScoreAnswer",
     "ScoreQuestion",
+    "shutdown_local_runtime",
 ]
