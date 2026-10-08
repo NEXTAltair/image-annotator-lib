@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import atexit
+import os
+import secrets
 import socket
 import subprocess
 import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
@@ -36,11 +38,20 @@ class RuntimeSettings:
     file_versions: tuple[tuple[int, int, int], ...]
 
 
+@dataclass(frozen=True)
+class ManagedEndpoint:
+    """An owned local endpoint; its transient credential is never user configuration."""
+
+    base_url: str
+    api_key: str = field(repr=False)
+
+
 class _LocalRuntime:
     def __init__(self, settings: RuntimeSettings) -> None:
         self.settings = settings
         self.process: subprocess.Popen[bytes] | None = None
         self.base_url = ""
+        self.api_key = secrets.token_urlsafe(32)
         self.ready = False
 
     def start(self, timeout: float) -> None:
@@ -78,6 +89,11 @@ class _LocalRuntime:
                     "--no-webui",
                     "--no-context-shift",
                     "--offline",
+                    "--api-key",
+                    self.api_key,
+                    "--cors-origins",
+                    "http://127.0.0.1",
+                    "--no-cors-credentials",
                     *(["--device", "none", "--no-mmproj-offload"] if settings.n_gpu_layers == 0 else []),
                 ],
                 cwd=settings.server_path.parent,
@@ -86,6 +102,11 @@ class _LocalRuntime:
                 stderr=subprocess.DEVNULL,
                 shell=False,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                env={
+                    key: value
+                    for key, value in os.environ.items()
+                    if not key.upper().startswith(("LLAMA_", "MTMD_", "GGML_", "AIP_"))
+                },
             )
             self._wait_ready(started + timeout)
             self.ready = True
@@ -120,11 +141,37 @@ class _LocalRuntime:
                             and health.get("status") == "ok"
                             and self.process.poll() is None
                         ):
+                            self._authenticate_ready(client, deadline)
                             return
                 except (httpx.RequestError, ValueError):
                     pass  # Loading a model precedes the server's health endpoint.
                 time.sleep(max(0, min(0.1, deadline - time.monotonic())))
         raise LocalRuntimeError("Local Clef model loading timed out. Check memory or increase the timeout.")
+
+    def _authenticate_ready(self, client: httpx.Client, deadline: float) -> None:
+        """Reject a port collision before sending any images or questions."""
+        probe = client.get(
+            f"{self.base_url}/props",
+            headers={"Authorization": f"Bearer {secrets.token_urlsafe(32)}"},
+            timeout=max(0.001, min(1.0, deadline - time.monotonic())),
+        )
+        if probe.status_code != 401:
+            raise LocalRuntimeError("The local Clef endpoint did not authenticate its owned process.")
+        response = client.get(
+            f"{self.base_url}/props",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            timeout=max(0.001, min(1.0, deadline - time.monotonic())),
+        )
+        if response.status_code != 200:
+            raise LocalRuntimeError("The local Clef endpoint rejected its temporary runtime credential.")
+        props = response.json()
+        if (
+            not isinstance(props, dict)
+            or props.get("model_path") != str(self.settings.model_path)
+            or self.process is None
+            or self.process.poll() is not None
+        ):
+            raise LocalRuntimeError("The local Clef endpoint does not match the owned model process.")
 
     def close(self) -> None:
         """Terminate only the subprocess owned by this runtime, then reap it."""
@@ -156,7 +203,7 @@ _active_runtime: _LocalRuntime | None = None
 
 
 @contextmanager
-def runtime_session(settings: RuntimeSettings, timeout: float) -> Iterator[str]:
+def runtime_session(settings: RuntimeSettings, timeout: float) -> Iterator[ManagedEndpoint]:
     """Serialize loading and inference; replace obsolete settings before loading."""
     global _active_runtime
     if not _runtime_lock.acquire(timeout=timeout):
@@ -176,7 +223,7 @@ def runtime_session(settings: RuntimeSettings, timeout: float) -> Iterator[str]:
             _active_runtime = _LocalRuntime(settings)
             _active_runtime.start(timeout)
         try:
-            yield _active_runtime.base_url
+            yield ManagedEndpoint(_active_runtime.base_url, _active_runtime.api_key)
         except BaseException:
             # A timed-out request may still consume VRAM/compute in the server.
             _active_runtime.close()

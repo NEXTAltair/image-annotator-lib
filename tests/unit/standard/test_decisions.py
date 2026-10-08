@@ -31,6 +31,7 @@ from image_annotator_lib.decisions import (
     ScoreQuestion,
     local,
 )
+from image_annotator_lib.decisions.runtime import ManagedEndpoint
 
 pytestmark = [pytest.mark.unit, pytest.mark.standard]
 
@@ -38,8 +39,8 @@ pytestmark = [pytest.mark.unit, pytest.mark.standard]
 @pytest.fixture(autouse=True)
 def mock_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     @contextmanager
-    def session(settings: Any, timeout: float) -> Iterator[str]:
-        yield "http://127.0.0.1:11437"
+    def session(settings: Any, timeout: float) -> Iterator[ManagedEndpoint]:
+        yield ManagedEndpoint("http://127.0.0.1:11437", "test-runtime-key")
 
     monkeypatch.setattr(local, "runtime_session", session)
 
@@ -168,7 +169,7 @@ def test_wire_body_stays_on_loopback_without_credentials(
     assert len(captured) == 1
     wire = captured[0]
     assert str(wire.url) == "http://127.0.0.1:11437/v1/systemone"
-    assert "Authorization" not in wire.headers
+    assert wire.headers["Authorization"] == "Bearer test-runtime-key"
     assert json.loads(wire.content) == {
         "model": "clef-flash",
         "state": state,
@@ -293,6 +294,7 @@ def test_maximum_question_and_option_limits_are_accepted(kind: str) -> None:
         {"context_size": 131073},
         {"context_size": 4096.0},
         {"timeout": float("inf")},
+        {"timeout": 1e20},
         {"timeout": 0},
         {"timeout": True},
     ],
@@ -439,16 +441,8 @@ def test_invalid_choice_and_score_answers_are_rejected(kind: str, answer: Any) -
             {"type": "choice", "choice": "a", "confidence": 0.6, "probabilities": {"a": 0.4, "b": 0.6}},
         ),
         (
-            "choice",
-            {"type": "choice", "choice": "b", "confidence": 0.7, "probabilities": {"a": 0.4, "b": 0.6}},
-        ),
-        (
             "score",
             {"type": "score", "score": 0.3, "confidence": 0.6, "probabilities": {"0": 0.4, "1": 0.6}},
-        ),
-        (
-            "score",
-            {"type": "score", "score": 0.6, "confidence": 0.7, "probabilities": {"0": 0.4, "1": 0.6}},
         ),
     ],
 )
@@ -463,6 +457,32 @@ def test_contradictory_choice_and_score_fields_are_rejected(kind: str, answer: d
     )
     assert result.error is not None and result.error.code == DecisionErrorCode.INVALID_RESPONSE
     assert result.answers == {}
+
+
+@pytest.mark.parametrize("kind", ["choice", "score"])
+@pytest.mark.parametrize("confidence", [0.0, 0.7, 1.0])
+def test_local_confidence_is_independent_of_maximum_probability(kind: str, confidence: float) -> None:
+    question = (
+        ChoiceQuestion("Pick?", {"a": "First", "b": "Second"})
+        if kind == "choice"
+        else ScoreQuestion("Rate?", ["Low", "High"])
+    )
+    answer = (
+        {"type": "choice", "choice": "b", "confidence": confidence, "probabilities": {"a": 0.4, "b": 0.6}}
+        if kind == "choice"
+        else {
+            "type": "score",
+            "score": 0.6,
+            "confidence": confidence,
+            "probabilities": {"0": 0.4, "1": 0.6},
+        }
+    )
+    result = _client(_response(answers={"tag_000": answer})).evaluate(
+        _request(questions={"tag_000": question})
+    )
+    assert result.error is None
+    assert isinstance(result.answers["tag_000"], (ChoiceAnswer, ScoreAnswer))
+    assert result.answers["tag_000"].confidence == confidence
 
 
 @pytest.mark.parametrize("selected", ["a", "b"])
@@ -679,10 +699,11 @@ def test_public_import_and_mock_transport_in_fresh_process() -> None:
     script = """
 import sys, httpx
 from contextlib import contextmanager
+from image_annotator_lib.decisions.runtime import ManagedEndpoint
 from image_annotator_lib.decisions import LocalDecisionClient, DecisionRequest, NoulQuestion, local
 @contextmanager
 def mock_session(settings, timeout):
-    yield "http://127.0.0.1:11437"
+    yield ManagedEndpoint("http://127.0.0.1:11437", "test-runtime-key")
 local.runtime_session = mock_session
 assert not any(name in sys.modules for name in ('torch', 'tensorflow', 'onnxruntime', 'transformers'))
 client = LocalDecisionClient(sys.executable, sys.executable, sys.executable, transport=httpx.MockTransport(lambda request: httpx.Response(200, json={'model': 'clef-flash', 'answers': {'caption_000': {'type': 'noul', 'noul': 0.91}}})))

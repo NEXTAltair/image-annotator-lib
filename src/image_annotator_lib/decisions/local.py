@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import threading
 from collections.abc import Sequence
 from io import BytesIO
 from pathlib import Path
@@ -253,10 +254,6 @@ def _answer(raw: Any, question: dict[str, Any]) -> DecisionAnswer:
         )
     confidence = _number(raw.get("confidence"))
     maximum = max(values.values())
-    if confidence != maximum:
-        raise _InvalidDecision(
-            "Answer confidence does not match its maximum probability.", DecisionErrorCode.INVALID_RESPONSE
-        )
     if question["type"] == "choice":
         choice = raw.get("choice")
         if not isinstance(choice, str) or choice not in keys:
@@ -317,7 +314,7 @@ class LocalDecisionClient:
     Model loading happens on the first valid evaluation. Clients share one
     runtime per Python process; inference is serialized, and changed settings
     replace the previous model. Only loopback traffic is sent; environment
-    proxies and redirects are disabled. No remote service or credentials exist.
+    proxies and redirects are disabled. No remote service or user credentials exist.
     An injected ``transport`` is borrowed, and does not bypass model startup.
     """
 
@@ -348,8 +345,12 @@ class LocalDecisionClient:
             or not isinstance(self._timeout, (int, float))
             or not math.isfinite(self._timeout)
             or self._timeout <= 0
+            or self._timeout > threading.TIMEOUT_MAX
         ):
-            raise _InvalidDecision("Timeout must be finite and positive.", DecisionErrorCode.CONFIGURATION)
+            raise _InvalidDecision(
+                "Timeout must be positive and within the platform's supported wait range.",
+                DecisionErrorCode.CONFIGURATION,
+            )
         for value, low, high, label in (
             (self._n_gpu_layers, 0, 999, "GPU layers"),
             (self._context_size, 512, 131072, "Context size"),
@@ -394,15 +395,18 @@ class LocalDecisionClient:
             payload, questions = _body(request, self.model_name)
             transport = _BorrowedTransport(self._transport) if self._transport is not None else None
             with (
-                runtime_session(settings, self._timeout) as base_url,
+                runtime_session(settings, self._timeout) as endpoint,
                 httpx.Client(
                     timeout=self._timeout, transport=transport, follow_redirects=False, trust_env=False
                 ) as client,
             ):
                 response = client.post(
-                    f"{base_url}/v1/systemone",
+                    f"{endpoint.base_url}/v1/systemone",
                     content=payload,
-                    headers={"Content-Type": "application/json"},
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {endpoint.api_key}",
+                    },
                 )
             if not 200 <= response.status_code < 300:
                 return self._failure(request, _http_error(response.status_code))

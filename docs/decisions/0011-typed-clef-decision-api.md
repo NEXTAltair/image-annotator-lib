@@ -93,7 +93,8 @@ The runtime uses `subprocess.Popen` without a shell and with hidden windows on
 Windows. It binds `127.0.0.1` on an available port, disables the web UI, enables
 offline mode and disables context shifting. Context, batch and microbatch sizes
 are equal, with one inference slot. GPU layers accept 0–999 (0 means CPU), context
-512–131072, and timeout must be finite and positive. Question count and image
+512–131072, and timeout must be finite, positive and at most
+`threading.TIMEOUT_MAX`. Question count and image
 byte limits do not guarantee fitting the token context; callers must split long
 inputs or increase context rather than rely on truncation.
 
@@ -106,10 +107,17 @@ Only the process owned by the library is terminated. `shutdown_local_runtime()`
 releases it explicitly and is also registered for interpreter shutdown.
 
 Both readiness and inference HTTP clients disable environment proxies and
-redirects. There are no credentials, remote endpoint settings, model downloads
-or paid requests. Injected HTTP transports remain caller-owned; tests patch the
-`local.runtime_session` context manager to avoid loading a model while retaining
-real input/answer validation.
+redirects. The child does not inherit `LLAMA_*`, `MTMD_*`, `GGML_*` or `AIP_*`
+settings, which could otherwise change its endpoint, authentication or model.
+Each runtime generates a temporary key for its owned local server; the user
+does not configure or store it. After health is ready, an authenticated `/props`
+handshake rejects both a wrong key and a wrong model before any input is sent.
+This prevents an unrelated service that claims the selected port from receiving
+images/questions. CORS is restricted and the key is supplied on inference calls.
+There are no hosted credentials, remote endpoint settings, model downloads or
+paid requests. Injected HTTP transports remain caller-owned; tests patch the
+`local.runtime_session` context manager to yield a `ManagedEndpoint` while
+retaining real input/answer validation.
 
 ### Validation and limits
 
@@ -130,12 +138,13 @@ Probability sums may differ from one by at most `max(0.01, N * 0.00005)`, where
 `N` is the option/level count. This preserves the original 0.01 tolerance while
 allowing four-decimal probability rounding across up to 255 choice options
 (at most 0.01275). Choice IDs must be maximum-probability options; any displayed
-tie is valid. Confidence must equal the maximum displayed probability for both
-choice and score. Scores must be in `[0, N-1]` and agree with the weighted level
+tie is valid. Confidence is an independent value in `[0, 1]` for both choice and
+score; it is not required to equal the maximum probability. Scores must be in
+`[0, N-1]` and agree with the weighted level
 probabilities within `0.00005 * (1 + N * (N-1) / 2)`: one four-decimal rounding
 error for the score, plus each probability's rounding error weighted by its
 level. Numeric comparisons also allow floating-point representation noise.
-These rules follow Cloudflare's [official answer formatter](https://huggingface.co/Cloudflare/clef-flash/blob/main/joint_schema_model.py).
+Confidence semantics follow the llama.cpp [systemone contract](https://github.com/ggml-org/llama.cpp/blob/b11435/tools/server/README.md#post-v1systemone).
 Values are preserved without rescaling, following [ADR 0009](0009-scorer-value-range-reference.md).
 Failure remains separate from decision content, following the outcome boundary
 of [ADR 0006](0006-annotation-outcome-contract.md).

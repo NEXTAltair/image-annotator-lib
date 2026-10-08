@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -19,7 +20,12 @@ from image_annotator_lib.decisions import (
     NoulQuestion,
 )
 from image_annotator_lib.decisions import runtime as runtime_module
-from image_annotator_lib.decisions.runtime import LocalRuntimeError, RuntimeSettings, _LocalRuntime
+from image_annotator_lib.decisions.runtime import (
+    LocalRuntimeError,
+    ManagedEndpoint,
+    RuntimeSettings,
+    _LocalRuntime,
+)
 
 pytestmark = [pytest.mark.unit, pytest.mark.standard]
 
@@ -67,8 +73,10 @@ def _mock_http(monkeypatch: pytest.MonkeyPatch, handler: Any) -> list[dict[str, 
     options: list[dict[str, Any]] = []
 
     def client(**kwargs: Any) -> httpx.Client:
-        options.append(kwargs)
-        return original(transport=httpx.MockTransport(handler), **kwargs)
+        options.append(dict(kwargs))
+        if kwargs.get("transport") is None:
+            kwargs["transport"] = httpx.MockTransport(handler)
+        return original(**kwargs)
 
     monkeypatch.setattr(runtime_module.httpx, "Client", client)
     return options
@@ -79,6 +87,17 @@ def test_runtime_launch_is_hidden_loopback_and_ready_before_use(
     settings: RuntimeSettings, monkeypatch: pytest.MonkeyPatch, n_gpu_layers: int
 ) -> None:
     settings = replace(settings, n_gpu_layers=n_gpu_layers)
+    inherited_options = (
+        "LLAMA_ARG_API_PREFIX",
+        "LLAMA_API_KEY",
+        "MTMD_BACKEND_DEVICE",
+        "GGML_RPC_SERVERS",
+        "AIP_MODE",
+    )
+    for name in inherited_options:
+        monkeypatch.setenv(name, "unmanaged-value")
+    monkeypatch.setenv("CLEF_TEST_KEEP", "preserved")
+    parent_env = dict(os.environ)
     calls: list[tuple[list[str], dict[str, Any]]] = []
     process = FakeProcess()
 
@@ -91,12 +110,16 @@ def test_runtime_launch_is_hidden_loopback_and_ready_before_use(
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        return httpx.Response(503 if len(requests) == 1 else 200, json={"status": "ok"})
+        if request.url.path == "/health":
+            return httpx.Response(503 if len(requests) == 1 else 200, json={"status": "ok"})
+        if request.headers["Authorization"] != f"Bearer {runtime.api_key}":
+            return httpx.Response(401)
+        return httpx.Response(200, json={"model_path": str(settings.model_path)})
 
     options = _mock_http(monkeypatch, handler)
     runtime = _LocalRuntime(settings)
     runtime.start(2)
-    assert len(calls) == 1 and len(requests) == 2
+    assert len(calls) == 1 and len(requests) == 4
     args, kwargs = calls[0]
     assert args[0] == str(settings.server_path)
     assert args[args.index("--host") + 1] == "127.0.0.1"
@@ -104,6 +127,12 @@ def test_runtime_launch_is_hidden_loopback_and_ready_before_use(
     assert args[args.index("-ub") + 1] == "4096"
     assert args[args.index("--parallel") + 1] == "1"
     assert "--no-context-shift" in args and "--offline" in args
+    assert args[args.index("--api-key") + 1] == runtime.api_key
+    assert len(runtime.api_key) >= 32
+    assert "--no-cors-credentials" in args
+    assert args[args.index("--cors-origins") + 1] == "http://127.0.0.1"
+    assert not any(name in kwargs["env"] for name in inherited_options)
+    assert kwargs["env"]["CLEF_TEST_KEEP"] == "preserved" and dict(os.environ) == parent_env
     if n_gpu_layers == 0:
         assert args[args.index("--device") + 1] == "none"
         assert "--no-mmproj-offload" in args
@@ -195,6 +224,43 @@ def test_http_success_without_ready_health_does_not_start_inference(
     assert process.terminated and runtime.process is None
 
 
+@pytest.mark.parametrize("other_service", ["unprotected", "other-key", "other-model", "redirect"])
+def test_port_collision_never_receives_images_or_questions(
+    settings: RuntimeSettings, monkeypatch: pytest.MonkeyPatch, other_service: str
+) -> None:
+    process = FakeProcess()
+    monkeypatch.setattr(runtime_module.subprocess, "Popen", lambda *args, **kwargs: process)
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok"})
+        if other_service == "unprotected":
+            return httpx.Response(200, json={"model_path": str(settings.model_path)})
+        if other_service == "redirect":
+            return httpx.Response(302, headers={"Location": "https://example.invalid"})
+        if other_service == "other-key" or len(requests) == 2:
+            return httpx.Response(401)
+        return httpx.Response(200, json={"model_path": "another-model.gguf"})
+
+    _mock_http(monkeypatch, handler)
+    client = LocalDecisionClient(settings.server_path, settings.model_path, settings.mmproj_path)
+    result = client.evaluate(
+        DecisionRequest("private-id", {"private": "state"}, {"tag": NoulQuestion("Fit?")})
+    )
+    assert result.error is not None and result.error.code == DecisionErrorCode.TRANSPORT
+    assert not result.answers and process.terminated
+    assert all(request.method == "GET" and request.url.host == "127.0.0.1" for request in requests)
+    assert all(not request.content for request in requests)
+
+
+def test_runtime_keys_are_unique_and_not_part_of_endpoint_repr(settings: RuntimeSettings) -> None:
+    first, second = _LocalRuntime(settings), _LocalRuntime(settings)
+    assert first.api_key != second.api_key
+    assert first.api_key not in repr(ManagedEndpoint("http://127.0.0.1:11437", first.api_key))
+
+
 def _fake_runtime(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     instances: list[Any] = []
 
@@ -203,6 +269,7 @@ def _fake_runtime(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
             self.settings = settings
             self.process: FakeProcess | None = FakeProcess()
             self.base_url = "http://127.0.0.1:11437"
+            self.api_key = "test-runtime-key"
             self.closed = False
             self.starts = 0
             self.ready = False
@@ -227,7 +294,7 @@ def test_clients_reuse_one_runtime_then_release_old_model_on_settings_or_file_ch
     instances = _fake_runtime(monkeypatch)
     for _ in range(2):
         with runtime_module.runtime_session(settings, 1) as endpoint:
-            assert endpoint == "http://127.0.0.1:11437"
+            assert endpoint == ManagedEndpoint("http://127.0.0.1:11437", "test-runtime-key")
     assert len(instances) == 1 and instances[0].starts == 1
     changed = replace(settings, n_gpu_layers=0)
     with runtime_module.runtime_session(changed, 1):
