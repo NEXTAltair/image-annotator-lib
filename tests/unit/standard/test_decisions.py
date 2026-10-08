@@ -312,6 +312,8 @@ def test_configuration_errors_are_sanitized(changes: dict[str, Any]) -> None:
         (429, DecisionErrorCode.PROVIDER, True),
         (500, DecisionErrorCode.PROVIDER, True),
         (400, DecisionErrorCode.PROVIDER, False),
+        (413, DecisionErrorCode.PROVIDER, False),
+        (404, DecisionErrorCode.CONFIGURATION, False),
         (302, DecisionErrorCode.PROVIDER, False),
     ],
 )
@@ -361,6 +363,7 @@ def test_transport_failures_sanitize_exception_messages(error: type[httpx.Reques
         _response(answers={"other": {"type": "noul", "noul": 0.5}}),
         _response(answers={"tag_000": {"type": "choice", "noul": 0.5}}),
         _response(model="unrecognized"),
+        _response(model="clef"),
         _response(model=None),
         _response(answers=[]),
         {"success": True, "result": []},

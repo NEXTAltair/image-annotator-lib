@@ -41,6 +41,7 @@ class _LocalRuntime:
         self.settings = settings
         self.process: subprocess.Popen[bytes] | None = None
         self.base_url = ""
+        self.ready = False
 
     def start(self, timeout: float) -> None:
         """Start a loopback server and wait for readiness within the time budget."""
@@ -86,6 +87,7 @@ class _LocalRuntime:
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             self._wait_ready(started + timeout)
+            self.ready = True
         except OSError:
             self.close()
             raise LocalRuntimeError(
@@ -110,24 +112,41 @@ class _LocalRuntime:
                     response = client.get(
                         f"{self.base_url}/health", timeout=max(0.001, min(1.0, deadline - time.monotonic()))
                     )
-                    if response.status_code == 200 and self.process.poll() is None:
-                        return
-                except httpx.RequestError:
+                    if response.status_code == 200:
+                        health = response.json()
+                        if (
+                            isinstance(health, dict)
+                            and health.get("status") == "ok"
+                            and self.process.poll() is None
+                        ):
+                            return
+                except (httpx.RequestError, ValueError):
                     pass  # Loading a model precedes the server's health endpoint.
                 time.sleep(max(0, min(0.1, deadline - time.monotonic())))
         raise LocalRuntimeError("Local Clef model loading timed out. Check memory or increase the timeout.")
 
     def close(self) -> None:
         """Terminate only the subprocess owned by this runtime, then reap it."""
+        self.ready = False
         if self.process is None:
             return
-        if self.process.poll() is None:
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait(timeout=5)
+        try:
+            if self.process.poll() is None:
+                try:
+                    self.process.terminate()
+                except OSError:
+                    # It can exit between poll() and terminate(), especially on Windows.
+                    if self.process.poll() is None:
+                        raise
+                try:
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            raise LocalRuntimeError(
+                "The owned local Clef process could not be stopped. Close it before evaluating again."
+            ) from None
         self.process = None
 
 
@@ -146,15 +165,15 @@ def runtime_session(settings: RuntimeSettings, timeout: float) -> Iterator[str]:
     try:
         if _active_runtime is not None and (
             _active_runtime.settings != settings
+            or not _active_runtime.ready
             or _active_runtime.process is None
             or _active_runtime.process.poll() is not None
         ):
             _active_runtime.close()
             _active_runtime = None
         if _active_runtime is None:
-            runtime = _LocalRuntime(settings)
-            runtime.start(timeout)
-            _active_runtime = runtime
+            _active_runtime = _LocalRuntime(settings)
+            _active_runtime.start(timeout)
         try:
             yield _active_runtime.base_url
         except BaseException:

@@ -151,6 +151,43 @@ def test_close_kills_and_reaps_a_process_that_ignores_termination(settings: Runt
     assert process.terminated and process.killed and runtime.process is None
 
 
+def test_close_handles_process_exit_between_poll_and_terminate(settings: RuntimeSettings) -> None:
+    class ExitingProcess(FakeProcess):
+        def terminate(self) -> None:
+            self.returncode = 0
+            raise ProcessLookupError("already exited")
+
+    runtime = _LocalRuntime(settings)
+    runtime.process = ExitingProcess()  # type: ignore[assignment]
+    runtime.close()
+    assert runtime.process is None
+
+
+def test_failed_termination_remains_typed_and_keeps_process_ownership(settings: RuntimeSettings) -> None:
+    class ProtectedProcess(FakeProcess):
+        def terminate(self) -> None:
+            raise PermissionError("private system detail")
+
+    runtime = _LocalRuntime(settings)
+    runtime.process = ProtectedProcess()  # type: ignore[assignment]
+    with pytest.raises(LocalRuntimeError, match="could not be stopped"):
+        runtime.close()
+    assert runtime.process is not None
+
+
+@pytest.mark.parametrize("health", [b"not JSON", b"[]", b'{"status": "loading"}'])
+def test_http_success_without_ready_health_does_not_start_inference(
+    settings: RuntimeSettings, monkeypatch: pytest.MonkeyPatch, health: bytes
+) -> None:
+    process = FakeProcess()
+    monkeypatch.setattr(runtime_module.subprocess, "Popen", lambda *args, **kwargs: process)
+    _mock_http(monkeypatch, lambda request: httpx.Response(200, content=health))
+    runtime = _LocalRuntime(settings)
+    with pytest.raises(LocalRuntimeError, match="timed out"):
+        runtime.start(0.01)
+    assert process.terminated and runtime.process is None
+
+
 def _fake_runtime(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     instances: list[Any] = []
 
@@ -161,13 +198,16 @@ def _fake_runtime(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
             self.base_url = "http://127.0.0.1:11437"
             self.closed = False
             self.starts = 0
+            self.ready = False
             instances.append(self)
 
         def start(self, timeout: float) -> None:
             self.starts += 1
+            self.ready = True
 
         def close(self) -> None:
             self.closed = True
+            self.ready = False
             self.process = None
 
     monkeypatch.setattr(runtime_module, "_LocalRuntime", FakeRuntime)
