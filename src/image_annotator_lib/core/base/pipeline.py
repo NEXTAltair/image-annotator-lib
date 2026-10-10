@@ -22,11 +22,20 @@ class PipelineBaseAnnotator(LocalModelAnnotator):
         from ..utils import determine_effective_device
 
         self.device = determine_effective_device(self._config.device, self.model_name)
+        self._requested_device = self._config.device
         self.batch_size = config_registry.get(self.model_name, "batch_size", 8)
         self.task = config_registry.get(self.model_name, "task", "image-classification")
         # components の型ヒントを具体的に指定
         self.components: TransformersPipelineComponents | None = None
         self._prepared = False
+
+    def _resolve_context_device(self) -> str:
+        """Retry the configured target while preserving nested inference placement."""
+        if not ModelLoad.is_final_model_context(self.model_name, self):
+            return self.device
+        from ..utils import determine_effective_device
+
+        return determine_effective_device(self._requested_device, self.model_name)
 
     @local_model_enter
     def __enter__(self) -> "PipelineBaseAnnotator":
@@ -39,6 +48,8 @@ class PipelineBaseAnnotator(LocalModelAnnotator):
             raise ValueError(f"モデル '{self.model_name}' の model_path が設定されていません。")
         if self.batch_size is None:
             raise ValueError(f"モデル '{self.model_name}' の batch_size が設定されていません。")
+
+        self.device = self._resolve_context_device()
 
         if (
             self._prepared

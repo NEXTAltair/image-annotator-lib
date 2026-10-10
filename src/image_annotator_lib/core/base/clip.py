@@ -33,6 +33,7 @@ class ClipBaseAnnotator(LocalModelAnnotator):
         from ..utils import determine_effective_device
 
         self.device = determine_effective_device(self._config.device, self.model_name)
+        self._requested_device = self._config.device
         # base_model は必須設定でデフォルト値なし
         self.base_model = config_registry.get(self.model_name, "base_model")  # 型チェック後に代入
         logger.debug(
@@ -41,6 +42,14 @@ class ClipBaseAnnotator(LocalModelAnnotator):
         # components の型ヒントを具体的に指定
         self.components: CLIPComponents | None = None
         self._prepared = False
+
+    def _resolve_context_device(self) -> str:
+        """Retry the configured target while preserving nested inference placement."""
+        if not ModelLoad.is_final_model_context(self.model_name, self):
+            return self.device
+        from ..utils import determine_effective_device
+
+        return determine_effective_device(self._requested_device, self.model_name)
 
     @local_model_enter
     def __enter__(self) -> Self:
@@ -51,6 +60,8 @@ class ClipBaseAnnotator(LocalModelAnnotator):
                 raise ValueError(f"モデル '{self.model_name}' の base_model が設定されていません。")
             if self.model_path is None:
                 raise ValueError(f"モデル '{self.model_name}' の model_path が設定されていません。")
+
+            self.device = self._resolve_context_device()
 
             if (
                 self._prepared
