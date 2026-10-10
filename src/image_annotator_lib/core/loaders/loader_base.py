@@ -278,14 +278,16 @@ class LoaderBase(ABC):
         else:
             logger.warning(f"モデル '{self.model_name}' サイズ不明/0、キャッシュクリアはベストエフォート。")
 
+        if self.device.startswith("cuda"):
+            # Every backend must admit GPU weights before framework allocation.
+            # Keep capacity failures typed; no backend allocation has started yet.
+            # Import at call time because the facade imports these loaders.
+            from ..model_factory import ModelLoad
+
+            ModelLoad._make_cuda_room(self.model_name, self.device)
+
         # 4. コンポーネントロード
         try:
-            if self.device.startswith("cuda"):
-                # Every backend must admit GPU weights before framework allocation.
-                # Import at call time because the facade imports these loaders.
-                from ..model_factory import ModelLoad
-
-                ModelLoad._make_cuda_room(self.model_name, self.device)
             logger.info(
                 f"モデル '{self.model_name}' ({model_type}) ロード開始 (デバイス: {self.device})..."
             )
