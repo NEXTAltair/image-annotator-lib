@@ -59,8 +59,12 @@ CPU offload and GPU restoration replace the transitioning model's host footprint
 instead of adding its size a second time. Host LRU victims must have reclaimable
 host weight bytes. GPU LRU victims must be idle and on the target GPU. Unused
 PyTorch allocator blocks are trimmed before comparing driver free VRAM to weight
-size. Known capacity shortage is reported after idle eviction; a valid CPU cache
-can continue through the existing restoration fallback.
+size. Every CUDA loader runs admission before its backend allocates weights;
+restoring CPU-cached weights also runs admission. Known capacity shortage is
+reported after idle eviction; a valid CPU cache can continue through the existing
+restoration fallback. Transformers, Pipeline and CLIP retain their configured
+target separately from effective CPU fallback placement so a later entry or
+reload can retry CUDA.
 
 ## Rationale
 
