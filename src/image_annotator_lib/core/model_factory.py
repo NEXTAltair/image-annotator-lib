@@ -63,6 +63,7 @@ class ModelLoad:
     _ACTIVE_CONTEXTS: ClassVar[dict[str, int]] = LoaderBase._ACTIVE_CONTEXTS
     _ACTIVE_THREADS: ClassVar[dict[str, int]] = LoaderBase._ACTIVE_THREADS
     _RELEASE_PENDING: ClassVar[set[str]] = LoaderBase._RELEASE_PENDING
+    _CLEANUP_PENDING: ClassVar[set[str]] = LoaderBase._CLEANUP_PENDING
     _PREPARING_MODELS: ClassVar[set[str]] = LoaderBase._PREPARING_MODELS
     _EXITING_MODELS: ClassVar[set[str]] = LoaderBase._EXITING_MODELS
 
@@ -89,6 +90,7 @@ class ModelLoad:
     _release_model_state = LoaderBase.__dict__["_release_model_state"]
     _invoke_component_releaser = LoaderBase.__dict__["_invoke_component_releaser"]
     _release_model_internal = LoaderBase.__dict__["_release_model_internal"]
+    _cleanup_allocator = LoaderBase.__dict__["_cleanup_allocator"]
     _handle_load_error = LoaderBase.__dict__["_handle_load_error"]
     begin_model_context = LoaderBase.__dict__["begin_model_context"]
     finish_model_entry = LoaderBase.__dict__["finish_model_entry"]
@@ -283,16 +285,13 @@ class ModelLoad:
             ModelLoad._make_cuda_room(model_name, device)
         except OutOfMemoryError:
             # A CPU-cached model can remain on CPU without harming active GPU owners.
+            if state != "on_cpu":
+                ModelLoad._restore_cpu_fallback(model_name, components, model_size)
             return None
 
         try:
             ModelLoad._move_components_to_device(components, device)
-            if host_size == 0.0 and not str(getattr(components.get("model"), "device", "")).startswith(
-                "cuda"
-            ):
-                host_size = model_size
-                if not ModelLoad._clear_cache_internal(model_name, host_size):
-                    raise MemoryError(f"Insufficient host cache after restoring {model_name!r}")
+            host_size = ModelLoad._restored_host_size(model_name, components, host_size, model_size)
             ModelLoad._update_model_state(model_name, device, "loaded", model_size, host_size_mb=host_size)
             logger.info(f"モデル '{model_name}' を {device} に復元完了。")
             return components
@@ -300,6 +299,17 @@ class ModelLoad:
             logger.error(f"モデル '{model_name}' の {device} への復元中にエラー: {e}", exc_info=True)
             ModelLoad._restore_cpu_fallback(model_name, components, model_size)
             return None
+
+    @staticmethod
+    def _restored_host_size(
+        model_name: str, components: dict[str, Any], expected: float, model_size: float
+    ) -> float:
+        actual = expected
+        if expected == 0.0 and not str(getattr(components.get("model"), "device", "")).startswith("cuda"):
+            actual = model_size
+        if actual > expected and not ModelLoad._clear_cache_internal(model_name, actual):
+            raise MemoryError(f"Insufficient host cache after restoring {model_name!r}")
+        return actual
 
     @staticmethod
     def _restore_cpu_fallback(model_name: str, components: dict[str, Any], model_size: float) -> None:
@@ -326,6 +336,7 @@ class ModelLoad:
         """
         if not device.startswith("cuda"):
             return
+        ModelLoad._trim_unused_cuda_cache(device)
 
         target_index = ModelLoad._cuda_index(device)
         size_mb = ModelLoad._MODEL_SIZES.get(model_name) or ModelLoad.get_model_size(model_name)
@@ -340,11 +351,23 @@ class ModelLoad:
             if ModelLoad.is_model_active(other_name):
                 continue
             if ModelLoad._has_cuda_room(size_mb, device):
-                break
+                return
             logger.info(f"VRAM 確保のためモデル '{other_name}' を解放 ({model_name} -> {device})")
             ModelLoad.release_model(other_name)
 
         ModelLoad._check_cuda_capacity(model_name, size_mb, device)
+
+    @staticmethod
+    def _trim_unused_cuda_cache(device: str) -> None:
+        """Driver free memory excludes reusable PyTorch blocks; trim those first."""
+        import torch
+
+        try:
+            if torch.cuda.memory_reserved(device) > torch.cuda.memory_allocated(device):
+                torch.cuda.empty_cache()
+        except (RuntimeError, AssertionError):
+            # Capacity remains unknown when the runtime cannot be queried.
+            logger.debug(f"Could not trim the CUDA allocator cache on {device}.")
 
     @staticmethod
     def _cuda_index(device: str) -> int:

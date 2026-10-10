@@ -65,6 +65,7 @@ class LoaderBase(ABC):
     _ACTIVE_CONTEXTS: ClassVar[dict[str, int]] = {}
     _ACTIVE_THREADS: ClassVar[dict[str, int]] = {}
     _RELEASE_PENDING: ClassVar[set[str]] = set()
+    _CLEANUP_PENDING: ClassVar[set[str]] = set()
     _PREPARING_MODELS: ClassVar[set[str]] = set()
     _EXITING_MODELS: ClassVar[set[str]] = set()
     # Model weight estimates remain in _MEMORY_USAGE for compatibility. Host
@@ -121,13 +122,17 @@ class LoaderBase(ABC):
         cls._ACTIVE_THREADS.pop(model_name, None)
         cls._PREPARING_MODELS.discard(model_name)
         cls._EXITING_MODELS.discard(model_name)
+        needs_cleanup = model_name in cls._CLEANUP_PENDING
+        cls._CLEANUP_PENDING.discard(model_name)
         if model_name in cls._RELEASE_PENDING:
             cls._release_model_internal(model_name)
         elif model_name in cls._MODEL_STATES:
             cls._update_model_state(model_name)
+            if needs_cleanup:
+                cls._cleanup_allocator()
         else:
             # Also discard callbacks installed before a failed load.
-            cls._release_model_state(model_name)
+            cls._release_model_internal(model_name)
 
     @classmethod
     def _check_context_owner(cls, model_name: str, owner: object) -> None:
@@ -167,6 +172,12 @@ class LoaderBase(ABC):
         if existing is not None and existing is not owner:
             raise ModelLoadError(f"Cannot invalidate another owner of model {model_name!r}.")
         cls._release_model_state(model_name, owner=owner, force=True)
+        if cls.is_model_active(model_name):
+            # Cleanup allocator caches after the last live context unwinds,
+            # when handled OOM tracebacks no longer hold inference tensors.
+            cls._CLEANUP_PENDING.add(model_name)
+        else:
+            cls._release_model_internal(model_name)
 
     def __init__(self, model_name: str, device: str) -> None:
         """ベースローダーを初期化する。
@@ -247,6 +258,7 @@ class LoaderBase(ABC):
         model_size_mb = LoaderBase._get_or_calculate_size(
             self.model_name, model_path, model_type, self, **kwargs
         )
+        expected_host_size = self._expected_host_size_mb(model_size_mb)
 
         # 2. メモリチェック
         if not LoaderBase._check_memory_before_load(model_size_mb, self.model_name):
@@ -257,9 +269,7 @@ class LoaderBase(ABC):
 
         # 3. キャッシュクリア
         if model_size_mb > 0:
-            if not LoaderBase._clear_cache_internal(
-                self.model_name, self._expected_host_size_mb(model_size_mb)
-            ):
+            if not LoaderBase._clear_cache_internal(self.model_name, expected_host_size):
                 LoaderBase._handle_load_error(
                     self.model_name,
                     MemoryError(f"Failed to clear sufficient cache for {self.model_name}"),
@@ -277,7 +287,9 @@ class LoaderBase(ABC):
 
             # 5. 成功時の状態更新
             host_size = self._loaded_host_size_mb(components, model_size_mb)
-            if not LoaderBase._clear_cache_internal(self.model_name, host_size):
+            if host_size > expected_host_size and not LoaderBase._clear_cache_internal(
+                self.model_name, host_size
+            ):
                 raise MemoryError(f"Insufficient host cache for loaded model {self.model_name!r}")
             LoaderBase._update_model_state(
                 self.model_name, self.device, "loaded", model_size_mb, host_size_mb=host_size
@@ -588,6 +600,7 @@ class LoaderBase(ABC):
             cls._MODEL_LAST_USED.pop(model_name, None)
             cls._MODEL_OWNERS.pop(model_name, None)
             cls._RELEASE_PENDING.discard(model_name)
+            cls._CLEANUP_PENDING.discard(model_name)
             logger.debug(f"モデル '{model_name}' 状態情報解放。")
             return
 
@@ -691,7 +704,6 @@ class LoaderBase(ABC):
             cls._MEMORY_USAGE.pop(model_name, None)
             cls._HOST_MEMORY_USAGE.pop(model_name, None)
             cls._MODEL_LAST_USED.pop(model_name, None)
-            cls._RELEASE_PENDING.discard(model_name)
             return True
         cls._invoke_component_releaser(model_name)
         cls._update_model_state(model_name, status="released")
@@ -747,11 +759,6 @@ class LoaderBase(ABC):
         if cls.is_model_active(model_name):
             cls._RELEASE_PENDING.add(model_name)
             return
-        try:
-            import torch
-        except ImportError:
-            torch = None  # type: ignore[assignment]
-
         logger.info(f"モデル '{model_name}' 解放処理開始...")
         if components:
             try:
@@ -768,15 +775,22 @@ class LoaderBase(ABC):
 
         cls._release_model_state(model_name)
 
-        try:
-            logger.debug("ガベージコレクションとCUDAキャッシュクリア実行...")
-            gc.collect()
-            if torch is not None and torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                logger.debug("クリーンアップ完了。")
-        except Exception as e:
-            logger.error(f"GC/CUDAキャッシュクリア中にエラー: {e}", exc_info=True)
+        cls._cleanup_allocator()
         logger.info(f"モデル '{model_name}' 解放処理完了。")
+
+    @classmethod
+    @resource_locked
+    def _cleanup_allocator(cls) -> None:
+        try:
+            gc.collect()
+            try:
+                import torch
+            except ImportError:
+                return
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception as error:
+            logger.error(f"GC/CUDAキャッシュクリア中にエラー: {error}", exc_info=True)
 
     @classmethod
     def _handle_load_error(cls, model_name: str, error: Exception) -> None:
