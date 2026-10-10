@@ -171,6 +171,8 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
         )
         if error:
             return error
+        if predictions is None:
+            raise RuntimeError("ONNX output validation returned no predictions or error.")
 
         # カテゴリ別にタグを分類
         tags_with_probs = list(zip(all_tags_list, predictions, strict=True))
@@ -202,7 +204,7 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
         raw_output: np.ndarray[Any, np.dtype[Any]],
         all_tags_list: list[str],
         capabilities: set,
-    ) -> tuple[np.ndarray | None, UnifiedAnnotationResult | None]:
+    ) -> tuple[np.ndarray[Any, np.dtype[np.float64]] | None, UnifiedAnnotationResult | None]:
         """ONNX出力のバリデーションを行う。
 
         Args:
@@ -231,6 +233,7 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
                 framework="onnx",
             )
 
+        predictions: np.ndarray[Any, np.dtype[np.float64]]
         if raw_output.ndim == 2 and raw_output.shape[0] == 1:
             predictions = raw_output[0].astype(float)
         elif raw_output.ndim == 1:

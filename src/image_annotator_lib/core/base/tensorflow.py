@@ -202,6 +202,7 @@ class TensorflowBaseAnnotator(LocalModelAnnotator):
             return {"error": {}}  # エラーを示す辞書を返す
 
         # 生出力が NumPy 配列であることを確認し、適切な次元から予測値を取得
+        predictions: np.ndarray[Any, np.dtype[np.float64]]
         if isinstance(raw_output, np.ndarray):
             predictions = raw_output.astype(float)
         else:
