@@ -13,15 +13,15 @@ if TYPE_CHECKING:
     import torch
 
 # --- ローカルインポート ---
-from ...exceptions.errors import ConfigurationError, ModelLoadError, OutOfMemoryError
+from ...exceptions.errors import ConfigurationError, ModelLoadError
 from ..config import config_registry
 from ..model_factory import ModelLoad
 from ..types import TransformersComponents, UnifiedAnnotationResult
 from ..utils import logger
-from .annotator import BaseAnnotator
+from .local import LocalModelAnnotator, local_model_enter, local_model_exit
 
 
-class TransformersBaseAnnotator(BaseAnnotator):
+class TransformersBaseAnnotator(LocalModelAnnotator):
     """Transformers ライブラリを使用するモデル用の基底クラス。"""
 
     def __init__(self, model_name: str):
@@ -34,106 +34,82 @@ class TransformersBaseAnnotator(BaseAnnotator):
         from ..utils import determine_effective_device
 
         self.device = determine_effective_device(self._config.device, self.model_name)
+        self._requested_device = self._config.device
         # 設定ファイルから追加パラメータを取得
         self.max_length = config_registry.get(self.model_name, "max_length", 75)
         self.processor_path = config_registry.get(self.model_name, "processor_path")
         # components の型ヒントを具体的に指定
         self.components: TransformersComponents | None = None
+        self._prepared = False
         # model_path の型を保証 (LocalMLModelConfig では str を期待)
         self.model_path = str(self.model_path) if isinstance(self.model_path, str) else ""
 
+    @local_model_enter
     def __enter__(self) -> TransformersBaseAnnotator:
-        """
-        モデルの状態に基づいて、必要な場合のみロードまたは復元
-        メモリ不足エラーをハンドリングし、VRAM使用量をログに出力
-        """
-        try:
-            if self.model_path is None:
-                raise ConfigurationError(f"モデル '{self.model_name}' の model_path が設定されていません。")
+        """準備済みモデルを保持し、必要な場合だけロード/復元する (Issue #165)。"""
+        if not self.model_path:
+            raise ConfigurationError(f"モデル '{self.model_name}' の model_path が設定されていません。")
 
-            # --- モデルロード処理 ---
-            # ロード前にキャッシュ状態を確認する (Issue #146)。
-            # load_components() は「キャッシュ済み」と「ロード失敗」の両方で None を返すため、
-            # 呼び出し前の状態で2ケースを区別する。
-            had_cached_state = ModelLoad._get_model_state(self.model_name) is not None
+        state = ModelLoad._get_model_state(self.model_name)
+        if self._prepared and self.components and state == f"on_{self.device}":
+            ModelLoad._update_model_state(self.model_name)
+            logger.debug(f"Transformers components already prepared for '{self.model_name}'; reusing")
+            return self
 
-            logger.info(f"モデルコンポーネントのロード試行: {self.model_name} をデバイス {self.device} へ")
-            loaded_components = ModelLoad.load_transformers_components(
-                self.model_name,
-                str(self.model_path),
-                str(self.device),
+        if not state:
+            self._release_retained_components()
+
+        if not self._prepared:
+            from ..utils import determine_effective_device
+
+            self.device = determine_effective_device(self._requested_device, self.model_name)
+        loaded = ModelLoad.load_transformers_components(
+            self.model_name, str(self.model_path), str(self.device)
+        )
+        if loaded is not None:
+            self.components = loaded
+        if (
+            not self.components
+            or self.components.get("model") is None
+            or self.components.get("processor") is None
+        ):
+            raise ModelLoadError(
+                f"Failed to load components for model '{self.model_name}'.", model_path=self.model_path
             )
 
-            # None = 既キャッシュ済み (self.components は前回 __exit__ で設定済み)。
-            # 空コンポーネント = ロード失敗。
-            if loaded_components is not None:
-                self.components = loaded_components
-                logger.info(f"モデルコンポーネントのロード成功: {self.model_name}")
-            elif not self.components:
-                if had_cached_state:
-                    # モデル状態が「キャッシュ済み」(None 返却) だが、このインスタンスはコンポーネントを
-                    # 保持していない。api_keys={} 指定時の毎回インスタンス再生成などで発生 (Issue #146)。
-                    # 状態をリセットして強制再ロードする。
-                    logger.warning(
-                        f"モデル '{self.model_name}' は状態「キャッシュ済み」だが、"
-                        "このインスタンスはコンポーネントを保持していない。状態をリセットして再ロード。"
-                    )
-                    ModelLoad._release_model_state(self.model_name)
-                    loaded_components = ModelLoad.load_transformers_components(
-                        self.model_name, str(self.model_path), str(self.device)
-                    )
-                    if loaded_components is not None:
-                        self.components = loaded_components
-                        logger.info(f"モデルコンポーネントの再ロード成功: {self.model_name}")
-                    else:
-                        error_msg = f"Failed to load components for model '{self.model_name}'."
-                        logger.error(error_msg, exc_info=True)
-                        raise ModelLoadError(error_msg, model_path=self.model_path)
-                else:
-                    error_msg = f"Failed to load components for model '{self.model_name}'."
-                    logger.error(error_msg, exc_info=True)
-                    raise ModelLoadError(error_msg, model_path=self.model_path)
+        self._restore_components()
 
-            # --- CUDAへの復元処理 ---
-            logger.debug(f"モデル {self.model_name} を {self.device} へ復元試行")
-            # Restoration Attempt (失敗しても継続可能)
-            restored_components = ModelLoad.restore_model_to_cuda(
-                self.model_name,
-                dict(self.components),
-                str(self.device),
-            )
-
-            # Restoration Failure Handling (警告のみ、CPU で継続)
-            if restored_components is not None:
-                if not isinstance(restored_components, dict):
-                    raise TypeError("restored_componentsはdict型である必要があります。")
-                self.components = cast(TransformersComponents, restored_components)
-                logger.debug(f"モデル {self.model_name} の {self.device} への復元成功")
-            else:
-                # restore_model_to_cuda() は既に CPU フォールバック済み（None 返却）
-                # self.components は CPU 版を維持したまま継続
-                logger.warning(
-                    f"Model '{self.model_name}' will run on CPU. "
-                    f"CUDA restoration failed but CPU fallback is already complete."
-                )
-        except (OutOfMemoryError, MemoryError, OSError) as mem_e:
-            # メモリ関連エラーはそのまま上位に伝播させる
-            raise mem_e
-        except Exception as e:
-            # メモリ関連以外の予期せぬエラー
-            logger.exception(f"モデル {self.model_name} のロード/復元中に予期せぬエラーが発生: {e}")
-            raise
-
+        self._prepared = True
+        ModelLoad.register_component_releaser(
+            self.model_name, self._release_retained_components, owner=self
+        )
         return self
 
+    def _restore_components(self) -> None:
+        """保持コンポーネントを復元し、CPU fallback 時は入力のデバイスも揃える。"""
+        had_loaded_state = ModelLoad._get_model_state(self.model_name) is not None
+        if self.components is None:
+            raise ModelLoadError(f"Missing components for model {self.model_name!r}.")
+        restored = ModelLoad.restore_model_to_cuda(self.model_name, dict(self.components), str(self.device))
+        if restored is not None:
+            self.components = cast(TransformersComponents, restored)
+        else:
+            state = ModelLoad._get_model_state(self.model_name)
+            if had_loaded_state and state is None:
+                raise ModelLoadError(
+                    f"Failed to restore components for model '{self.model_name}'.",
+                    model_path=self.model_path,
+                )
+            if state == "on_cpu":
+                self.device = "cpu"
+            logger.warning(f"Model '{self.model_name}' will run on CPU after restoration fallback.")
+
+    @local_model_exit
     def __exit__(
         self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any
     ) -> None:
-        if self.components and isinstance(self.components, dict):
-            cached_components = ModelLoad.cache_to_main_memory(self.model_name, dict(self.components))
-            self.components = cast(TransformersComponents, cached_components)
-        else:
-            self.components = None
+        """正常終了では保持を続け、解放は ModelLoad の LRU / release_model に委ねる。"""
+        logger.debug(f"Exiting context for Transformers model '{self.model_name}' (exception: {exc_type})")
 
     def _preprocess_images(self, images: list[Image.Image]) -> list[dict[str, Any]]:
         """画像バッチを前処理します。各画像を個別に処理して結果をリストで返します。"""

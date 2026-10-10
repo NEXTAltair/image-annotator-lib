@@ -19,10 +19,10 @@ from ..model_config import BaseModelConfig
 from ..model_factory import ModelLoad
 from ..types import TensorFlowComponents, UnifiedAnnotationResult
 from ..utils import logger
-from .annotator import BaseAnnotator
+from .local import LocalModelAnnotator, local_model_enter, local_model_exit
 
 
-class TensorflowBaseAnnotator(BaseAnnotator):
+class TensorflowBaseAnnotator(LocalModelAnnotator):
     """TensorFlow モデルを使用するモデル用の基底クラス。"""
 
     def __init__(self, model_name: str, config: BaseModelConfig | None = None):
@@ -58,7 +58,9 @@ class TensorflowBaseAnnotator(BaseAnnotator):
         self.model_format = model_format_input
         # components の型ヒントを具体的に指定
         self.components: TensorFlowComponents | None = None
+        self._prepared = False
 
+    @local_model_enter
     def __enter__(self) -> TensorflowBaseAnnotator:
         """TensorFlow モデルコンポーネントをロードします。状態管理は ModelLoad に委譲します。"""
         logger.debug(f"Entering context for TensorFlow model '{self.model_name}'")
@@ -68,6 +70,9 @@ class TensorflowBaseAnnotator(BaseAnnotator):
             )
             if self.model_path is None:
                 raise ValueError(f"モデル '{self.model_name}' の model_path が設定されていません。")
+            if self._prepared and self.components:
+                ModelLoad._update_model_state(self.model_name)
+                return self
             loaded_components = ModelLoad.load_tensorflow_components(
                 self.model_name,
                 self.model_path,
@@ -78,17 +83,17 @@ class TensorflowBaseAnnotator(BaseAnnotator):
                 raise ModelLoadError(f"モデル '{self.model_name}' のロード/復元に失敗しました。")
             self.components = loaded_components
             self._load_tags()  # TFモデル固有のタグロード処理
+            self._prepared = True
             logger.info(f"モデル '{self.model_name}' を正常にロードしました")
         except (ModelLoadError, OutOfMemoryError, FileNotFoundError, ValueError) as e:
             logger.error(f"TensorFlow モデル '{self.model_name}' のロード/準備中にエラー: {e}")
-            self.components = None
             raise
         except Exception as e:
             logger.exception(f"TensorFlow モデル '{self.model_name}' のロード/準備中に予期せぬエラー: {e}")
-            self.components = None
             raise ModelLoadError(f"予期せぬロードエラー: {e}") from e
         return self
 
+    @local_model_exit
     def __exit__(
         self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any
     ) -> None:
@@ -108,7 +113,10 @@ class TensorflowBaseAnnotator(BaseAnnotator):
             except Exception as e:
                 logger.exception(f"TensorFlow モデル '{self.model_name}' の解放中にエラー: {e}")
             finally:
-                self.components = None
+                # Leased release is deferred; keep the dictionary available to its
+                # registered callback until end_model_context clears it in place.
+                if not ModelLoad.is_model_active(self.model_name):
+                    self._release_retained_components()
         if exc_type:
             logger.error(f"TensorFlow モデル '{self.model_name}' のコンテキスト内で例外発生: {exc_val}")
 
@@ -197,6 +205,7 @@ class TensorflowBaseAnnotator(BaseAnnotator):
             return {"error": {}}  # エラーを示す辞書を返す
 
         # 生出力が NumPy 配列であることを確認し、適切な次元から予測値を取得
+        predictions: np.ndarray[Any, np.dtype[np.float64]]
         if isinstance(raw_output, np.ndarray):
             predictions = raw_output.astype(float)
         else:

@@ -22,6 +22,7 @@ from PIL import Image
 
 from image_annotator_lib.core.base.pipeline import PipelineBaseAnnotator
 from image_annotator_lib.core.base.transformers import TransformersBaseAnnotator
+from image_annotator_lib.core.model_factory import ModelLoad
 
 # ADR 0023 Phase 1 (Issue #35): WebApiBaseAnnotator は廃止された。WebAPI の lifecycle test は
 # `tests/unit/core/test_webapi_annotator.py` を参照。本ファイルではローカル ML 系 base
@@ -69,7 +70,9 @@ class TestFullLifecycle:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_pipeline_full_lifecycle_success(self, managed_config_registry, lightweight_test_images_local):
+    def test_pipeline_full_lifecycle_success(
+        self, managed_config_registry, lightweight_test_images_local, track_model_load
+    ):
         """Test complete pipeline lifecycle: __init__ → __enter__ → annotate → __exit__
 
         REAL components:
@@ -108,6 +111,7 @@ class TestFullLifecycle:
         with patch(
             "image_annotator_lib.core.base.pipeline.ModelLoad.load_transformers_pipeline_components"
         ) as mock_load_pipeline:
+            track_model_load(mock_load_pipeline, pipeline=True)
             # Mock pipeline components
             mock_pipeline = MagicMock()
             mock_pipeline.return_value = [{"label": "test", "score": 0.95}]
@@ -133,14 +137,13 @@ class TestFullLifecycle:
                 # Assert: Device set correctly
                 assert annotator.device == "cpu", "デバイスがCPUに設定されている"
 
-            # Note: ModelLoad._MODEL_STATES tracking depends on real ModelLoad operations.
-            # With mocked load_transformers_pipeline_components, state tracking may not occur.
-            # The critical behavior (components loaded, context manager works) is verified above.
+            assert ModelLoad._get_model_state(annotator.model_name) == "on_cpu"
+            assert not ModelLoad.is_model_active(annotator.model_name)
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
     def test_transformers_full_lifecycle_success(
-        self, managed_config_registry, lightweight_test_images_local
+        self, managed_config_registry, lightweight_test_images_local, track_model_load
     ):
         """Test complete transformers lifecycle: __init__ → __enter__ → annotate → __exit__
 
@@ -166,6 +169,7 @@ class TestFullLifecycle:
         with patch(
             "image_annotator_lib.core.base.transformers.ModelLoad.load_transformers_components"
         ) as mock_load_transformers:
+            track_model_load(mock_load_transformers)
             # Mock transformers components
             mock_model = MagicMock()
             mock_processor = MagicMock()
@@ -196,7 +200,9 @@ class TestFullLifecycle:
                 # Assert: Device set correctly
                 assert annotator.device == "cpu"
 
-            # Note: ModelLoad._MODEL_STATES tracking depends on real ModelLoad operations.
+            assert ModelLoad._get_model_state(annotator.model_name) == "on_cpu"
+            assert not ModelLoad.is_model_active(annotator.model_name)
+
 
 # NOTE: WebAPI annotator lifecycle test was removed in ADR 0023 Phase 1 (Issue #35).
 # `WebApiBaseAnnotator` was deprecated and replaced by `WebApiAnnotator` which has a
@@ -226,7 +232,11 @@ class TestDeviceFallback:
 
     @pytest.mark.integration
     def test_cuda_to_cpu_fallback_preserves_functionality(
-        self, managed_config_registry, lightweight_test_images_local, mock_cuda_unavailable
+        self,
+        managed_config_registry,
+        lightweight_test_images_local,
+        mock_cuda_unavailable,
+        track_model_load,
     ):
         """Test CUDA → CPU fallback with REAL device state management.
 
@@ -260,6 +270,7 @@ class TestDeviceFallback:
         with patch(
             "image_annotator_lib.core.base.pipeline.ModelLoad.load_transformers_pipeline_components"
         ) as mock_load:
+            track_model_load(mock_load, pipeline=True, device="cpu")
             # Mock pipeline components (CPU version)
             mock_pipeline = MagicMock()
             mock_pipeline.return_value = [{"label": "fallback_test", "score": 0.88}]
@@ -279,7 +290,9 @@ class TestDeviceFallback:
                 # Components loaded successfully on CPU (inference not tested here)
 
     @pytest.mark.integration
-    def test_cpu_explicit_no_fallback_needed(self, managed_config_registry, lightweight_test_images_local):
+    def test_cpu_explicit_no_fallback_needed(
+        self, managed_config_registry, lightweight_test_images_local, track_model_load
+    ):
         """Test explicit CPU configuration with no fallback.
 
         Verifies CPU-only path works independently without fallback logic.
@@ -311,6 +324,7 @@ class TestDeviceFallback:
         with patch(
             "image_annotator_lib.core.base.pipeline.ModelLoad.load_transformers_pipeline_components"
         ) as mock_load:
+            track_model_load(mock_load, pipeline=True)
             # Mock pipeline components
             mock_pipeline = MagicMock()
             mock_pipeline.return_value = [{"label": "cpu_test", "score": 0.91}]
@@ -378,19 +392,16 @@ class TestErrorRecovery:
             # Act: Attempt to load model (should fail)
             annotator = ConcreteTestPipelineAnnotator(model_name="load_failure_model")
 
-            try:
+            with pytest.raises(RuntimeError, match="Simulated load failure"):
                 annotator.__enter__()
-                # If we reach here, the error was not propagated
-                assert False, "Expected RuntimeError to be propagated"
-            except RuntimeError as e:
-                # Assert: Error propagated correctly
-                assert "Simulated load failure" in str(e), "エラーメッセージが正しく伝播"
 
             # Assert: Cleanup occurred - components not loaded
             assert annotator.components is None, "ロード失敗時はcomponentsがNoneのまま"
 
     @pytest.mark.integration
-    def test_restoration_failure_continues_with_warning(self, managed_config_registry, mock_cuda_available):
+    def test_restoration_failure_continues_with_warning(
+        self, managed_config_registry, mock_cuda_available, track_model_load
+    ):
         """Test CUDA restoration failure allows CPU continuation.
 
         REAL components:
@@ -421,6 +432,7 @@ class TestErrorRecovery:
         with patch(
             "image_annotator_lib.core.base.pipeline.ModelLoad.load_transformers_pipeline_components"
         ) as mock_load:
+            track_model_load(mock_load, pipeline=True)
             mock_pipeline = MagicMock()
             mock_pipeline.return_value = [{"label": "test", "score": 0.9}]
             mock_load.return_value = {"pipeline": mock_pipeline}
@@ -440,23 +452,13 @@ class TestErrorRecovery:
             with patch(
                 "image_annotator_lib.core.base.pipeline.ModelLoad.restore_model_to_cuda"
             ) as mock_restore:
-                mock_restore.side_effect = RuntimeError("CUDA restoration failed")
 
-                # Act: Try to restore (should fall back to CPU)
-                try:
-                    annotator.__enter__()
+                def restore_with_cpu_fallback(model_name, components, device):
+                    ModelLoad._update_model_state(model_name, "cpu", "cached_cpu", 1024.0)
+                    return None
 
-                    # Assert: Falls back to CPU without exception
-                    # Note: Device may remain "cuda" in config, but components work on CPU
+                mock_restore.side_effect = restore_with_cpu_fallback
+                with annotator:
                     assert annotator.components is not None, "CPU上でコンポーネント使用可能"
-
-                except RuntimeError:
-                    # If restoration failure propagates, verify it's handled
-                    # (depending on implementation, may continue on CPU)
-                    pass
-
-                # Cleanup
-                try:
-                    annotator.__exit__(None, None, None)
-                except Exception:
-                    pass
+                    assert annotator.device == "cpu"
+                    assert ModelLoad._get_model_state(annotator.model_name) == "on_cpu"

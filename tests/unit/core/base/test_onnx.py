@@ -16,6 +16,7 @@ from PIL import Image
 
 from image_annotator_lib.core.base.onnx import ONNXBaseAnnotator
 from image_annotator_lib.core.config import config_registry
+from image_annotator_lib.core.model_factory import ModelLoad
 
 # ==============================================================================
 # Test Fixtures (autouse)
@@ -162,6 +163,9 @@ def test_onnx_annotator_reenter_reuses_loaded_session():
     annotator.components = {"session": session}
     annotator._prepared = True
 
+    ModelLoad._update_model_state("test-model", "cpu", "loaded", 512.0)
+    ModelLoad._MODEL_OWNERS["test-model"] = annotator
+
     with (
         patch("image_annotator_lib.core.model_factory.ModelLoad.load_onnx_components") as mock_load,
         patch.object(annotator, "_load_tags") as mock_load_tags,
@@ -217,8 +221,6 @@ def test_onnx_annotator_releases_retained_session_on_state_release():
     実メモリ/VRAM が解放されず、後続ロードが上限を超えうる。状態解放の共通経路から
     登録済み releaser が呼ばれて components が落ちることを検証する。
     """
-    from image_annotator_lib.core.model_factory import ModelLoad
-
     annotator = ConcreteONNXAnnotator("test-model")
     annotator.model_path = "dummy/path"
 
@@ -228,6 +230,12 @@ def test_onnx_annotator_releases_retained_session_on_state_release():
         patch.object(annotator, "_analyze_model_input_format"),
     ):
         mock_load.return_value = {"session": MagicMock()}
+
+        def load_with_state(*args, **kwargs):
+            ModelLoad._update_model_state("test-model", "cpu", "loaded", 512.0)
+            return mock_load.return_value
+
+        mock_load.side_effect = load_with_state
         with annotator:
             pass
 
@@ -477,11 +485,11 @@ def test_onnx_annotator_invalidates_session_after_inference_oom():
     annotator.components = {"session": session}
     annotator._prepared = True
 
-    with patch("image_annotator_lib.core.model_factory.ModelLoad.release_model") as mock_release:
+    with patch("image_annotator_lib.core.model_factory.ModelLoad.invalidate_model") as mock_invalidate:
         with pytest.raises(OutOfMemoryError):
             annotator._run_inference([MagicMock()])
 
-        mock_release.assert_called_once_with("test-model")
+        mock_invalidate.assert_called_once_with("test-model", annotator)
 
     assert annotator.components is None
     assert annotator._prepared is False
