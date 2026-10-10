@@ -302,18 +302,7 @@ def test_transformers_tagger_device_handling(
 def test_transformers_tagger_memory_management(
     mock_bliptagger_config, mock_transformers_components, mock_capabilities_captioner
 ):
-    """Test model unloading and CUDA cache clearing.
-
-    Mock Strategy:
-    - Mock: ModelLoad.cache_to_main_memory
-    - Real: Context manager exit, component cleanup
-
-    Verifies:
-    - __exit__ calls cache_to_main_memory
-    - Components cached on exit
-    - Proper cleanup even with exceptions
-    - CUDA memory freed (if applicable)
-    """
+    """Successful context exit retains components without moving them to CPU (Issue #165)."""
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
     ) as mock_load:
@@ -327,13 +316,7 @@ def test_transformers_tagger_memory_management(
                 # Components loaded
                 assert tagger.components is not None
 
-            # After __exit__, cache_to_main_memory should be called
-            mock_cache.assert_called_once()
-            call_args = mock_cache.call_args
-            assert call_args[0][0] == mock_bliptagger_config  # model_name
-            assert isinstance(call_args[0][1], dict)  # components dict
-
-            # Components should be cached version
+            mock_cache.assert_not_called()
             assert tagger.components is not None
 
 

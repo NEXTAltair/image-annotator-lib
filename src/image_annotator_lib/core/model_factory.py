@@ -274,7 +274,7 @@ class ModelLoad:
     def register_component_releaser(model_name: str, releaser: Callable[[], None]) -> None:
         """コンポーネントを保持する annotator の解放コールバックを登録する (Issue #162)。
 
-        コンテキストを抜けてもセッションを保持する annotator (ONNX) は、LRU 退避や
+        コンテキストを抜けても実体を保持する annotator (ONNX / Transformers) は、LRU 退避や
         明示解放のときに実体も手放す必要がある。
 
         Args:
