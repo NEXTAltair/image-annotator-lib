@@ -634,18 +634,13 @@ def test_clear_cache_internal_skip_same_model():
     max_cache = 1500.0
 
     with patch.object(ModelLoad, "_get_max_cache_size", return_value=max_cache):
-        # Exceed cache with same model - provide enough values for all calls
-        # (initial check, loop condition, final check)
-        with patch.object(
-            ModelLoad, "_get_current_cache_usage", side_effect=[1000.0, 1000.0, 1000.0, 1000.0]
-        ):
-            with patch.object(ModelLoad, "_release_model_state") as mock_release:
-                result = ModelLoad._clear_cache_internal(model_name, 600.0)
+        # The protected model's requested size replaces its existing usage.
+        # A final 2GB demand cannot fit in 1.5GB, even with its old 1GB removed.
+        with patch.object(ModelLoad, "_release_model_state") as mock_release:
+            result = ModelLoad._clear_cache_internal(model_name, 2000.0)
 
-                # Should return False (not enough space made)
-                assert result is False
-                # Should not release the same model
-                mock_release.assert_not_called()
+            assert result is False
+            mock_release.assert_not_called()
 
 
 # ============================================================================
@@ -999,20 +994,20 @@ def test_lru_eviction_with_multiple_models():
         ModelLoad._MODEL_SIZES[model_name] = 1024.0
 
     # Mock memory check to trigger eviction
-    # Cache: 3GB (3 models × 1GB), Required: 2GB, Max: 4GB → 5GB > 4GB triggers eviction
+    # Replacing model_new's 1GB with 3GB gives 5GB total against a 4GB limit.
     max_cache_mb = 4 * 1024  # 4GB max (reduced to trigger eviction)
     with patch.object(ModelLoad, "_get_max_cache_size", return_value=max_cache_mb):
         with patch("psutil.virtual_memory") as mock_vm:
             mock_vm.return_value.available = 500 * 1024 * 1024  # 500MB available
 
-            # Request 2GB (should evict oldest model first)
+            # Request a final 3GB for model_new (evict the oldest model first).
             # Use wraps to monitor calls while executing real implementation
             with patch.object(
                 ModelLoad, "_release_model_state", wraps=ModelLoad._release_model_state
             ) as mock_release:
                 result = ModelLoad._clear_cache_internal(
                     "model_new",  # Don't evict this one
-                    2048.0,  # required_size_mb
+                    3072.0,  # replacement size, required_size_mb
                 )
 
                 assert result is True
@@ -1117,11 +1112,11 @@ def test_lru_eviction_respects_memory_limits():
         ModelLoad._MODEL_LAST_USED[model_name] = base_time + i
         ModelLoad._MODEL_SIZES[model_name] = 500.0
 
-    # Cache: 2GB (4 models × 500MB), Required: 1GB, Max: 2.5GB → 3GB > 2.5GB triggers eviction
+    # Three other models use 1500MB; a final 1536MB for model_3 exceeds 2560MB.
     max_cache_mb = 2560  # 2.5GB max (reduced to trigger eviction)
     with patch.object(ModelLoad, "_get_max_cache_size", return_value=max_cache_mb):
         with patch("psutil.virtual_memory") as mock_vm:
-            # 100MB available, request 1GB (need to free ~500MB, so evict at least 1-2 models)
+            # Releasing one 500MB idle model makes the final demand fit.
             mock_vm.return_value.available = 100 * 1024 * 1024
 
             # Use wraps to monitor calls while executing real implementation
@@ -1130,14 +1125,11 @@ def test_lru_eviction_respects_memory_limits():
             ) as mock_release:
                 result = ModelLoad._clear_cache_internal(
                     "model_3",  # Protect newest model
-                    1024.0,  # required_size_mb
+                    1536.0,  # replacement size, required_size_mb
                 )
 
                 assert result is True
-                # Should evict at least 1 model (500MB freed) to meet requirement
-                # (may evict more if implementation is conservative)
-                assert mock_release.call_count >= 1
-                assert mock_release.call_count <= 4
+                assert mock_release.call_count == 1
 
                 # Verify models were actually evicted from cache
                 evicted_models = [call[0][0] for call in mock_release.call_args_list]

@@ -586,3 +586,22 @@ def test_mid_context_offload_is_rejected_and_prediction_stays_on_gpu(backend):
         assert ModelLoad._get_model_state(MODEL_NAME) == "on_cuda"
         assert_predicts(annotator)
     moves.assert_not_called()
+
+
+def test_retained_cpu_model_survives_known_vram_deficit_without_redownload(backend, monkeypatch):
+    loads, moves = backend
+    assert call_annotate().error is None
+    annotator = annotation_runner._MODEL_INSTANCE_REGISTRY[MODEL_NAME]
+    model = annotator.components["model"]
+    ModelLoad.cache_to_main_memory(MODEL_NAME, dict(annotator.components))
+    monkeypatch.setattr("torch.cuda.mem_get_info", lambda device: (512 * 1024**2, 2 * 1024**3))
+    assert call_annotate().captions == ["test caption"]
+    assert call_annotate().captions == ["test caption"]
+    assert annotator.components["model"] is model
+    assert annotator.device == "cpu"
+    assert model.device == "cpu"
+    assert ModelLoad._get_model_state(MODEL_NAME) == "on_cpu"
+    assert ModelLoad._HOST_MEMORY_USAGE[MODEL_NAME] == 1024.0
+    assert not ModelLoad.is_model_active(MODEL_NAME)
+    loads.assert_called_once()
+    assert all(call.args[1] == "cpu" for call in moves.call_args_list)

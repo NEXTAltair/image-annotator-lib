@@ -1,14 +1,21 @@
 """Lease ownership and host-memory regressions with real loader bookkeeping."""
 
+import sys
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
+from image_annotator_lib.core.base.clip import ClipBaseAnnotator
 from image_annotator_lib.core.base.onnx import ONNXBaseAnnotator
+from image_annotator_lib.core.base.pipeline import PipelineBaseAnnotator
+from image_annotator_lib.core.base.tensorflow import TensorflowBaseAnnotator
 from image_annotator_lib.core.config import config_registry
+from image_annotator_lib.core.loaders.clip_loader import CLIPLoader
 from image_annotator_lib.core.loaders.loader_base import LoaderBase
 from image_annotator_lib.core.loaders.onnx_loader import ONNXLoader
+from image_annotator_lib.core.loaders.tensorflow_loader import TensorFlowLoader
+from image_annotator_lib.core.loaders.transformers_loader import TransformersPipelineLoader
 from image_annotator_lib.core.model_factory import ModelLoad
 from image_annotator_lib.exceptions.errors import ModelLoadError, OutOfMemoryError
 
@@ -22,6 +29,64 @@ class TestONNXAnnotator(ONNXBaseAnnotator):
 
     def _load_tags(self):
         self.all_tags = ["test-tag"]
+
+
+class TestTensorflowAnnotator(TensorflowBaseAnnotator):
+    __test__ = False
+
+    def _load_tags(self):
+        self.all_tags = ["test-tag"]
+
+    def _preprocess_images(self, images):
+        return images
+
+    def _format_predictions(self, outputs):
+        return outputs
+
+
+@pytest.fixture(params=["pipeline", "clip", "tensorflow"])
+def transient_backend(monkeypatch, request):
+    """Exercise final-exit offloading/release of the other local backends."""
+    kind = request.param
+    model_name = f"test-nested-{kind}"
+    config = {
+        "class": "AestheticShadow",
+        "model_path": "fake/model",
+        "device": "cuda",
+        "estimated_size_gb": 1.0,
+    }
+    if kind == "clip":
+        config["base_model"] = "fake/clip"
+    monkeypatch.setitem(config_registry._merged_config_data, model_name, config)
+    monkeypatch.setattr("image_annotator_lib.core.utils.determine_effective_device", lambda d, n: d)
+    monkeypatch.setattr(LoaderBase, "_check_memory_before_load", classmethod(lambda cls, *a: True))
+    monkeypatch.setattr(LoaderBase, "_get_max_cache_size", classmethod(lambda cls: 4096.0))
+    monkeypatch.setattr(ModelLoad, "_get_max_cache_size", classmethod(lambda cls: 4096.0))
+    monkeypatch.setattr("torch.cuda.current_device", lambda: 0)
+    monkeypatch.setattr("torch.cuda.mem_get_info", lambda device: (16 * 1024**3, 16 * 1024**3))
+    model = SimpleNamespace(device="cuda")
+    clear_session = Mock()
+    if kind == "pipeline":
+        loader_class = TransformersPipelineLoader
+        components = {"pipeline": SimpleNamespace(model=model)}
+        annotator_class = PipelineBaseAnnotator
+    elif kind == "clip":
+        loader_class = CLIPLoader
+        components = {"model": model, "clip_model": model, "processor": object()}
+        annotator_class = ClipBaseAnnotator
+    else:
+        fake_tensorflow = Mock()
+        fake_tensorflow.config.list_physical_devices.return_value = []
+        fake_tensorflow.keras.backend.clear_session = clear_session
+        monkeypatch.setitem(sys.modules, "tensorflow", fake_tensorflow)
+        loader_class = TensorFlowLoader
+        components = {"model": model}
+        annotator_class = TestTensorflowAnnotator
+    loads = Mock(return_value=components)
+    monkeypatch.setattr(loader_class, "_load_components_internal", lambda self, **kwargs: loads())
+    moves = Mock(side_effect=lambda components, device: setattr(model, "device", device))
+    monkeypatch.setattr(ModelLoad, "_move_components_to_device", moves)
+    return kind, annotator_class(model_name), loads, moves, clear_session
 
 
 @pytest.fixture
@@ -71,12 +136,52 @@ def test_owner_is_reserved_during_model_preparation():
     assert "preparing" not in ModelLoad._PREPARING_MODELS
 
 
+def test_other_local_backend_nested_exit_only_offloads_or_releases_at_final_exit(transient_backend):
+    kind, annotator, loads, moves, clear_session = transient_backend
+    with annotator:
+        components = annotator.components
+        with annotator:
+            assert annotator.components is components
+        assert annotator.components is components
+        assert ModelLoad._get_model_state(annotator.model_name) == "on_cuda"
+        assert ModelLoad.is_final_model_context(annotator.model_name, annotator)
+        moves.assert_not_called()
+        clear_session.assert_not_called()
+    assert not ModelLoad.is_model_active(annotator.model_name)
+    loads.assert_called_once_with()
+    if kind == "tensorflow":
+        assert annotator.components is None
+        assert components == {}
+        assert ModelLoad._get_model_state(annotator.model_name) is None
+        clear_session.assert_called_once_with()
+    else:
+        assert ModelLoad._get_model_state(annotator.model_name) == "on_cpu"
+        assert [call.args[1] for call in moves.call_args_list] == ["cpu"]
+
+
+def test_other_local_backend_caught_inner_exception_preserves_outer_context(transient_backend):
+    _, annotator, loads, moves, clear_session = transient_backend
+    with annotator:
+        components = annotator.components
+        with pytest.raises(ValueError, match="inner caller failed"):
+            with annotator:
+                raise ValueError("inner caller failed")
+        assert annotator.components is components
+        assert ModelLoad._get_model_state(annotator.model_name) == "on_cuda"
+        assert ModelLoad.is_final_model_context(annotator.model_name, annotator)
+        moves.assert_not_called()
+        clear_session.assert_not_called()
+    assert not ModelLoad.is_model_active(annotator.model_name)
+    assert not ModelLoad._ACTIVE_THREADS
+    loads.assert_called_once_with()
+
+
 def test_nested_deferred_release_calls_owner_releaser_once():
     owner = object()
     release = Mock()
     enter_lease("nested", owner)
     ModelLoad._update_model_state("nested", "cpu", "loaded", 512.0)
-    ModelLoad.register_component_releaser("nested", release, owner)
+    ModelLoad.register_component_releaser("nested", release, owner=owner)
     enter_lease("nested", owner)
     ModelLoad.release_model("nested")
     release.assert_not_called()
@@ -98,9 +203,11 @@ def test_foreign_owner_cannot_invalidate_or_unregister_current_components():
     release = Mock()
     enter_lease("owned", owner)
     ModelLoad._update_model_state("owned", "cpu", "loaded", 512.0)
-    ModelLoad.register_component_releaser("owned", release, owner)
-    ModelLoad.unregister_component_releaser("owned", stale_owner)
-    ModelLoad.invalidate_model("owned", stale_owner)
+    ModelLoad.register_component_releaser("owned", release, owner=owner)
+    with pytest.raises(ModelLoadError):
+        ModelLoad.unregister_component_releaser("owned", owner=stale_owner)
+    with pytest.raises(ModelLoadError):
+        ModelLoad.invalidate_model("owned", stale_owner)
     assert ModelLoad._get_model_state("owned") == "on_cpu"
     assert ModelLoad.is_final_model_context("owned", owner)
     release.assert_not_called()
@@ -116,7 +223,7 @@ def test_own_invalidation_clears_resources_but_waits_to_balance_existing_leases(
     enter_lease("failed", owner)
     enter_lease("failed", owner)
     ModelLoad._update_model_state("failed", "cuda", "loaded", 512.0, host_size_mb=0.0)
-    ModelLoad.register_component_releaser("failed", release, owner)
+    ModelLoad.register_component_releaser("failed", release, owner=owner)
     ModelLoad.invalidate_model("failed", owner)
     release.assert_called_once_with()
     assert ModelLoad._get_model_state("failed") is None
@@ -136,7 +243,7 @@ def test_known_vram_insufficiency_raises_after_idle_eviction_without_touching_ac
     idle_release = Mock()
     enter_lease("active", owner)
     ModelLoad._update_model_state("active", "cuda", "loaded", 1024.0, host_size_mb=0.0)
-    ModelLoad.register_component_releaser("active", active_release, owner)
+    ModelLoad.register_component_releaser("active", active_release, owner=owner)
     ModelLoad._update_model_state("idle", "cuda", "loaded", 256.0, host_size_mb=0.0)
     ModelLoad.register_component_releaser("idle", idle_release)
     ModelLoad._MODEL_SIZES["incoming"] = 2048.0
@@ -160,7 +267,7 @@ def test_unknown_vram_capacity_only_evicts_idle_models(monkeypatch, unknown):
     idle_release = Mock()
     enter_lease("active", owner)
     ModelLoad._update_model_state("active", "cuda", "loaded", 1024.0, host_size_mb=0.0)
-    ModelLoad.register_component_releaser("active", active_release, owner)
+    ModelLoad.register_component_releaser("active", active_release, owner=owner)
     ModelLoad._update_model_state("idle", "cuda", "loaded", 256.0, host_size_mb=0.0)
     ModelLoad.register_component_releaser("idle", idle_release)
     monkeypatch.setattr("torch.cuda.current_device", lambda: 0)
@@ -289,7 +396,7 @@ def test_state_release_clears_both_memory_ledgers_and_owner_callback():
     release = Mock()
     enter_lease("released", owner)
     ModelLoad._update_model_state("released", "cuda", "loaded", 1024.0, host_size_mb=128.0)
-    ModelLoad.register_component_releaser("released", release, owner)
+    ModelLoad.register_component_releaser("released", release, owner=owner)
     ModelLoad.end_model_context("released", owner)
     ModelLoad.release_model("released")
     release.assert_called_once_with()

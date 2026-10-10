@@ -14,8 +14,21 @@ import pytest
 import torch
 from PIL import Image
 
+from image_annotator_lib.core.model_factory import ModelLoad
 from image_annotator_lib.core.types import TaskCapability, UnifiedAnnotationResult
 from image_annotator_lib.model_class.tagger_transformers import BLIP2Tagger, BLIPTagger, GITTagger
+
+
+def track_loaded_components(mock_load):
+    """Publish loader state and give each fake model owner its own dictionary."""
+
+    def load(model_name, model_path, device):
+        size_mb = ModelLoad.get_model_size(model_name) or 0.0
+        ModelLoad._MODEL_SIZES[model_name] = size_mb
+        ModelLoad._update_model_state(model_name, device, "loaded", size_mb)
+        return dict(mock_load.return_value)
+
+    mock_load.side_effect = load
 
 
 @pytest.fixture
@@ -132,6 +145,7 @@ def test_transformers_tagger_initialization(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = mock_transformers_components
 
         tagger = BLIPTagger(mock_bliptagger_config)
@@ -172,6 +186,7 @@ def test_transformers_tagger_preprocessing(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = mock_transformers_components
 
         tagger = BLIPTagger(mock_bliptagger_config)
@@ -211,6 +226,7 @@ def test_transformers_tagger_inference_mocked(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = mock_transformers_components
 
         tagger = BLIPTagger(mock_bliptagger_config)
@@ -262,6 +278,7 @@ def test_transformers_tagger_device_handling(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = mock_transformers_components
 
         tagger = BLIPTagger("test_cpu")
@@ -284,6 +301,7 @@ def test_transformers_tagger_device_handling(
         with patch(
             "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
         ) as mock_load:
+            track_loaded_components(mock_load)
             with patch(
                 "image_annotator_lib.core.model_factory.ModelLoad.restore_model_to_cuda",
                 return_value=None,
@@ -306,6 +324,7 @@ def test_transformers_tagger_memory_management(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         with patch("image_annotator_lib.core.model_factory.ModelLoad.cache_to_main_memory") as mock_cache:
             mock_load.return_value = mock_transformers_components
             mock_cache.return_value = mock_transformers_components
@@ -350,6 +369,7 @@ def test_blip2_and_git_tagger_initialization(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = mock_transformers_components
 
         tagger = BLIP2Tagger("test_blip2")
@@ -371,6 +391,7 @@ def test_blip2_and_git_tagger_initialization(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = mock_transformers_components
 
         tagger = GITTagger("test_git")
@@ -406,6 +427,7 @@ def test_toriigate_tagger_custom_initialization(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = mock_transformers_components
 
         tagger = ToriiGateTagger("test_toriigate")
@@ -484,6 +506,7 @@ def test_toriigate_tagger_preprocessing(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = mock_components
 
         tagger = ToriiGateTagger("test_toriigate")
@@ -566,6 +589,7 @@ def test_toriigate_tagger_inference_with_max_new_tokens(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = mock_components
 
         tagger = ToriiGateTagger("test_toriigate")
@@ -638,6 +662,7 @@ def test_toriigate_tagger_format_with_assistant_prefix(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = mock_components
 
         tagger = ToriiGateTagger("test_toriigate")
@@ -670,6 +695,7 @@ def test_toriigate_tagger_format_with_assistant_prefix(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = mock_components
 
         tagger = ToriiGateTagger("test_toriigate")

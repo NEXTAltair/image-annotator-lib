@@ -14,9 +14,24 @@ import pytest
 import torch
 from PIL import Image
 
+from image_annotator_lib.core.model_factory import ModelLoad
 from image_annotator_lib.core.types import ScoreScale, UnifiedAnnotationResult
 from image_annotator_lib.model_class.pipeline_scorers import AestheticShadow, CafePredictor
 from image_annotator_lib.model_class.scorer_clip import ImprovedAesthetic, WaifuAesthetic
+
+
+def track_loaded_components(mock_load):
+    """Facade fakes must publish the state that a real successful loader owns."""
+
+    def load(*args, **kwargs):
+        model_name = kwargs["model_name"] if "model_name" in kwargs else args[1]
+        device = kwargs["device"] if "device" in kwargs else args[3]
+        size_mb = ModelLoad.get_model_size(model_name) or 0.0
+        ModelLoad._MODEL_SIZES[model_name] = size_mb
+        ModelLoad._update_model_state(model_name, device, "loaded", size_mb)
+        return dict(mock_load.return_value)
+
+    mock_load.side_effect = load
 
 
 @pytest.fixture
@@ -215,6 +230,7 @@ def test_pipeline_scorer_initialization(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_pipeline_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = {"pipeline": mock_pipeline, "model_path": "/fake/path"}
 
         scorer = AestheticShadow(mock_aesthetic_shadow_config)
@@ -264,6 +280,7 @@ def test_pipeline_scorer_prediction(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_pipeline_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = {"pipeline": mock_pipeline, "model_path": "/fake/path"}
 
         scorer = AestheticShadow(mock_aesthetic_shadow_config)
@@ -312,6 +329,7 @@ def test_cafe_scorer_prediction(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_pipeline_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = {"pipeline": mock_cafe_pipeline, "model_path": "/fake/path"}
 
         scorer = CafePredictor(mock_cafe_config)
@@ -352,6 +370,7 @@ def test_clip_scorer_initialization(
     - MLP head for aesthetic scoring initialized
     """
     with patch("image_annotator_lib.core.model_factory.ModelLoad.load_clip_components") as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = mock_clip_components
 
         scorer = ImprovedAesthetic(mock_clip_scorer_config)
@@ -396,6 +415,7 @@ def test_scorer_batch_processing(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_pipeline_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = {"pipeline": mock_pipeline, "model_path": "/fake/path"}
 
         scorer = AestheticShadow(mock_aesthetic_shadow_config)
@@ -466,6 +486,7 @@ def test_clip_scorer_inference_flow(
     import torch
 
     with patch("image_annotator_lib.core.model_factory.ModelLoad.load_clip_components") as mock_load:
+        track_loaded_components(mock_load)
         # Setup mock CLIP components with realistic tensor flow
         mock_clip_model = MagicMock()
         mock_classifier = MagicMock()
@@ -556,6 +577,7 @@ def test_clip_scorer_feature_normalization(
     import torch
 
     with patch("image_annotator_lib.core.model_factory.ModelLoad.load_clip_components") as mock_load:
+        track_loaded_components(mock_load)
         # Setup mock with unnormalized features
         mock_clip_model = MagicMock()
         mock_classifier = MagicMock()
@@ -625,6 +647,7 @@ def test_clip_scorer_handles_transformers5_pooled_output(
     from transformers.modeling_outputs import BaseModelOutputWithPooling
 
     with patch("image_annotator_lib.core.model_factory.ModelLoad.load_clip_components") as mock_load:
+        track_loaded_components(mock_load)
         mock_clip_model = MagicMock()
         mock_classifier = MagicMock()
 
@@ -775,6 +798,7 @@ def test_aesthetic_shadow_format_predictions_score_scales(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_pipeline_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = {"pipeline": mock_pipeline, "model_path": "/fake/path"}
 
         scorer = AestheticShadow(mock_aesthetic_shadow_config)
@@ -800,6 +824,7 @@ def test_cafe_format_predictions_score_scales(
     with patch(
         "image_annotator_lib.core.model_factory.ModelLoad.load_transformers_pipeline_components"
     ) as mock_load:
+        track_loaded_components(mock_load)
         mock_load.return_value = {"pipeline": mock_cafe_pipeline, "model_path": "/fake/path"}
 
         scorer = CafePredictor(mock_cafe_config)
@@ -824,6 +849,7 @@ def test_improved_aesthetic_format_predictions_score_scales(
     import torch
 
     with patch("image_annotator_lib.core.model_factory.ModelLoad.load_clip_components") as mock_load:
+        track_loaded_components(mock_load)
         mock_clip_model = MagicMock()
         mock_classifier = MagicMock()
         mock_clip_model.get_image_features.return_value = torch.randn(1, 512) * 10
