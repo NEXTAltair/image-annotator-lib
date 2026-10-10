@@ -67,12 +67,16 @@ def local_model_exit[AnnotatorT: LocalModelAnnotator](
                 method(self, exc_type, exc_val, exc_tb)
                 return
 
+            # Direct __exit__ calls have no lease to return or owner to validate.
+            if not ModelLoad.is_model_active(self.model_name):
+                method(self, exc_type, exc_val, exc_tb)
+                return
+
             final_exit = ModelLoad.begin_model_exit(self.model_name, self)
             self._context_exit_dispatch = True
             failed = exc_type is not None
             try:
-                # Preserve direct __exit__ use outside a lease for compatibility.
-                if final_exit or not ModelLoad.is_model_active(self.model_name):
+                if final_exit:
                     method(self, exc_type, exc_val, exc_tb)
             except BaseException:
                 failed = True
