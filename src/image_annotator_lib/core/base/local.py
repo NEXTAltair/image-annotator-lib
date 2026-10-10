@@ -34,10 +34,11 @@ def local_model_enter[AnnotatorT: LocalModelAnnotator](
             ModelLoad.begin_model_context(self.model_name, self)
             self._context_entry_dispatch = True
             try:
-                if ModelLoad.is_final_model_context(self.model_name, self):
-                    ModelLoad.register_component_releaser(
-                        self.model_name, self._release_retained_components, owner=self
-                    )
+                # An inner entry may recover a generation invalidated by its own
+                # OOM, which removed the prior generation's release callback.
+                ModelLoad.register_component_releaser(
+                    self.model_name, self._release_retained_components, owner=self
+                )
                 result = method(self)
                 ModelLoad.finish_model_entry(self.model_name, self)
                 return result
