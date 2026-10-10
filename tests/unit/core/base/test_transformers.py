@@ -66,6 +66,8 @@ def backend(monkeypatch):
         },
     )
     monkeypatch.setattr("image_annotator_lib.core.utils.determine_effective_device", lambda d, n: d)
+    monkeypatch.setattr("torch.cuda.current_device", lambda: 0)
+    monkeypatch.setattr("torch.cuda.mem_get_info", lambda device: (16 * 1024**3, 16 * 1024**3))
     monkeypatch.setattr(LoaderBase, "_check_memory_before_load", classmethod(lambda cls, *a: True))
     monkeypatch.setattr(LoaderBase, "_get_max_cache_size", classmethod(lambda cls: 2048.0))
     monkeypatch.setattr(ModelLoad, "_get_max_cache_size", classmethod(lambda cls: 2048.0))
@@ -132,6 +134,78 @@ def test_failed_cuda_restore_uses_cpu_for_inputs(backend):
     assert call_annotate().error is None
     moves.assert_not_called()
     loads.assert_called_once()
+
+    ModelLoad.release_model(MODEL_NAME)
+    moves.side_effect = lambda components, device: setattr(components["model"], "device", device)
+    assert call_annotate().error is None
+    assert annotator.device == "cuda"
+    assert loads.call_count == 2
+
+
+@pytest.mark.parametrize("size_known", [True, False])
+def test_switching_models_evicts_old_model_when_vram_is_insufficient(backend, monkeypatch, size_known):
+    loads, moves = backend
+    call_annotate()
+    old = annotation_runner._MODEL_INSTANCE_REGISTRY[MODEL_NAME]
+    next_name = "test-next-transformers"
+    config = dict(config_registry._merged_config_data[MODEL_NAME])
+    if not size_known:
+        config.pop("estimated_size_gb")
+    monkeypatch.setitem(config_registry._merged_config_data, next_name, config)
+    monkeypatch.setattr("torch.cuda.mem_get_info", lambda device: (512 * 1024**2, 2 * 1024**3))
+    if not size_known:
+        monkeypatch.setattr(TransformersLoader, "_calculate_specific_size", lambda *args, **kwargs: 0.0)
+    next_annotator = BLIPTagger(next_name)
+    with next_annotator:
+        assert old.components is None
+        assert ModelLoad._get_model_state(MODEL_NAME) is None
+    with next_annotator:
+        assert next_annotator.components is not None
+    assert loads.call_count == 2
+    moves.assert_not_called()
+
+
+def test_switching_models_preserves_cached_model_when_vram_is_sufficient(backend):
+    call_annotate()
+    old = annotation_runner._MODEL_INSTANCE_REGISTRY[MODEL_NAME]
+    next_name = "test-next-transformers"
+    config_registry._merged_config_data[next_name] = dict(config_registry._merged_config_data[MODEL_NAME])
+    with BLIPTagger(next_name):
+        assert old.components is not None
+
+
+def test_gpu_eviction_skips_other_devices_and_cpu_models(backend, monkeypatch):
+    call_annotate()
+    old = annotation_runner._MODEL_INSTANCE_REGISTRY[MODEL_NAME]
+    ModelLoad._update_model_state(MODEL_NAME, "cuda:1", "loaded", 1024.0)
+    monkeypatch.setattr("torch.cuda.mem_get_info", lambda device: (0, 2 * 1024**3))
+    ModelLoad._make_cuda_room("next-model", "cuda:0")
+    assert old.components is not None
+    ModelLoad._update_model_state(MODEL_NAME, "cpu", "cached_cpu", 1024.0)
+    ModelLoad._make_cuda_room("next-model", "cuda")
+    assert old.components is not None
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, AssertionError])
+def test_gpu_memory_probe_failure_evicts_other_resident_models(backend, monkeypatch, error_type):
+    call_annotate()
+    old = annotation_runner._MODEL_INSTANCE_REGISTRY[MODEL_NAME]
+    monkeypatch.setattr("torch.cuda.mem_get_info", Mock(side_effect=error_type("unavailable")))
+    ModelLoad._make_cuda_room("next-model", "cuda")
+    assert old.components is None
+
+
+def test_gpu_eviction_stops_after_enough_vram_is_recovered(backend, monkeypatch):
+    call_annotate()
+    old = annotation_runner._MODEL_INSTANCE_REGISTRY[MODEL_NAME]
+    ModelLoad._update_model_state("newer-model", "cuda", "loaded", 256.0)
+    monkeypatch.setitem(ModelLoad._MODEL_LAST_USED, MODEL_NAME, 0.0)
+    ModelLoad._MODEL_SIZES["next-model"] = 512.0
+    available = Mock(side_effect=[(0, 2 * 1024**3), (1024**3, 2 * 1024**3)])
+    monkeypatch.setattr("torch.cuda.mem_get_info", available)
+    ModelLoad._make_cuda_room("next-model", "cuda")
+    assert old.components is None
+    assert ModelLoad._get_model_state("newer-model") == "on_cuda"
 
 
 def test_failed_cpu_fallback_does_not_retain_invalid_components(backend):

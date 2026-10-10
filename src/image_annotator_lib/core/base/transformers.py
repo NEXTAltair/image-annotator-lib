@@ -34,6 +34,7 @@ class TransformersBaseAnnotator(BaseAnnotator):
         from ..utils import determine_effective_device
 
         self.device = determine_effective_device(self._config.device, self.model_name)
+        self._requested_device = self._config.device
         # 設定ファイルから追加パラメータを取得
         self.max_length = config_registry.get(self.model_name, "max_length", 75)
         self.processor_path = config_registry.get(self.model_name, "processor_path")
@@ -61,6 +62,11 @@ class TransformersBaseAnnotator(BaseAnnotator):
             elif not state:
                 self._release_retained_components()
 
+            if not self._prepared:
+                from ..utils import determine_effective_device
+
+                self.device = determine_effective_device(self._requested_device, self.model_name)
+            ModelLoad._make_cuda_room(self.model_name, self.device)
             loaded = ModelLoad.load_transformers_components(
                 self.model_name, str(self.model_path), str(self.device)
             )

@@ -271,6 +271,53 @@ class ModelLoad:
             return None
 
     @staticmethod
+    def _make_cuda_room(model_name: str, device: str) -> None:
+        """ロード/復元先の VRAM が足りなければ、同じ GPU の古いモデルを解放する。
+
+        RAM ベースの LRU だけでは GPU 上に保持したモデルを制限できない。
+        サイズや空き VRAM が不明な場合は、他モデルの GPU 保持を保守的に解除する。
+        """
+        if not device.startswith("cuda"):
+            return
+        import torch
+
+        try:
+            default_index = torch.cuda.current_device()
+        except (RuntimeError, AssertionError):
+            default_index = 0
+        target_index = torch.device(device).index
+        if target_index is None:
+            target_index = default_index
+        size_mb = ModelLoad._MODEL_SIZES.get(model_name) or ModelLoad.get_model_size(model_name)
+
+        for other_name, _ in ModelLoad._get_models_sorted_by_last_used():
+            state = ModelLoad._get_model_state(other_name)
+            if other_name == model_name or not state or not state.startswith("on_cuda"):
+                continue
+            other_index = torch.device(state.removeprefix("on_")).index
+            if other_index is None:
+                other_index = default_index
+            if other_index != target_index:
+                continue
+            if ModelLoad._has_cuda_room(size_mb, device):
+                break
+            logger.info(f"VRAM 確保のためモデル '{other_name}' を解放 ({model_name} -> {device})")
+            ModelLoad.release_model(other_name)
+
+    @staticmethod
+    def _has_cuda_room(size_mb: float | None, device: str) -> bool:
+        """空き VRAM と重みの推定サイズを比較する。計測不能時は保持を続けない。"""
+        if not size_mb or size_mb <= 0:
+            return False
+        import torch
+
+        try:
+            available_bytes, _ = torch.cuda.mem_get_info(device)
+            return available_bytes >= size_mb * 1024 * 1024
+        except (RuntimeError, AssertionError):
+            return False
+
+    @staticmethod
     def register_component_releaser(model_name: str, releaser: Callable[[], None]) -> None:
         """コンポーネントを保持する annotator の解放コールバックを登録する (Issue #162)。
 
