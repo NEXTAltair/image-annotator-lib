@@ -190,6 +190,8 @@ def test_gpu_eviction_skips_other_devices_and_cpu_models(backend, monkeypatch):
 def test_gpu_memory_probe_failure_evicts_other_resident_models(backend, monkeypatch, error_type):
     call_annotate()
     old = annotation_runner._MODEL_INSTANCE_REGISTRY[MODEL_NAME]
+    ModelLoad._MODEL_SIZES["next-model"] = 512.0
+    monkeypatch.setattr("torch.cuda.current_device", Mock(side_effect=error_type("unavailable")))
     monkeypatch.setattr("torch.cuda.mem_get_info", Mock(side_effect=error_type("unavailable")))
     ModelLoad._make_cuda_room("next-model", "cuda")
     assert old.components is None
