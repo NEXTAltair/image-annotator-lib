@@ -13,15 +13,15 @@ if TYPE_CHECKING:
     import torch
 
 # --- ローカルインポート ---
-from ...exceptions.errors import ConfigurationError, ModelLoadError, OutOfMemoryError
+from ...exceptions.errors import ConfigurationError, ModelLoadError
 from ..config import config_registry
 from ..model_factory import ModelLoad
 from ..types import TransformersComponents, UnifiedAnnotationResult
 from ..utils import logger
-from .annotator import BaseAnnotator
+from .local import LocalModelAnnotator, local_model_enter, local_model_exit
 
 
-class TransformersBaseAnnotator(BaseAnnotator):
+class TransformersBaseAnnotator(LocalModelAnnotator):
     """Transformers ライブラリを使用するモデル用の基底クラス。"""
 
     def __init__(self, model_name: str):
@@ -44,50 +44,46 @@ class TransformersBaseAnnotator(BaseAnnotator):
         # model_path の型を保証 (LocalMLModelConfig では str を期待)
         self.model_path = str(self.model_path) if isinstance(self.model_path, str) else ""
 
+    @local_model_enter
     def __enter__(self) -> TransformersBaseAnnotator:
         """準備済みモデルを保持し、必要な場合だけロード/復元する (Issue #165)。"""
-        try:
-            if not self.model_path:
-                raise ConfigurationError(f"モデル '{self.model_name}' の model_path が設定されていません。")
+        if not self.model_path:
+            raise ConfigurationError(f"モデル '{self.model_name}' の model_path が設定されていません。")
 
-            state = ModelLoad._get_model_state(self.model_name)
-            if self._prepared and self.components and state == f"on_{self.device}":
-                ModelLoad._update_model_state(self.model_name)
-                logger.debug(f"Transformers components already prepared for '{self.model_name}'; reusing")
-                return self
+        state = ModelLoad._get_model_state(self.model_name)
+        if self._prepared and self.components and state == f"on_{self.device}":
+            ModelLoad._update_model_state(self.model_name)
+            logger.debug(f"Transformers components already prepared for '{self.model_name}'; reusing")
+            return self
 
-            if state and not self._prepared:
-                # 別インスタンスが所有する実体も解放してからロードする。
-                ModelLoad.release_model(self.model_name)
-            elif not state:
-                self._release_retained_components()
+        if not state:
+            self._release_retained_components()
 
-            if not self._prepared:
-                from ..utils import determine_effective_device
+        if not self._prepared:
+            from ..utils import determine_effective_device
 
-                self.device = determine_effective_device(self._requested_device, self.model_name)
-            ModelLoad._make_cuda_room(self.model_name, self.device)
-            loaded = ModelLoad.load_transformers_components(
-                self.model_name, str(self.model_path), str(self.device)
+            self.device = determine_effective_device(self._requested_device, self.model_name)
+        ModelLoad._make_cuda_room(self.model_name, self.device)
+        loaded = ModelLoad.load_transformers_components(
+            self.model_name, str(self.model_path), str(self.device)
+        )
+        if loaded is not None:
+            self.components = loaded
+        if (
+            not self.components
+            or self.components.get("model") is None
+            or self.components.get("processor") is None
+        ):
+            raise ModelLoadError(
+                f"Failed to load components for model '{self.model_name}'.", model_path=self.model_path
             )
-            if loaded is not None:
-                self.components = loaded
-            if (
-                not self.components
-                or self.components.get("model") is None
-                or self.components.get("processor") is None
-            ):
-                raise ModelLoadError(
-                    f"Failed to load components for model '{self.model_name}'.", model_path=self.model_path
-                )
 
-            self._restore_components()
+        self._restore_components()
 
-            self._prepared = True
-            ModelLoad.register_component_releaser(self.model_name, self._release_retained_components)
-        except Exception:
-            self._discard_components()
-            raise
+        self._prepared = True
+        ModelLoad.register_component_releaser(
+            self.model_name, self._release_retained_components, owner=self
+        )
         return self
 
     def _restore_components(self) -> None:
@@ -109,41 +105,12 @@ class TransformersBaseAnnotator(BaseAnnotator):
                 self.device = "cpu"
             logger.warning(f"Model '{self.model_name}' will run on CPU after restoration fallback.")
 
-    def _release_retained_components(self) -> None:
-        """LRU / 明示解放から呼ばれ、モデルとプロセッサの参照を手放す。"""
-        components = self.components
-        self.components = None
-        self._prepared = False
-        if components:
-            cast(dict[str, Any], components).clear()
-
-    def _discard_components(self) -> None:
-        """準備失敗や OOM 後に、次回クリーンなロードを要求する。"""
-        self._release_retained_components()
-        ModelLoad.unregister_component_releaser(self.model_name)
-        try:
-            ModelLoad.release_model(self.model_name)
-        except Exception as e:
-            logger.error(f"コンポーネント解放失敗 ({self.model_name}): {e}")
-
+    @local_model_exit
     def __exit__(
         self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any
     ) -> None:
         """正常終了では保持を続け、解放は ModelLoad の LRU / release_model に委ねる。"""
-        if exc_type is not None:
-            self._discard_components()
-
-    def _execute_pipeline(self, images: list[Image.Image]) -> list:
-        """predict が OOM をエラー結果に変換する前に、保持中の実体を無効化する。"""
-        import torch
-
-        try:
-            return super()._execute_pipeline(images)
-        except (OutOfMemoryError, MemoryError, torch.cuda.OutOfMemoryError) as e:
-            self._discard_components()
-            raise OutOfMemoryError(
-                f"モデル '{self.model_name}' の処理中にメモリ不足が発生しました。"
-            ) from e
+        logger.debug(f"Exiting context for Transformers model '{self.model_name}' (exception: {exc_type})")
 
     def _preprocess_images(self, images: list[Image.Image]) -> list[dict[str, Any]]:
         """画像バッチを前処理します。各画像を個別に処理して結果をリストで返します。"""

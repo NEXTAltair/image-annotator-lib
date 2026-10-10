@@ -10,10 +10,10 @@ from ..config import config_registry
 from ..model_factory import ModelLoad
 from ..types import TransformersPipelineComponents, UnifiedAnnotationResult
 from ..utils import logger
-from .annotator import BaseAnnotator
+from .local import LocalModelAnnotator, local_model_enter, local_model_exit
 
 
-class PipelineBaseAnnotator(BaseAnnotator):
+class PipelineBaseAnnotator(LocalModelAnnotator):
     """Hugging Face Pipeline を使用するモデル用の基底クラス。"""
 
     def __init__(self, model_name: str):
@@ -26,7 +26,9 @@ class PipelineBaseAnnotator(BaseAnnotator):
         self.task = config_registry.get(self.model_name, "task", "image-classification")
         # components の型ヒントを具体的に指定
         self.components: TransformersPipelineComponents | None = None
+        self._prepared = False
 
+    @local_model_enter
     def __enter__(self) -> "PipelineBaseAnnotator":
         """
         モデルの状態に基づいて、必要な場合のみロードまたは復元
@@ -38,10 +40,13 @@ class PipelineBaseAnnotator(BaseAnnotator):
         if self.batch_size is None:
             raise ValueError(f"モデル '{self.model_name}' の batch_size が設定されていません。")
 
-        # ロード前にキャッシュ状態を確認する (Issue #146)。
-        # load_components() は「キャッシュ済み」と「ロード失敗」の両方で None を返すため、
-        # 呼び出し前の状態で2ケースを区別する。
-        had_cached_state = ModelLoad._get_model_state(self.model_name) is not None
+        if (
+            self._prepared
+            and self.components
+            and ModelLoad._get_model_state(self.model_name) == f"on_{self.device}"
+        ):
+            ModelLoad._update_model_state(self.model_name)
+            return self
 
         loaded_components = ModelLoad.load_transformers_pipeline_components(
             self.task,
@@ -55,29 +60,11 @@ class PipelineBaseAnnotator(BaseAnnotator):
         # 空コンポーネント = ロード失敗。
         if loaded_components is not None:
             self.components = loaded_components
-        elif not self.components:
-            if had_cached_state:
-                # モデル状態が「キャッシュ済み」(None 返却) だが、このインスタンスはコンポーネントを
-                # 保持していない。api_keys={} 指定時の毎回インスタンス再生成などで発生 (Issue #146)。
-                # 状態をリセットして強制再ロードする。
-                logger.warning(
-                    f"モデル '{self.model_name}' は状態「キャッシュ済み」だが、"
-                    "このインスタンスはコンポーネントを保持していない。状態をリセットして再ロード。"
-                )
-                ModelLoad._release_model_state(self.model_name)
-                loaded_components = ModelLoad.load_transformers_pipeline_components(
-                    self.task, self.model_name, self.model_path, self.device, self.batch_size
-                )
-                if loaded_components is not None:
-                    self.components = loaded_components
-                else:
-                    error_msg = f"Failed to load pipeline components for model '{self.model_name}'."
-                    logger.error(error_msg, exc_info=True)
-                    raise ModelLoadError(error_msg, model_path=self.model_path)
-            else:
-                error_msg = f"Failed to load pipeline components for model '{self.model_name}'."
-                logger.error(error_msg, exc_info=True)
-                raise ModelLoadError(error_msg, model_path=self.model_path)
+        if not self.components or self.components.get("pipeline") is None:
+            raise ModelLoadError(
+                f"Failed to load pipeline components for model '{self.model_name}'.",
+                model_path=self.model_path,
+            )
 
         # Restoration Attempt (失敗しても継続可能)
         restored_components = ModelLoad.restore_model_to_cuda(
@@ -94,13 +81,24 @@ class PipelineBaseAnnotator(BaseAnnotator):
                 f"Model '{self.model_name}' will run on CPU. "
                 f"CUDA restoration failed but CPU fallback is already complete."
             )
+            if ModelLoad._get_model_state(self.model_name) == "on_cpu":
+                self.device = "cpu"
+            else:
+                raise ModelLoadError(
+                    f"Failed to restore pipeline components for model '{self.model_name}'."
+                )
+        self._prepared = True
         return self
 
+    @local_model_exit
     def __exit__(
         self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any
     ) -> None:
         """Pipeline モデルをキャッシュします。"""
         logger.debug(f"Exiting context for Pipeline model '{self.model_name}' (exception: {exc_type})")
+        if not self.components:
+            ModelLoad.release_model(self.model_name)
+            return
         cached_components = ModelLoad.cache_to_main_memory(
             self.model_name, cast(dict[str, Any], self.components)
         )

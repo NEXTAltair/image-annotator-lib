@@ -11,10 +11,10 @@ from ...exceptions.errors import OutOfMemoryError
 from ..model_factory import ModelLoad
 from ..types import ONNXComponents, RatingPrediction, TaskCapability, UnifiedAnnotationResult
 from ..utils import logger
-from .annotator import BaseAnnotator
+from .local import LocalModelAnnotator, local_model_enter, local_model_exit
 
 
-class ONNXBaseAnnotator(BaseAnnotator):
+class ONNXBaseAnnotator(LocalModelAnnotator):
     """ONNX Runtime を使用するモデル用の基底クラス。"""
 
     onnx_model_filename: ClassVar[str] = "model.onnx"
@@ -37,6 +37,7 @@ class ONNXBaseAnnotator(BaseAnnotator):
         # 次回呼び出しで使い回さないためのフラグ。
         self._prepared: bool = False
 
+    @local_model_enter
     def __enter__(self) -> Self:
         """ONNX モデルコンポーネントを準備する (準備済みなら再利用する)。
 
@@ -58,22 +59,8 @@ class ONNXBaseAnnotator(BaseAnnotator):
                 self._load_components()
                 return self
 
-            # `load_components()` は「キャッシュ済み」と「ロード失敗」の両方で None を返す。
-            # 呼び出し前の状態で 2 ケースを区別する (Transformers 系と同じ対処)。
-            had_cached_state = ModelLoad._get_model_state(self.model_name) is not None
-
             logger.info(f"Loading/Restoring ONNX components: model='{self.model_path}'")
             loaded = self._load_components()
-
-            if loaded is None and had_cached_state:
-                # 状態は「ロード済み」だがこのインスタンスは components を保持していない。
-                # 状態をリセットして強制再ロードする。
-                logger.warning(
-                    f"モデル '{self.model_name}' は状態「ロード済み」だが、"
-                    "このインスタンスはコンポーネントを保持していない。状態をリセットして再ロード。"
-                )
-                ModelLoad.release_model(self.model_name)
-                loaded = self._load_components()
 
             if loaded is None:
                 raise RuntimeError(f"ONNX モデル '{self.model_name}' のロードに失敗しました。")
@@ -83,14 +70,14 @@ class ONNXBaseAnnotator(BaseAnnotator):
             self._analyze_model_input_format()
             self._prepared = True
             # LRU 退避 / 明示解放から実体も解放できるようにする (Issue #162)。
-            ModelLoad.register_component_releaser(self.model_name, self._release_retained_components)
+            ModelLoad.register_component_releaser(
+                self.model_name, self._release_retained_components, owner=self
+            )
 
         except OutOfMemoryError as e:
-            self._discard_components()
             raise e
         except Exception as e:
             logger.exception(f"ONNXモデル {self.model_name} の準備中にエラーが発生: {e}")
-            self._discard_components()
             raise
 
         return self
@@ -106,29 +93,7 @@ class ONNXBaseAnnotator(BaseAnnotator):
             metadata_extension=self.onnx_metadata_extension,
         )
 
-    def _discard_components(self) -> None:
-        """準備に失敗した components と状態を捨てて、次回クリーンに再ロードさせる。"""
-        self._prepared = False
-        self.components = None
-        ModelLoad.unregister_component_releaser(self.model_name)
-        try:
-            ModelLoad.release_model(self.model_name)
-        except Exception as e:  # 解放失敗で元の例外を隠さない
-            logger.error(f"準備失敗後の解放でエラー ({self.model_name}): {e}", exc_info=True)
-
-    def _release_retained_components(self) -> None:
-        """LRU 退避 / 明示解放から呼ばれ、保持中のセッションを手放す (Issue #162)。
-
-        `ModelLoad` 側の状態解放と同じ経路で呼ばれるため、ここから解放 API を
-        呼び返してはならない (再入する)。参照を落とすだけにする。
-        """
-        logger.debug(f"Releasing retained ONNX components for '{self.model_name}'")
-        self._prepared = False
-        components = self.components
-        self.components = None
-        if components:
-            components.pop("session", None)  # type: ignore[misc]
-
+    @local_model_exit
     def __exit__(
         self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any
     ) -> None:
