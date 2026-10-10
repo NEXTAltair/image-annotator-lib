@@ -70,7 +70,7 @@ def isolate_model_resources(monkeypatch):
         shared = {}
         monkeypatch.setattr(LoaderBase, name, shared, raising=False)
         monkeypatch.setattr(ModelLoad, name, shared, raising=False)
-    for name in ("_RELEASE_PENDING", "_PREPARING_MODELS", "_EXITING_MODELS"):
+    for name in ("_RELEASE_PENDING", "_CLEANUP_PENDING", "_PREPARING_MODELS", "_EXITING_MODELS"):
         shared = set()
         monkeypatch.setattr(LoaderBase, name, shared, raising=False)
         monkeypatch.setattr(ModelLoad, name, shared, raising=False)

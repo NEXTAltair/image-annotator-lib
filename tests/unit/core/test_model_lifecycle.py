@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from PIL import Image
 
 from image_annotator_lib.core.base.clip import ClipBaseAnnotator
 from image_annotator_lib.core.base.onnx import ONNXBaseAnnotator
@@ -174,6 +175,67 @@ def test_other_local_backend_caught_inner_exception_preserves_outer_context(tran
     assert not ModelLoad.is_model_active(annotator.model_name)
     assert not ModelLoad._ACTIVE_THREADS
     loads.assert_called_once_with()
+
+
+@pytest.mark.parametrize("transient_backend", ["pipeline", "clip"], indirect=True)
+@pytest.mark.parametrize("release_requested", [False, True])
+def test_recovered_nested_generation_remains_releasable_after_own_oom(
+    transient_backend, monkeypatch, release_requested
+):
+    """Re-entry after invalidation must register the new generation's actual refs."""
+    kind, annotator, loads, moves, _ = transient_backend
+
+    def download_generation():
+        model = SimpleNamespace(device="cuda")
+        if kind == "pipeline":
+            return {"pipeline": SimpleNamespace(model=model)}
+        return {"model": model, "clip_model": model, "processor": object()}
+
+    def move_generation(components, device):
+        model = components["pipeline"].model if kind == "pipeline" else components["model"]
+        model.device = device
+
+    loads.side_effect = download_generation
+    moves.side_effect = move_generation
+    with annotator:
+        failed_components = annotator.components
+        if release_requested:
+            ModelLoad.release_model(annotator.model_name)
+            assert annotator.components is failed_components
+        with monkeypatch.context() as scope:
+            scope.setattr(annotator, "_preprocess_images", Mock(side_effect=OutOfMemoryError("own OOM")))
+            result = annotator.predict([Image.new("RGB", (4, 4))])[0]
+        assert "メモリ不足" in result.error
+        assert failed_components == {}
+        assert annotator.components is None
+        assert ModelLoad._get_model_state(annotator.model_name) is None
+        assert ModelLoad.is_model_active(annotator.model_name)
+        with annotator:
+            recovered_components = annotator.components
+            assert recovered_components is not failed_components
+            assert recovered_components
+            assert ModelLoad._get_model_state(annotator.model_name) == "on_cuda"
+        assert annotator.components is recovered_components
+        assert ModelLoad.is_final_model_context(annotator.model_name, annotator)
+    if release_requested:
+        assert annotator.components is None
+        assert recovered_components == {}
+        assert ModelLoad._get_model_state(annotator.model_name) is None
+    else:
+        assert annotator.components is recovered_components
+        assert recovered_components
+        assert ModelLoad._get_model_state(annotator.model_name) == "on_cpu"
+        assert ModelLoad._get_current_cache_usage() == 1024.0
+    ModelLoad.release_model(annotator.model_name)
+    assert annotator.components is None
+    assert recovered_components == {}
+    assert ModelLoad._get_model_state(annotator.model_name) is None
+    assert annotator.model_name not in ModelLoad._MEMORY_USAGE
+    assert annotator.model_name not in ModelLoad._HOST_MEMORY_USAGE
+    assert not ModelLoad.is_model_active(annotator.model_name)
+    assert not ModelLoad._RELEASE_PENDING
+    assert not ModelLoad._CLEANUP_PENDING
+    assert loads.call_count == 2
 
 
 def test_nested_deferred_release_calls_owner_releaser_once():

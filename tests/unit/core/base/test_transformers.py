@@ -605,3 +605,36 @@ def test_retained_cpu_model_survives_known_vram_deficit_without_redownload(backe
     assert not ModelLoad.is_model_active(MODEL_NAME)
     loads.assert_called_once()
     assert all(call.args[1] == "cpu" for call in moves.call_args_list)
+
+
+def test_public_annotate_oom_cleanup_allows_immediate_next_chunk(backend, monkeypatch):
+    """A failed chunk must return reserved VRAM before the next admission probe."""
+    import torch
+
+    loads, _ = backend
+    available = {"bytes": 16 * 1024**3}
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (available["bytes"], 16 * 1024**3))
+    empty_cache = Mock(side_effect=lambda: available.update(bytes=16 * 1024**3))
+    monkeypatch.setattr(torch.cuda, "empty_cache", empty_cache)
+
+    def fail_allocation(**kwargs):
+        available["bytes"] = 512 * 1024**2
+        raise torch.cuda.OutOfMemoryError("allocator retains reserved memory until empty_cache")
+
+    def download(device):
+        model = FakeModel(device)
+        if loads.call_count == 1:
+            model.generate.side_effect = fail_allocation
+        return {"model": model, "processor": FakeProcessor()}
+
+    loads.side_effect = download
+    assert "メモリ不足" in call_annotate().error
+    assert available["bytes"] == 16 * 1024**3
+    assert not ModelLoad.is_model_active(MODEL_NAME)
+    assert not ModelLoad._CLEANUP_PENDING
+    result = call_annotate()
+    assert result.error is None
+    assert result.captions == ["test caption"]
+    assert loads.call_count == 2
+    empty_cache.assert_called()
