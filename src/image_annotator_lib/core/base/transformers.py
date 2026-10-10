@@ -63,7 +63,8 @@ class TransformersBaseAnnotator(LocalModelAnnotator):
             from ..utils import determine_effective_device
 
             self.device = determine_effective_device(self._requested_device, self.model_name)
-        ModelLoad._make_cuda_room(self.model_name, self.device)
+        if state is None:
+            ModelLoad._make_cuda_room(self.model_name, self.device)
         loaded = ModelLoad.load_transformers_components(
             self.model_name, str(self.model_path), str(self.device)
         )
