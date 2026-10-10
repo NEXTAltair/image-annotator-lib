@@ -113,7 +113,10 @@ class TensorflowBaseAnnotator(LocalModelAnnotator):
             except Exception as e:
                 logger.exception(f"TensorFlow モデル '{self.model_name}' の解放中にエラー: {e}")
             finally:
-                self.components = None
+                # Leased release is deferred; keep the dictionary available to its
+                # registered callback until end_model_context clears it in place.
+                if not ModelLoad.is_model_active(self.model_name):
+                    self._release_retained_components()
         if exc_type:
             logger.error(f"TensorFlow モデル '{self.model_name}' のコンテキスト内で例外発生: {exc_val}")
 
