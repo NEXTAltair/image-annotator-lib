@@ -15,18 +15,31 @@ import gc
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from functools import wraps
 from pathlib import Path
+from threading import RLock, get_ident
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import psutil
 
-from ...exceptions.errors import OutOfMemoryError
+from ...exceptions.errors import ModelLoadError, OutOfMemoryError
 from ..config import config_registry
 from ..types import LoaderComponents
 from ..utils import logger
 
 if TYPE_CHECKING:
     import torch
+
+
+def resource_locked[**P, R](method: Callable[P, R]) -> Callable[P, R]:
+    """Serialize admission, accounting, migration, and release; never inference."""
+
+    @wraps(method)
+    def locked(*args: P.args, **kwargs: P.kwargs) -> R:
+        with LoaderBase._RESOURCE_LOCK:
+            return method(*args, **kwargs)
+
+    return locked
 
 
 class LoaderBase(ABC):
@@ -47,6 +60,113 @@ class LoaderBase(ABC):
     # LRU 退避 / 明示解放と協調するためのコールバック登録簿。
     # 登録が無いモデル (毎回解放する従来型) は影響を受けない。
     _COMPONENT_RELEASERS: ClassVar[dict[str, Callable[[], None]]] = {}
+    _RESOURCE_LOCK: ClassVar[Any] = RLock()
+    _MODEL_OWNERS: ClassVar[dict[str, object]] = {}
+    _ACTIVE_CONTEXTS: ClassVar[dict[str, int]] = {}
+    _ACTIVE_THREADS: ClassVar[dict[str, int]] = {}
+    _RELEASE_PENDING: ClassVar[set[str]] = set()
+    _PREPARING_MODELS: ClassVar[set[str]] = set()
+    _EXITING_MODELS: ClassVar[set[str]] = set()
+    # Model weight estimates remain in _MEMORY_USAGE for compatibility. Host
+    # cache admission uses a separate ledger, with a conservative legacy fallback.
+    _HOST_MEMORY_USAGE: ClassVar[dict[str, float]] = {}
+
+    @classmethod
+    @resource_locked
+    def begin_model_context(cls, model_name: str, owner: object) -> None:
+        """Reserve one model generation before preparation; pin it until final exit."""
+        count = cls._ACTIVE_CONTEXTS.get(model_name, 0)
+        if count:
+            if (
+                cls._MODEL_OWNERS.get(model_name) is not owner
+                or cls._ACTIVE_THREADS.get(model_name) != get_ident()
+            ):
+                raise ModelLoadError(f"Model {model_name!r} is in use by another context owner/thread.")
+        else:
+            previous = cls._MODEL_OWNERS.get(model_name)
+            stale_owner = hasattr(owner, "components") and getattr(owner, "components", None) is None
+            if (previous is not owner or stale_owner) and model_name in cls._MODEL_STATES:
+                cls._release_model_state(model_name)
+            cls._MODEL_OWNERS[model_name] = owner
+            cls._ACTIVE_THREADS[model_name] = get_ident()
+            cls._PREPARING_MODELS.add(model_name)
+        cls._ACTIVE_CONTEXTS[model_name] = count + 1
+
+    @classmethod
+    @resource_locked
+    def finish_model_entry(cls, model_name: str, owner: object) -> None:
+        cls._check_context_owner(model_name, owner)
+        cls._PREPARING_MODELS.discard(model_name)
+
+    @classmethod
+    @resource_locked
+    def begin_model_exit(cls, model_name: str, owner: object) -> bool:
+        cls._check_context_owner(model_name, owner)
+        final = cls._ACTIVE_CONTEXTS.get(model_name, 0) == 1
+        if final:
+            cls._EXITING_MODELS.add(model_name)
+        return final
+
+    @classmethod
+    @resource_locked
+    def end_model_context(cls, model_name: str, owner: object, *, failed: bool = False) -> None:
+        cls._check_context_owner(model_name, owner)
+        count = cls._ACTIVE_CONTEXTS[model_name]
+        if failed:
+            cls._RELEASE_PENDING.add(model_name)
+        if count > 1:
+            cls._ACTIVE_CONTEXTS[model_name] = count - 1
+            return
+        cls._ACTIVE_CONTEXTS.pop(model_name, None)
+        cls._ACTIVE_THREADS.pop(model_name, None)
+        cls._PREPARING_MODELS.discard(model_name)
+        cls._EXITING_MODELS.discard(model_name)
+        if model_name in cls._RELEASE_PENDING:
+            cls._release_model_internal(model_name)
+        elif model_name in cls._MODEL_STATES:
+            cls._update_model_state(model_name)
+        else:
+            # Also discard callbacks installed before a failed load.
+            cls._release_model_state(model_name)
+
+    @classmethod
+    def _check_context_owner(cls, model_name: str, owner: object) -> None:
+        if (
+            not cls._ACTIVE_CONTEXTS.get(model_name)
+            or cls._MODEL_OWNERS.get(model_name) is not owner
+            or cls._ACTIVE_THREADS.get(model_name) != get_ident()
+        ):
+            raise ModelLoadError(f"Context ownership mismatch for model {model_name!r}.")
+
+    @classmethod
+    @resource_locked
+    def is_model_active(cls, model_name: str) -> bool:
+        return cls._ACTIVE_CONTEXTS.get(model_name, 0) > 0
+
+    @classmethod
+    @resource_locked
+    def is_final_model_context(cls, model_name: str, owner: object) -> bool:
+        return cls._MODEL_OWNERS.get(model_name) is owner and cls._ACTIVE_CONTEXTS.get(model_name, 0) == 1
+
+    @classmethod
+    def _assert_device_migration_allowed(cls, model_name: str) -> None:
+        if not cls.is_model_active(model_name):
+            return
+        if (
+            cls._ACTIVE_CONTEXTS[model_name] != 1
+            or cls._ACTIVE_THREADS.get(model_name) != get_ident()
+            or model_name not in cls._PREPARING_MODELS | cls._EXITING_MODELS
+        ):
+            raise ModelLoadError(f"Cannot migrate active model {model_name!r}.")
+
+    @classmethod
+    @resource_locked
+    def invalidate_model(cls, model_name: str, owner: object) -> None:
+        """Owner-local failure may invalidate its generation without releasing leases."""
+        existing = cls._MODEL_OWNERS.get(model_name)
+        if existing is not None and existing is not owner:
+            raise ModelLoadError(f"Cannot invalidate another owner of model {model_name!r}.")
+        cls._release_model_state(model_name, owner=owner, force=True)
 
     def __init__(self, model_name: str, device: str) -> None:
         """ベースローダーを初期化する。
@@ -94,6 +214,7 @@ class LoaderBase(ABC):
 
     # --- ロードオーケストレーション ---
 
+    @resource_locked
     def load_components(self, model_path: str, **kwargs: Any) -> LoaderComponents | None:
         """モデルのロードプロセスを調整する。
 
@@ -136,7 +257,9 @@ class LoaderBase(ABC):
 
         # 3. キャッシュクリア
         if model_size_mb > 0:
-            if not LoaderBase._clear_cache_internal(self.model_name, model_size_mb):
+            if not LoaderBase._clear_cache_internal(
+                self.model_name, self._expected_host_size_mb(model_size_mb)
+            ):
                 LoaderBase._handle_load_error(
                     self.model_name,
                     MemoryError(f"Failed to clear sufficient cache for {self.model_name}"),
@@ -153,13 +276,25 @@ class LoaderBase(ABC):
             components = self._load_components_internal(model_path=model_path, **kwargs)
 
             # 5. 成功時の状態更新
-            LoaderBase._update_model_state(self.model_name, self.device, "loaded", model_size_mb)
+            host_size = self._loaded_host_size_mb(components, model_size_mb)
+            if not LoaderBase._clear_cache_internal(self.model_name, host_size):
+                raise MemoryError(f"Insufficient host cache for loaded model {self.model_name!r}")
+            LoaderBase._update_model_state(
+                self.model_name, self.device, "loaded", model_size_mb, host_size_mb=host_size
+            )
             logger.info(f"モデル '{self.model_name}' ({model_type}) ロード成功 (デバイス: {self.device})。")
             return components
 
         except Exception as e:
             LoaderBase._handle_load_error(self.model_name, e)
             return None
+
+    def _expected_host_size_mb(self, model_size_mb: float) -> float:
+        """Unknown placement conservatively reserves the full weight size on host."""
+        return model_size_mb
+
+    def _loaded_host_size_mb(self, components: LoaderComponents, model_size_mb: float) -> float:
+        return self._expected_host_size_mb(model_size_mb)
 
     # --- サイズ管理ヘルパー ---
 
@@ -230,9 +365,7 @@ class LoaderBase(ABC):
             return
         try:
             size_gb = size_mb / 1024
-            config_registry.set_runtime_cache_value(
-                model_name, "estimated_size_gb", round(size_gb, 3)
-            )
+            config_registry.set_runtime_cache_value(model_name, "estimated_size_gb", round(size_gb, 3))
             config_registry.save_runtime_cache()
             logger.debug(f"モデル '{model_name}' 計算サイズ ({size_gb:.3f}GB) を runtime cache に保存。")
         except Exception as e:
@@ -298,8 +431,12 @@ class LoaderBase(ABC):
 
     @classmethod
     def _get_current_cache_usage(cls) -> float:
-        """現在のキャッシュ使用量合計 (MB) を返す。"""
-        return sum(cls._MEMORY_USAGE.values())
+        """Estimated host-resident weight usage (MB), not total GPU weight size."""
+        return sum(cls._get_host_memory_usage(name) for name in cls._MEMORY_USAGE)
+
+    @classmethod
+    def _get_host_memory_usage(cls, model_name: str) -> float:
+        return cls._HOST_MEMORY_USAGE.get(model_name, cls._MEMORY_USAGE.get(model_name, 0.0))
 
     @classmethod
     def _get_models_sorted_by_last_used(cls) -> list[tuple[str, float]]:
@@ -354,6 +491,7 @@ class LoaderBase(ABC):
         return float(total_memory * cls._CACHE_RATIO)
 
     @classmethod
+    @resource_locked
     def _clear_cache_internal(cls, model_name_to_load: str, required_size_mb: float) -> bool:
         """必要に応じて LRU でモデルをキャッシュから削除する。
 
@@ -365,7 +503,7 @@ class LoaderBase(ABC):
             十分なスペースがあるか確保できた場合 True、そうでなければ False。
         """
         max_cache = cls._get_max_cache_size()
-        initial_cache_size = cls._get_current_cache_usage()
+        initial_cache_size = cls._get_current_cache_usage() - cls._get_host_memory_usage(model_name_to_load)
 
         if initial_cache_size + required_size_mb <= max_cache:
             return True
@@ -382,7 +520,9 @@ class LoaderBase(ABC):
         released_something = False
 
         for old_model_name, last_used in models_by_age:
-            current_cache_size = cls._get_current_cache_usage()
+            current_cache_size = cls._get_current_cache_usage() - cls._get_host_memory_usage(
+                model_name_to_load
+            )
             if current_cache_size + required_size_mb <= max_cache:
                 logger.info("キャッシュ解放停止: 必要容量確保完了。")
                 break
@@ -391,8 +531,10 @@ class LoaderBase(ABC):
                 continue
             if old_model_name not in cls._MODEL_STATES:
                 continue
+            if cls.is_model_active(old_model_name) or cls._get_host_memory_usage(old_model_name) <= 0:
+                continue
 
-            freed_memory = cls._get_model_memory_usage(old_model_name)
+            freed_memory = cls._get_host_memory_usage(old_model_name)
             logger.info(
                 f"モデル '{old_model_name}' を解放"
                 f" (最終使用: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_used))},"
@@ -401,7 +543,7 @@ class LoaderBase(ABC):
             cls._release_model_state(old_model_name)
             released_something = True
 
-        final_cache_size = cls._get_current_cache_usage()
+        final_cache_size = cls._get_current_cache_usage() - cls._get_host_memory_usage(model_name_to_load)
         if final_cache_size + required_size_mb > max_cache:
             final_cache_gb = final_cache_size / 1024
             logger.error(
@@ -415,12 +557,15 @@ class LoaderBase(ABC):
         return True
 
     @classmethod
+    @resource_locked
     def _update_model_state(
         cls,
         model_name: str,
         device: str | None = None,
         status: str | None = None,
         size_mb: float | None = None,
+        *,
+        host_size_mb: float | None = None,
     ) -> None:
         """モデルの状態、メモリ使用量、最終使用時刻を一元的に更新する。
 
@@ -434,9 +579,15 @@ class LoaderBase(ABC):
         current_time = time.time()
 
         if status == "released":
+            if cls.is_model_active(model_name):
+                cls._RELEASE_PENDING.add(model_name)
+                return
             cls._MODEL_STATES.pop(model_name, None)
             cls._MEMORY_USAGE.pop(model_name, None)
+            cls._HOST_MEMORY_USAGE.pop(model_name, None)
             cls._MODEL_LAST_USED.pop(model_name, None)
+            cls._MODEL_OWNERS.pop(model_name, None)
+            cls._RELEASE_PENDING.discard(model_name)
             logger.debug(f"モデル '{model_name}' 状態情報解放。")
             return
 
@@ -451,9 +602,13 @@ class LoaderBase(ABC):
         if size_mb is not None:
             if size_mb > 0:
                 cls._MEMORY_USAGE[model_name] = size_mb
+                cls._HOST_MEMORY_USAGE[model_name] = (
+                    size_mb if host_size_mb is None else max(0.0, host_size_mb)
+                )
                 logger.debug(f"モデル '{model_name}' メモリ使用量 -> {size_mb / 1024:.3f} GB")
             elif model_name in cls._MEMORY_USAGE:
                 del cls._MEMORY_USAGE[model_name]
+                cls._HOST_MEMORY_USAGE.pop(model_name, None)
                 logger.debug(f"モデル '{model_name}' メモリ使用量クリア (サイズ0または無効)")
 
     @classmethod
@@ -495,7 +650,7 @@ class LoaderBase(ABC):
                         and current_device_str != target_device
                         and isinstance(component, torch.Tensor | torch.nn.Module)
                     ):
-                        component.to(target_device)
+                        components[component_name] = component.to(target_device)
                         moved = True
 
                 if moved:
@@ -510,9 +665,15 @@ class LoaderBase(ABC):
                     f"コンポーネント '{component_name}' デバイス移動中にエラー ({target_device}): {e}",
                     exc_info=False,
                 )
+                # Failed migration must reach restoration/fallback handling;
+                # recording the requested device here would falsify residency.
+                raise
 
     @classmethod
-    def _release_model_state(cls, model_name: str) -> None:
+    @resource_locked
+    def _release_model_state(
+        cls, model_name: str, *, owner: object | None = None, force: bool = False
+    ) -> bool:
         """モデルの状態情報を解放し、保持中コンポーネントの解放も要求する。
 
         Issue #162: セッションを保持する annotator (ONNX) は、状態だけ解放されると
@@ -521,22 +682,43 @@ class LoaderBase(ABC):
         (`_release_model_internal`) の共通経路である本メソッドから、登録済みの
         releaser を呼んで実体も手放させる。
         """
+        if cls.is_model_active(model_name):
+            if not force or cls._MODEL_OWNERS.get(model_name) is not owner:
+                cls._RELEASE_PENDING.add(model_name)
+                return False
+            cls._invoke_component_releaser(model_name)
+            cls._MODEL_STATES.pop(model_name, None)
+            cls._MEMORY_USAGE.pop(model_name, None)
+            cls._HOST_MEMORY_USAGE.pop(model_name, None)
+            cls._MODEL_LAST_USED.pop(model_name, None)
+            cls._RELEASE_PENDING.discard(model_name)
+            return True
         cls._invoke_component_releaser(model_name)
         cls._update_model_state(model_name, status="released")
+        return True
 
     @classmethod
-    def register_component_releaser(cls, model_name: str, releaser: Callable[[], None]) -> None:
+    @resource_locked
+    def register_component_releaser(
+        cls, model_name: str, releaser: Callable[[], None], *, owner: object | None = None
+    ) -> None:
         """コンポーネントを保持する annotator の解放コールバックを登録する (Issue #162)。
 
         Args:
             model_name: 対象モデル名。
             releaser: 呼ばれたら保持中コンポーネントを手放す callable。
         """
+        callback_owner = owner if owner is not None else getattr(releaser, "__self__", None)
+        if cls.is_model_active(model_name) and cls._MODEL_OWNERS.get(model_name) is not callback_owner:
+            raise ModelLoadError(f"Cannot replace active model {model_name!r}'s release callback.")
         cls._COMPONENT_RELEASERS[model_name] = releaser
 
     @classmethod
-    def unregister_component_releaser(cls, model_name: str) -> None:
+    @resource_locked
+    def unregister_component_releaser(cls, model_name: str, *, owner: object | None = None) -> None:
         """解放コールバックの登録を解除する (Issue #162)。"""
+        if cls.is_model_active(model_name) and cls._MODEL_OWNERS.get(model_name) is not owner:
+            raise ModelLoadError(f"Cannot unregister active model {model_name!r}'s release callback.")
         cls._COMPONENT_RELEASERS.pop(model_name, None)
 
     @classmethod
@@ -554,6 +736,7 @@ class LoaderBase(ABC):
             logger.error(f"コンポーネント解放コールバックでエラー ({model_name}): {e}", exc_info=True)
 
     @classmethod
+    @resource_locked
     def _release_model_internal(cls, model_name: str, components: dict[str, Any] | None = None) -> None:
         """モデルの状態と関連コンポーネントを解放する。
 
@@ -561,6 +744,9 @@ class LoaderBase(ABC):
             model_name: 解放するモデル名。
             components: 削除を試みるモデルコンポーネント辞書 (省略可)。
         """
+        if cls.is_model_active(model_name):
+            cls._RELEASE_PENDING.add(model_name)
+            return
         try:
             import torch
         except ImportError:
