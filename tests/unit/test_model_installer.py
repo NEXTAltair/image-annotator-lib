@@ -1,6 +1,7 @@
 """model_installer (明示モデルインストール API) のユニットテスト (LoRAIro Issue #754)"""
 
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -51,6 +52,48 @@ class TestModelInstallProgress:
 
 
 class TestIsModelInstalled:
+    def test_url_model_marker_does_not_claim_installed_in_another_checkout(self, tmp_path):
+        shared_markers = tmp_path / "user-cache" / "install_markers"
+        config = {"url-scorer": {"model_path": "https://example.test/score.pt", "class": "AestheticScorer"}}
+        artifact = tmp_path / "checkout-a" / "models" / "score.pt"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_bytes(b"test weights")
+        with (
+            _patch_config(config),
+            patch("image_annotator_lib.model_installer._install_url_resource"),
+            patch(
+                "image_annotator_lib.model_installer.DEFAULT_PATHS",
+                {"cache_dir": tmp_path / "checkout-a" / "models", "install_marker_dir": shared_markers},
+            ),
+        ):
+            install_model("url-scorer")
+            assert is_model_installed("url-scorer") is True
+            with patch(
+                "image_annotator_lib.model_installer.DEFAULT_PATHS",
+                {"cache_dir": tmp_path / "checkout-b" / "models", "install_marker_dir": shared_markers},
+            ):
+                assert is_model_installed("url-scorer") is False
+            assert is_model_installed("url-scorer") is True
+
+    def test_url_marker_surviving_deleted_model_weights_is_invalid(self, tmp_path):
+        model_cache = tmp_path / "models"
+        model_cache.mkdir()
+        artifact = model_cache / "score.pt"
+        artifact.write_bytes(b"test weights")
+        config = {"url-scorer": {"model_path": "https://example.test/score.pt", "class": "AestheticScorer"}}
+        with (
+            _patch_config(config),
+            patch("image_annotator_lib.model_installer._install_url_resource"),
+            patch(
+                "image_annotator_lib.model_installer.DEFAULT_PATHS",
+                {"cache_dir": model_cache, "install_marker_dir": tmp_path / "user-markers"},
+            ),
+        ):
+            install_model("url-scorer")
+            assert is_model_installed("url-scorer") is True
+            artifact.unlink()
+            assert is_model_installed("url-scorer") is False
+
     def test_unknown_model_returns_true(self, fake_paths):
         with _patch_config({}):
             assert is_model_installed("openai/gpt-4o") is True
@@ -58,6 +101,78 @@ class TestIsModelInstalled:
     def test_model_without_model_path_returns_true(self, fake_paths):
         with _patch_config({"some_model": {"class": "WDTagger"}}):
             assert is_model_installed("some_model") is True
+
+    @pytest.mark.parametrize("relative", [False, True])
+    @pytest.mark.parametrize("directory", [False, True])
+    def test_deleted_local_model_invalidates_persistent_marker(
+        self, fake_paths, tmp_path, monkeypatch, relative, directory
+    ):
+        monkeypatch.chdir(tmp_path)
+        artifact = tmp_path / "models" / ("local-model" if directory else "model.onnx")
+        artifact.parent.mkdir()
+        if directory:
+            artifact.mkdir()
+        else:
+            artifact.write_bytes(b"test weights")
+        model_path = str(artifact.relative_to(tmp_path) if relative else artifact)
+        with _patch_config({"local": {"model_path": model_path}}):
+            install_model("local")
+            assert is_model_installed("local")
+            if directory:
+                artifact.rmdir()
+            else:
+                artifact.unlink()
+            assert not is_model_installed("local")
+
+    @pytest.mark.parametrize("directory", [False, True])
+    def test_relative_local_marker_rejects_missing_and_same_named_other_resource(
+        self, fake_paths, tmp_path, monkeypatch, directory
+    ):
+        monkeypatch.chdir(tmp_path)
+        relative_model = "models/local-model" if directory else "models/model.onnx"
+        artifact = tmp_path / relative_model
+        artifact.parent.mkdir(exist_ok=True)
+        if directory:
+            artifact.mkdir()
+        else:
+            artifact.write_bytes(b"installed weights")
+        other = tmp_path / "other"
+        other.mkdir()
+        with _patch_config({"local": {"model_path": relative_model}}):
+            install_model("local")
+            assert is_model_installed("local")
+            monkeypatch.chdir(other)
+            assert not is_model_installed("local")
+            same_named = other / relative_model
+            same_named.parent.mkdir()
+            if directory:
+                same_named.mkdir()
+            else:
+                same_named.write_bytes(b"different weights")
+            assert not is_model_installed("local")
+            monkeypatch.chdir(tmp_path)
+            assert is_model_installed("local")
+
+    @pytest.mark.parametrize("directory", [False, True])
+    def test_relative_local_marker_allows_same_resource_after_chdir(
+        self, fake_paths, tmp_path, monkeypatch, directory
+    ):
+        artifact = tmp_path / "models" / ("local-model" if directory else "model.onnx")
+        artifact.parent.mkdir(exist_ok=True)
+        if directory:
+            artifact.mkdir()
+        else:
+            artifact.write_bytes(b"installed weights")
+        start, other = tmp_path / "start", tmp_path / "other"
+        start.mkdir()
+        other.mkdir()
+        relative_model = str(Path("..") / "models" / artifact.name)
+        monkeypatch.chdir(start)
+        with _patch_config({"local": {"model_path": relative_model}}):
+            install_model("local")
+            assert is_model_installed("local")
+            monkeypatch.chdir(other)
+            assert is_model_installed("local")
 
     def test_known_model_without_marker_returns_false(self, fake_paths):
         config = {"wd-vit-tagger-v3": {"model_path": "SmilingWolf/wd-vit-tagger-v3", "class": "WDTagger"}}

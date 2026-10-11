@@ -55,6 +55,7 @@ dependencies = [
     "tqdm>=4.66.0",
     "imagehash",
     "loguru",
+    "platformdirs>=4.3.0",
     "torch>=2.6.0",
     "torchvision>=0.21.0",
     "datetime>=5.5",

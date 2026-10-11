@@ -6,7 +6,7 @@
 install ジョブとして実行できる。
 
 設計メモ:
-    - インストール済み判定は install marker ファイル (cache_dir/install_markers/)
+    - インストール済み判定は OS user cache の install marker ファイル (install_marker_dir/)
       で行う。実ファイルのキャッシュ走査は from_pretrained 系の部分キャッシュと
       整合させるのが難しく、marker 方式が最も決定的で高速 (offline-safe)。
       本 API 導入前に推論経由で暗黙ダウンロード済みのモデルは「未インストール」
@@ -30,7 +30,13 @@ from urllib.parse import urlparse
 from tqdm.auto import tqdm as _base_tqdm
 
 from .core.config import config_registry
-from .core.constants import DEFAULT_PATHS
+from .core.constants import (
+    CACHE_DIR,
+    DEFAULT_PATHS,
+    RUNTIME_CACHE_DIR,
+    SYSTEM_CONFIG_PATH,
+    runtime_state_namespace,
+)
 from .core.utils import DEFAULT_TIMEOUT, logger
 from .exceptions.errors import ModelInstallCancelledError, ModelNotFoundError
 
@@ -201,7 +207,26 @@ def _marker_path(model_name: str) -> Path:
     """モデルの install marker ファイルパスを返す。"""
     # config セクション名にパス区切りは現れないが、防御的に置換する
     safe_name = model_name.replace("/", "__").replace("\\", "__")
-    return Path(DEFAULT_PATHS["cache_dir"]) / _INSTALL_MARKER_DIR_NAME / f"{safe_name}.json"
+    marker_dir = DEFAULT_PATHS.get("install_marker_dir")
+    cache_dir = Path(DEFAULT_PATHS["cache_dir"])
+    # Custom path dictionaries from existing callers retain their portable
+    # cache_dir behavior. The default separates OS-specific installation state.
+    custom_cache_with_default_markers = (
+        marker_dir == RUNTIME_CACHE_DIR / _INSTALL_MARKER_DIR_NAME and cache_dir.resolve() != CACHE_DIR
+    )
+    if marker_dir is None or custom_cache_with_default_markers:
+        marker_dir = cache_dir / _INSTALL_MARKER_DIR_NAME
+    else:
+        # URL artifacts remain project-local. The same OS user may use several
+        # checkouts, so installation state must identify the actual model cache.
+        catalog = getattr(config_registry, "_runtime_state_catalog_path", None)
+        if not isinstance(catalog, str | Path):
+            catalog = getattr(config_registry, "_system_config_path", None)
+        if not isinstance(catalog, str | Path):
+            catalog = DEFAULT_PATHS.get("config_toml", SYSTEM_CONFIG_PATH)
+        namespace = runtime_state_namespace(Path(catalog), cache_dir)
+        marker_dir = Path(marker_dir) / namespace
+    return Path(marker_dir) / f"{safe_name}.json"
 
 
 def _model_config(model_name: str) -> dict[str, object] | None:
@@ -239,7 +264,25 @@ def is_model_installed(model_name: str) -> bool:
         logger.warning(f"install marker の読み込み失敗 ({model_name}): {e} — 未インストール扱い")
         return False
     # Codex P2 (PR #151): config の model_path 付け替えで stale になった marker を拒否する
-    return marker_data.get("model_path") == str(config.get("model_path"))
+    model_path = str(config.get("model_path"))
+    if marker_data.get("model_path") != model_path:
+        return False
+    if urlparse(model_path).scheme in ("http", "https"):
+        from .core.utils import _is_cached
+
+        # Clearing project weights must invalidate a marker in the user cache.
+        return _is_cached(model_path, Path(DEFAULT_PATHS["cache_dir"]))[0]
+    local_resource = marker_data.get("local_path")
+    if isinstance(local_resource, str):
+        # Match the loader's current relative-path semantics. A same-named file
+        # in another cwd must not hit an installation of a different resource.
+        configured_resource = Path(model_path).resolve()
+        return configured_resource == Path(local_resource).resolve() and configured_resource.exists()
+    # Legacy markers have no source type. Unambiguous local paths can still be
+    # revalidated without treating a Hugging Face org/repo identifier as a file.
+    if Path(model_path).is_absolute() or model_path.startswith(("./", "../", ".\\", "..\\")):
+        return Path(model_path).exists()
+    return True
 
 
 def install_model(
@@ -279,9 +322,11 @@ def install_model(
 
     logger.info(f"モデルインストール開始: {model_name} (class={model_class})")
     parsed = urlparse(model_path)
+    local_resource: Path | None = None
     if parsed.scheme in ("http", "https"):
         _install_url_resource(model_path, aggregator)
     elif Path(model_path).exists():
+        local_resource = Path(model_path).resolve()
         # Codex P2 (PR #151): ローカルファイル/ディレクトリ指定はダウンロード不要。
         # 既存 loader (get_file_path / from_pretrained) がそのまま解決できる。
         logger.debug(f"model_path はローカルパスのため DL をスキップ: {model_path}")
@@ -293,7 +338,7 @@ def install_model(
         # CLIP 系: 分類 head (URL) に加えて base CLIP repo が必要
         _install_hf_repo(base_model, aggregator, _HfPatterns(transformers_weights=True))
 
-    _write_marker(model_name, model_path)
+    _write_marker(model_name, model_path, local_resource)
     logger.info(f"モデルインストール完了: {model_name}")
 
 
@@ -397,7 +442,7 @@ def _install_url_resource(url: str, aggregator: _ByteProgressAggregator) -> None
         tmp_path.unlink(missing_ok=True)
 
 
-def _write_marker(model_name: str, model_path: str) -> None:
+def _write_marker(model_name: str, model_path: str, local_resource: Path | None = None) -> None:
     """install 完了 marker を書き込む。"""
     marker = _marker_path(model_name)
     marker.parent.mkdir(parents=True, exist_ok=True)
@@ -406,6 +451,7 @@ def _write_marker(model_name: str, model_path: str) -> None:
             {
                 "model_name": model_name,
                 "model_path": model_path,
+                "local_path": str(local_resource) if local_resource is not None else None,
                 "installed_at": datetime.now().isoformat(),
             },
             ensure_ascii=False,
