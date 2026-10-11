@@ -140,6 +140,8 @@ Windows ではこの一時ディレクトリの保護に Python 3.12.4 以降が
 計測キャッシュとインストール判定はカタログと `models/` の絶対パスを元に保存先を分けるため、
 同じ OS ユーザーの別 checkout に実行時状態を流用しません。URL モデルの重みを削除すると
 インストール済み判定も無効になります。相対 HOME override は読み取り時のディレクトリに固定します。
+相対ローカルモデルは loader が実行時 cwd で解決する実リソースと marker の記録が一致し、
+リソースが存在する場合だけインストール済みと判定します。別 cwd の同名ファイルは流用しません。
 `ModelConfigRegistry.load(config_path=..., user_config_path=..., runtime_cache_path=...)` と
 各保存メソッドの明示パスは引き続き使用できます。保存先ディレクトリの上書きには
 `IMAGE_ANNOTATOR_LIB_CONFIG_HOME`・`IMAGE_ANNOTATOR_LIB_CACHE_HOME`・`IMAGE_ANNOTATOR_LIB_LOG_HOME` を

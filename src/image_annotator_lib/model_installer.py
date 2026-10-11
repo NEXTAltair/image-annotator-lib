@@ -274,7 +274,10 @@ def is_model_installed(model_name: str) -> bool:
         return _is_cached(model_path, Path(DEFAULT_PATHS["cache_dir"]))[0]
     local_resource = marker_data.get("local_path")
     if isinstance(local_resource, str):
-        return Path(local_resource).exists()
+        # Match the loader's current relative-path semantics. A same-named file
+        # in another cwd must not hit an installation of a different resource.
+        configured_resource = Path(model_path).resolve()
+        return configured_resource == Path(local_resource).resolve() and configured_resource.exists()
     # Legacy markers have no source type. Unambiguous local paths can still be
     # revalidated without treating a Hugging Face org/repo identifier as a file.
     if Path(model_path).is_absolute() or model_path.startswith(("./", "../", ".\\", "..\\")):

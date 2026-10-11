@@ -1,6 +1,7 @@
 """model_installer (明示モデルインストール API) のユニットテスト (LoRAIro Issue #754)"""
 
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -122,6 +123,56 @@ class TestIsModelInstalled:
             else:
                 artifact.unlink()
             assert not is_model_installed("local")
+
+    @pytest.mark.parametrize("directory", [False, True])
+    def test_relative_local_marker_rejects_missing_and_same_named_other_resource(
+        self, fake_paths, tmp_path, monkeypatch, directory
+    ):
+        monkeypatch.chdir(tmp_path)
+        relative_model = "models/local-model" if directory else "models/model.onnx"
+        artifact = tmp_path / relative_model
+        artifact.parent.mkdir(exist_ok=True)
+        if directory:
+            artifact.mkdir()
+        else:
+            artifact.write_bytes(b"installed weights")
+        other = tmp_path / "other"
+        other.mkdir()
+        with _patch_config({"local": {"model_path": relative_model}}):
+            install_model("local")
+            assert is_model_installed("local")
+            monkeypatch.chdir(other)
+            assert not is_model_installed("local")
+            same_named = other / relative_model
+            same_named.parent.mkdir()
+            if directory:
+                same_named.mkdir()
+            else:
+                same_named.write_bytes(b"different weights")
+            assert not is_model_installed("local")
+            monkeypatch.chdir(tmp_path)
+            assert is_model_installed("local")
+
+    @pytest.mark.parametrize("directory", [False, True])
+    def test_relative_local_marker_allows_same_resource_after_chdir(
+        self, fake_paths, tmp_path, monkeypatch, directory
+    ):
+        artifact = tmp_path / "models" / ("local-model" if directory else "model.onnx")
+        artifact.parent.mkdir(exist_ok=True)
+        if directory:
+            artifact.mkdir()
+        else:
+            artifact.write_bytes(b"installed weights")
+        start, other = tmp_path / "start", tmp_path / "other"
+        start.mkdir()
+        other.mkdir()
+        relative_model = str(Path("..") / "models" / artifact.name)
+        monkeypatch.chdir(start)
+        with _patch_config({"local": {"model_path": relative_model}}):
+            install_model("local")
+            assert is_model_installed("local")
+            monkeypatch.chdir(other)
+            assert is_model_installed("local")
 
     def test_known_model_without_marker_returns_false(self, fake_paths):
         config = {"wd-vit-tagger-v3": {"model_path": "SmilingWolf/wd-vit-tagger-v3", "class": "WDTagger"}}
