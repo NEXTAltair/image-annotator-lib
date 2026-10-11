@@ -15,7 +15,9 @@ from image_annotator_lib.config_policy import (
 
 from .constants import (
     DEFAULT_PATHS,
+    MODEL_RUNTIME_CACHE_PATH,
     TEMPLATE_SYSTEM_CONFIG_PATH,
+    runtime_cache_path_for_catalog,
 )
 from .utils import logger
 
@@ -69,6 +71,10 @@ class ModelConfigRegistry:
         self._runtime_cache_path = Path(
             runtime_cache_path if runtime_cache_path else DEFAULT_PATHS["model_runtime_cache_toml"]
         )
+        if runtime_cache_path is None and self._runtime_cache_path == MODEL_RUNTIME_CACHE_PATH:
+            self._runtime_cache_path = runtime_cache_path_for_catalog(
+                self._system_config_path, Path(DEFAULT_PATHS["cache_dir"])
+            )
         logger.debug(f"システム設定パスを決定: {self._system_config_path}")
         logger.debug(f"ユーザー設定パスを決定: {self._user_config_path}")
         logger.debug(f"モデル runtime cache パスを決定: {self._runtime_cache_path}")

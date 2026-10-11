@@ -1,3 +1,4 @@
+import hashlib
 import importlib.resources
 import os
 from pathlib import Path
@@ -22,7 +23,7 @@ CACHE_DIR = PROJECT_ROOT / "models"
 def _local_directory(variable: str, default: Path) -> Path:
     """Resolve an explicit local override without importing shared project paths."""
     configured = os.environ.get(variable)
-    return Path(configured).expanduser() if configured else default
+    return Path(configured).expanduser().resolve() if configured else default
 
 
 # Mutable preferences, derived metadata, install markers and logs are owned by
@@ -39,10 +40,28 @@ LOG_DIR = _local_directory(
 
 # システム設定ファイルのパス (プロジェクトルート/config/annotator_config.toml)
 SYSTEM_CONFIG_PATH = CONFIG_DIR / "annotator_config.toml"
+
+
+def runtime_state_namespace(catalog_path: Path, cache_dir: Path) -> str:
+    """Identify a catalog and its actual model cache without exposing paths in filenames."""
+    identity = f"{catalog_path.resolve()}\0{cache_dir.resolve()}"
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+
+
+def runtime_cache_path_for_catalog(catalog_path: Path, cache_dir: Path) -> Path:
+    """Keep measured model metadata local to one catalog and model-cache identity."""
+    return (
+        RUNTIME_CACHE_DIR
+        / "projects"
+        / runtime_state_namespace(catalog_path, cache_dir)
+        / ("model_runtime_cache.toml")
+    )
+
+
 # OS user model overrides (explicit user_config_path remains supported)
 USER_CONFIG_PATH = USER_CONFIG_DIR / "user_config.toml"
 # Runtime-derived model metadata cache (deletable local state)
-MODEL_RUNTIME_CACHE_PATH = RUNTIME_CACHE_DIR / "model_runtime_cache.toml"
+MODEL_RUNTIME_CACHE_PATH = runtime_cache_path_for_catalog(SYSTEM_CONFIG_PATH, CACHE_DIR)
 
 # ADR 0023 Phase 1 (Issue #35, PR #40): `AVAILABLE_API_MODELS_CONFIG_PATH` 定数は廃止。
 # WebAPI モデル一覧は `webapi/api_model_discovery.py` で LiteLLM 同梱 DB から runtime

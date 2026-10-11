@@ -131,14 +131,15 @@ Windows ではこの一時ディレクトリの保護に Python 3.12.4 以降が
 | ファイル | Windows | Linux |
 |---|---|---|
 | `user_config.toml` | `%LOCALAPPDATA%/image-annotator-lib/` | `~/.config/image-annotator-lib/` |
-| `model_runtime_cache.toml` と `install_markers/` | `%LOCALAPPDATA%/image-annotator-lib/Cache/` | `~/.cache/image-annotator-lib/` |
+| `projects/<identity>/model_runtime_cache.toml` と `install_markers/<identity>/` | `%LOCALAPPDATA%/image-annotator-lib/Cache/` | `~/.cache/image-annotator-lib/` |
 | `image-annotator-lib.log` | `%LOCALAPPDATA%/image-annotator-lib/Logs/` | `~/.local/state/image-annotator-lib/log/` |
 
 既存の `config/user_config.toml`・`config/model_runtime_cache.toml` と `models/install_markers/` は
 自動移行・削除しません。その OS に適したユーザー設定だけを明示的に新しい保存先へ移してください。
 実行時キャッシュとインストール判定は OS ごとに再生成します。
-インストール判定は `models/` の絶対パスを元に保存先を分けるため、同じ OS ユーザーの別 checkout
-に未取得の URL モデルを取得済みと誤認しません。
+計測キャッシュとインストール判定はカタログと `models/` の絶対パスを元に保存先を分けるため、
+同じ OS ユーザーの別 checkout に実行時状態を流用しません。URL モデルの重みを削除すると
+インストール済み判定も無効になります。相対 HOME override は読み取り時のディレクトリに固定します。
 `ModelConfigRegistry.load(config_path=..., user_config_path=..., runtime_cache_path=...)` と
 各保存メソッドの明示パスは引き続き使用できます。保存先ディレクトリの上書きには
 `IMAGE_ANNOTATOR_LIB_CONFIG_HOME`・`IMAGE_ANNOTATOR_LIB_CACHE_HOME`・`IMAGE_ANNOTATOR_LIB_LOG_HOME` を
