@@ -108,9 +108,9 @@ def test_install_markers_use_local_runtime_directory_and_keep_custom_cache_compa
 
     paths = load_paths(monkeypatch, tmp_path, "windows")
     monkeypatch.setattr(model_installer, "DEFAULT_PATHS", paths.DEFAULT_PATHS)
-    assert model_installer._marker_path("org/model") == (
-        paths.RUNTIME_CACHE_DIR / "install_markers" / "org__model.json"
-    )
+    marker = model_installer._marker_path("org/model")
+    assert marker.parent.parent == paths.RUNTIME_CACHE_DIR / "install_markers"
+    assert marker.name == "org__model.json"
     monkeypatch.setattr(model_installer, "DEFAULT_PATHS", {"cache_dir": tmp_path / "custom-models"})
     assert model_installer._marker_path("org/model") == (
         tmp_path / "custom-models" / "install_markers" / "org__model.json"

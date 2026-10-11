@@ -137,6 +137,8 @@ Windows ではこの一時ディレクトリの保護に Python 3.12.4 以降が
 既存の `config/user_config.toml`・`config/model_runtime_cache.toml` と `models/install_markers/` は
 自動移行・削除しません。その OS に適したユーザー設定だけを明示的に新しい保存先へ移してください。
 実行時キャッシュとインストール判定は OS ごとに再生成します。
+インストール判定は `models/` の絶対パスを元に保存先を分けるため、同じ OS ユーザーの別 checkout
+に未取得の URL モデルを取得済みと誤認しません。
 `ModelConfigRegistry.load(config_path=..., user_config_path=..., runtime_cache_path=...)` と
 各保存メソッドの明示パスは引き続き使用できます。保存先ディレクトリの上書きには
 `IMAGE_ANNOTATOR_LIB_CONFIG_HOME`・`IMAGE_ANNOTATOR_LIB_CACHE_HOME`・`IMAGE_ANNOTATOR_LIB_LOG_HOME` を
