@@ -122,6 +122,26 @@ Windows ではこの一時ディレクトリの保護に Python 3.12.4 以降が
    uv sync --dev
    ```
 
+## 設定と実行時ファイルの保存先
+
+`config/annotator_config.toml` はカレントディレクトリの共通モデルカタログ、`models/` は
+モデルの重みの保存先です。OS 固有のユーザー設定・実行時状態・ログは `platformdirs` で
+解決する OS ユーザーディレクトリに保存します。
+
+| ファイル | Windows | Linux |
+|---|---|---|
+| `user_config.toml` | `%LOCALAPPDATA%/image-annotator-lib/` | `~/.config/image-annotator-lib/` |
+| `model_runtime_cache.toml` と `install_markers/` | `%LOCALAPPDATA%/image-annotator-lib/Cache/` | `~/.cache/image-annotator-lib/` |
+| `image-annotator-lib.log` | `%LOCALAPPDATA%/image-annotator-lib/Logs/` | `~/.local/state/image-annotator-lib/log/` |
+
+既存の `config/user_config.toml`・`config/model_runtime_cache.toml` と `models/install_markers/` は
+自動移行・削除しません。その OS に適したユーザー設定だけを明示的に新しい保存先へ移してください。
+実行時キャッシュとインストール判定は OS ごとに再生成します。
+`ModelConfigRegistry.load(config_path=..., user_config_path=..., runtime_cache_path=...)` と
+各保存メソッドの明示パスは引き続き使用できます。保存先ディレクトリの上書きには
+`IMAGE_ANNOTATOR_LIB_CONFIG_HOME`・`IMAGE_ANNOTATOR_LIB_CACHE_HOME`・`IMAGE_ANNOTATOR_LIB_LOG_HOME` を
+その環境で設定してください。共有プロジェクトの設定に OS 固有の値を固定しないでください。
+
 ## Getting Started / 基本的な使い方
 
 ### 1. ライブラリのインポート

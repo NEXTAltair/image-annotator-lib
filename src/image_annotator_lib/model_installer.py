@@ -6,7 +6,7 @@
 install ジョブとして実行できる。
 
 設計メモ:
-    - インストール済み判定は install marker ファイル (cache_dir/install_markers/)
+    - インストール済み判定は OS user cache の install marker ファイル (install_marker_dir/)
       で行う。実ファイルのキャッシュ走査は from_pretrained 系の部分キャッシュと
       整合させるのが難しく、marker 方式が最も決定的で高速 (offline-safe)。
       本 API 導入前に推論経由で暗黙ダウンロード済みのモデルは「未インストール」
@@ -201,7 +201,12 @@ def _marker_path(model_name: str) -> Path:
     """モデルの install marker ファイルパスを返す。"""
     # config セクション名にパス区切りは現れないが、防御的に置換する
     safe_name = model_name.replace("/", "__").replace("\\", "__")
-    return Path(DEFAULT_PATHS["cache_dir"]) / _INSTALL_MARKER_DIR_NAME / f"{safe_name}.json"
+    marker_dir = DEFAULT_PATHS.get("install_marker_dir")
+    # Custom path dictionaries from existing callers retain their portable
+    # cache_dir behavior. The default separates OS-specific installation state.
+    if marker_dir is None:
+        marker_dir = Path(DEFAULT_PATHS["cache_dir"]) / _INSTALL_MARKER_DIR_NAME
+    return Path(marker_dir) / f"{safe_name}.json"
 
 
 def _model_config(model_name: str) -> dict[str, object] | None:
