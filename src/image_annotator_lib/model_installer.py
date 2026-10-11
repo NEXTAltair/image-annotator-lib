@@ -18,7 +18,6 @@ install ジョブとして実行できる。
 
 from __future__ import annotations
 
-import hashlib
 import json
 import threading
 from collections.abc import Callable
@@ -31,7 +30,13 @@ from urllib.parse import urlparse
 from tqdm.auto import tqdm as _base_tqdm
 
 from .core.config import config_registry
-from .core.constants import DEFAULT_PATHS
+from .core.constants import (
+    CACHE_DIR,
+    DEFAULT_PATHS,
+    RUNTIME_CACHE_DIR,
+    SYSTEM_CONFIG_PATH,
+    runtime_state_namespace,
+)
 from .core.utils import DEFAULT_TIMEOUT, logger
 from .exceptions.errors import ModelInstallCancelledError, ModelNotFoundError
 
@@ -203,15 +208,21 @@ def _marker_path(model_name: str) -> Path:
     # config セクション名にパス区切りは現れないが、防御的に置換する
     safe_name = model_name.replace("/", "__").replace("\\", "__")
     marker_dir = DEFAULT_PATHS.get("install_marker_dir")
+    cache_dir = Path(DEFAULT_PATHS["cache_dir"])
     # Custom path dictionaries from existing callers retain their portable
     # cache_dir behavior. The default separates OS-specific installation state.
-    if marker_dir is None:
-        marker_dir = Path(DEFAULT_PATHS["cache_dir"]) / _INSTALL_MARKER_DIR_NAME
+    custom_cache_with_default_markers = (
+        marker_dir == RUNTIME_CACHE_DIR / _INSTALL_MARKER_DIR_NAME and cache_dir.resolve() != CACHE_DIR
+    )
+    if marker_dir is None or custom_cache_with_default_markers:
+        marker_dir = cache_dir / _INSTALL_MARKER_DIR_NAME
     else:
         # URL artifacts remain project-local. The same OS user may use several
         # checkouts, so installation state must identify the actual model cache.
-        cache_identity = str(Path(DEFAULT_PATHS["cache_dir"]).resolve())
-        namespace = hashlib.sha256(cache_identity.encode("utf-8")).hexdigest()[:16]
+        catalog = getattr(config_registry, "_system_config_path", None)
+        if not isinstance(catalog, str | Path):
+            catalog = DEFAULT_PATHS.get("config_toml", SYSTEM_CONFIG_PATH)
+        namespace = runtime_state_namespace(Path(catalog), cache_dir)
         marker_dir = Path(marker_dir) / namespace
     return Path(marker_dir) / f"{safe_name}.json"
 
@@ -251,7 +262,15 @@ def is_model_installed(model_name: str) -> bool:
         logger.warning(f"install marker の読み込み失敗 ({model_name}): {e} — 未インストール扱い")
         return False
     # Codex P2 (PR #151): config の model_path 付け替えで stale になった marker を拒否する
-    return marker_data.get("model_path") == str(config.get("model_path"))
+    model_path = str(config.get("model_path"))
+    if marker_data.get("model_path") != model_path:
+        return False
+    if urlparse(model_path).scheme in ("http", "https"):
+        from .core.utils import _is_cached
+
+        # Clearing project weights must invalidate a marker in the user cache.
+        return _is_cached(model_path, Path(DEFAULT_PATHS["cache_dir"]))[0]
+    return True
 
 
 def install_model(

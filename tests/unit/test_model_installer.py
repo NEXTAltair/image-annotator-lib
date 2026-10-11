@@ -54,6 +54,9 @@ class TestIsModelInstalled:
     def test_url_model_marker_does_not_claim_installed_in_another_checkout(self, tmp_path):
         shared_markers = tmp_path / "user-cache" / "install_markers"
         config = {"url-scorer": {"model_path": "https://example.test/score.pt", "class": "AestheticScorer"}}
+        artifact = tmp_path / "checkout-a" / "models" / "score.pt"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_bytes(b"test weights")
         with (
             _patch_config(config),
             patch("image_annotator_lib.model_installer._install_url_resource"),
@@ -70,6 +73,25 @@ class TestIsModelInstalled:
             ):
                 assert is_model_installed("url-scorer") is False
             assert is_model_installed("url-scorer") is True
+
+    def test_url_marker_surviving_deleted_model_weights_is_invalid(self, tmp_path):
+        model_cache = tmp_path / "models"
+        model_cache.mkdir()
+        artifact = model_cache / "score.pt"
+        artifact.write_bytes(b"test weights")
+        config = {"url-scorer": {"model_path": "https://example.test/score.pt", "class": "AestheticScorer"}}
+        with (
+            _patch_config(config),
+            patch("image_annotator_lib.model_installer._install_url_resource"),
+            patch(
+                "image_annotator_lib.model_installer.DEFAULT_PATHS",
+                {"cache_dir": model_cache, "install_marker_dir": tmp_path / "user-markers"},
+            ),
+        ):
+            install_model("url-scorer")
+            assert is_model_installed("url-scorer") is True
+            artifact.unlink()
+            assert is_model_installed("url-scorer") is False
 
     def test_unknown_model_returns_true(self, fake_paths):
         with _patch_config({}):
