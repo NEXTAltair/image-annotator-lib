@@ -54,6 +54,7 @@ class ModelConfigRegistry:
         self._user_config_data: dict[str, dict[str, Any]] = {}
         self._merged_config_data: dict[str, dict[str, Any]] = {}
         self._system_config_path: Path | None = None
+        self._runtime_state_catalog_path: Path | None = None
         self._runtime_cache_path: Path | None = None
         self._user_config_path: Path | None = None
 
@@ -65,6 +66,9 @@ class ModelConfigRegistry:
     ) -> None:
         """システム設定とユーザー設定のパスを決定し、インスタンス変数に格納する。"""
         self._system_config_path = Path(config_path if config_path else DEFAULT_PATHS["config_toml"])
+        # Explicit relative registry paths keep their existing public behavior,
+        # but persistent-state identity must stay anchored to the load directory.
+        self._runtime_state_catalog_path = self._system_config_path.resolve()
         self._user_config_path = Path(
             user_config_path if user_config_path else DEFAULT_PATHS["user_config_toml"]
         )
@@ -73,7 +77,7 @@ class ModelConfigRegistry:
         )
         if runtime_cache_path is None and self._runtime_cache_path == MODEL_RUNTIME_CACHE_PATH:
             self._runtime_cache_path = runtime_cache_path_for_catalog(
-                self._system_config_path, Path(DEFAULT_PATHS["cache_dir"])
+                self._runtime_state_catalog_path, Path(DEFAULT_PATHS["cache_dir"])
             )
         logger.debug(f"システム設定パスを決定: {self._system_config_path}")
         logger.debug(f"ユーザー設定パスを決定: {self._user_config_path}")

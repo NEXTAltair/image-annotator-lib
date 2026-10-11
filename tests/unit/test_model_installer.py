@@ -101,6 +101,28 @@ class TestIsModelInstalled:
         with _patch_config({"some_model": {"class": "WDTagger"}}):
             assert is_model_installed("some_model") is True
 
+    @pytest.mark.parametrize("relative", [False, True])
+    @pytest.mark.parametrize("directory", [False, True])
+    def test_deleted_local_model_invalidates_persistent_marker(
+        self, fake_paths, tmp_path, monkeypatch, relative, directory
+    ):
+        monkeypatch.chdir(tmp_path)
+        artifact = tmp_path / "models" / ("local-model" if directory else "model.onnx")
+        artifact.parent.mkdir()
+        if directory:
+            artifact.mkdir()
+        else:
+            artifact.write_bytes(b"test weights")
+        model_path = str(artifact.relative_to(tmp_path) if relative else artifact)
+        with _patch_config({"local": {"model_path": model_path}}):
+            install_model("local")
+            assert is_model_installed("local")
+            if directory:
+                artifact.rmdir()
+            else:
+                artifact.unlink()
+            assert not is_model_installed("local")
+
     def test_known_model_without_marker_returns_false(self, fake_paths):
         config = {"wd-vit-tagger-v3": {"model_path": "SmilingWolf/wd-vit-tagger-v3", "class": "WDTagger"}}
         with _patch_config(config):
