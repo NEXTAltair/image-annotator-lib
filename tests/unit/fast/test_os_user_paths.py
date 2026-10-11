@@ -186,3 +186,34 @@ def test_install_markers_use_the_same_catalog_identity_as_runtime_metadata(monke
     assert marker_a.parent.name == constants.runtime_state_namespace(catalog_a, model_cache)
     assert marker_b.parent.name == constants.runtime_state_namespace(catalog_b, model_cache)
     assert marker_a != marker_b
+
+
+def test_relative_catalog_keeps_runtime_and_marker_identity_after_chdir(monkeypatch, tmp_path):
+    from image_annotator_lib import model_installer
+
+    paths = load_paths(monkeypatch, tmp_path, "windows")
+    catalog = paths.SYSTEM_CONFIG_PATH
+    catalog.parent.mkdir(exist_ok=True)
+    catalog.write_text('[local]\nmodel_path = "https://example.test/score.pt"\n')
+    artifact = paths.CACHE_DIR / "score.pt"
+    artifact.parent.mkdir(exist_ok=True)
+    artifact.write_bytes(b"test weights")
+    monkeypatch.setattr(config_module, "DEFAULT_PATHS", paths.DEFAULT_PATHS)
+    monkeypatch.setattr(config_module, "MODEL_RUNTIME_CACHE_PATH", paths.MODEL_RUNTIME_CACHE_PATH)
+    monkeypatch.setattr(
+        config_module, "runtime_cache_path_for_catalog", paths.runtime_cache_path_for_catalog
+    )
+    registry = ModelConfigRegistry()
+    registry.load(config_path=catalog.relative_to(tmp_path))
+    monkeypatch.setattr(model_installer, "config_registry", registry)
+    monkeypatch.setattr(model_installer, "DEFAULT_PATHS", paths.DEFAULT_PATHS)
+    monkeypatch.setattr(model_installer, "_install_url_resource", lambda *args: None)
+    model_installer.install_model("local")
+    original_marker = model_installer._marker_path("local")
+    original_runtime = registry._runtime_cache_path
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.chdir(other)
+    assert model_installer._marker_path("local") == original_marker
+    assert registry._runtime_cache_path == original_runtime
+    assert model_installer.is_model_installed("local")

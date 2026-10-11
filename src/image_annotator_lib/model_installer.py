@@ -219,7 +219,9 @@ def _marker_path(model_name: str) -> Path:
     else:
         # URL artifacts remain project-local. The same OS user may use several
         # checkouts, so installation state must identify the actual model cache.
-        catalog = getattr(config_registry, "_system_config_path", None)
+        catalog = getattr(config_registry, "_runtime_state_catalog_path", None)
+        if not isinstance(catalog, str | Path):
+            catalog = getattr(config_registry, "_system_config_path", None)
         if not isinstance(catalog, str | Path):
             catalog = DEFAULT_PATHS.get("config_toml", SYSTEM_CONFIG_PATH)
         namespace = runtime_state_namespace(Path(catalog), cache_dir)
@@ -270,6 +272,13 @@ def is_model_installed(model_name: str) -> bool:
 
         # Clearing project weights must invalidate a marker in the user cache.
         return _is_cached(model_path, Path(DEFAULT_PATHS["cache_dir"]))[0]
+    local_resource = marker_data.get("local_path")
+    if isinstance(local_resource, str):
+        return Path(local_resource).exists()
+    # Legacy markers have no source type. Unambiguous local paths can still be
+    # revalidated without treating a Hugging Face org/repo identifier as a file.
+    if Path(model_path).is_absolute() or model_path.startswith(("./", "../", ".\\", "..\\")):
+        return Path(model_path).exists()
     return True
 
 
@@ -310,9 +319,11 @@ def install_model(
 
     logger.info(f"モデルインストール開始: {model_name} (class={model_class})")
     parsed = urlparse(model_path)
+    local_resource: Path | None = None
     if parsed.scheme in ("http", "https"):
         _install_url_resource(model_path, aggregator)
     elif Path(model_path).exists():
+        local_resource = Path(model_path).resolve()
         # Codex P2 (PR #151): ローカルファイル/ディレクトリ指定はダウンロード不要。
         # 既存 loader (get_file_path / from_pretrained) がそのまま解決できる。
         logger.debug(f"model_path はローカルパスのため DL をスキップ: {model_path}")
@@ -324,7 +335,7 @@ def install_model(
         # CLIP 系: 分類 head (URL) に加えて base CLIP repo が必要
         _install_hf_repo(base_model, aggregator, _HfPatterns(transformers_weights=True))
 
-    _write_marker(model_name, model_path)
+    _write_marker(model_name, model_path, local_resource)
     logger.info(f"モデルインストール完了: {model_name}")
 
 
@@ -428,7 +439,7 @@ def _install_url_resource(url: str, aggregator: _ByteProgressAggregator) -> None
         tmp_path.unlink(missing_ok=True)
 
 
-def _write_marker(model_name: str, model_path: str) -> None:
+def _write_marker(model_name: str, model_path: str, local_resource: Path | None = None) -> None:
     """install 完了 marker を書き込む。"""
     marker = _marker_path(model_name)
     marker.parent.mkdir(parents=True, exist_ok=True)
@@ -437,6 +448,7 @@ def _write_marker(model_name: str, model_path: str) -> None:
             {
                 "model_name": model_name,
                 "model_path": model_path,
+                "local_path": str(local_resource) if local_resource is not None else None,
                 "installed_at": datetime.now().isoformat(),
             },
             ensure_ascii=False,
