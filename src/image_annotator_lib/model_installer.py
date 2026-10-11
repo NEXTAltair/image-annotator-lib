@@ -18,6 +18,7 @@ install ジョブとして実行できる。
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from collections.abc import Callable
@@ -206,6 +207,12 @@ def _marker_path(model_name: str) -> Path:
     # cache_dir behavior. The default separates OS-specific installation state.
     if marker_dir is None:
         marker_dir = Path(DEFAULT_PATHS["cache_dir"]) / _INSTALL_MARKER_DIR_NAME
+    else:
+        # URL artifacts remain project-local. The same OS user may use several
+        # checkouts, so installation state must identify the actual model cache.
+        cache_identity = str(Path(DEFAULT_PATHS["cache_dir"]).resolve())
+        namespace = hashlib.sha256(cache_identity.encode("utf-8")).hexdigest()[:16]
+        marker_dir = Path(marker_dir) / namespace
     return Path(marker_dir) / f"{safe_name}.json"
 
 
