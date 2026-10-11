@@ -51,6 +51,26 @@ class TestModelInstallProgress:
 
 
 class TestIsModelInstalled:
+    def test_url_model_marker_does_not_claim_installed_in_another_checkout(self, tmp_path):
+        shared_markers = tmp_path / "user-cache" / "install_markers"
+        config = {"url-scorer": {"model_path": "https://example.test/score.pt", "class": "AestheticScorer"}}
+        with (
+            _patch_config(config),
+            patch("image_annotator_lib.model_installer._install_url_resource"),
+            patch(
+                "image_annotator_lib.model_installer.DEFAULT_PATHS",
+                {"cache_dir": tmp_path / "checkout-a" / "models", "install_marker_dir": shared_markers},
+            ),
+        ):
+            install_model("url-scorer")
+            assert is_model_installed("url-scorer") is True
+            with patch(
+                "image_annotator_lib.model_installer.DEFAULT_PATHS",
+                {"cache_dir": tmp_path / "checkout-b" / "models", "install_marker_dir": shared_markers},
+            ):
+                assert is_model_installed("url-scorer") is False
+            assert is_model_installed("url-scorer") is True
+
     def test_unknown_model_returns_true(self, fake_paths):
         with _patch_config({}):
             assert is_model_installed("openai/gpt-4o") is True
