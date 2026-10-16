@@ -26,6 +26,15 @@ if __name__ != "__main__":
 class TransformersLoader(LoaderBase):
     """Hugging Face Transformers モデル (AutoModelForImageTextToText) のローダー。"""
 
+    def _expected_host_size_mb(self, model_size_mb: float) -> float:
+        # .to(self.device) below either transfers all weights or fails. Host
+        # staging still passes the physical-memory check before loading.
+        return 0.0 if self.device.startswith("cuda") else model_size_mb
+
+    def _loaded_host_size_mb(self, components: Any, model_size_mb: float) -> float:
+        model = components.get("model")
+        return 0.0 if str(getattr(model, "device", "")).startswith("cuda") else model_size_mb
+
     def _calculate_specific_size(self, model_path: str, **kwargs: Any) -> float:
         """CPU 上でモデルを一時ロードしてサイズを計算する。"""
         import torch.nn

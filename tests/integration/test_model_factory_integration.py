@@ -50,7 +50,7 @@ class TestMultiModelConcurrentLoading:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_concurrent_model_loading_cache_behavior(self, managed_config_registry):
+    def test_concurrent_model_loading_cache_behavior(self, managed_config_registry, track_model_load):
         """Test 3 models loading sequentially with cache tracking.
 
         REAL components:
@@ -87,6 +87,7 @@ class TestMultiModelConcurrentLoading:
         with patch(
             "image_annotator_lib.core.base.pipeline.ModelLoad.load_transformers_pipeline_components"
         ) as mock_load:
+            track_model_load(mock_load, pipeline=True)
             mock_pipeline = MagicMock()
             mock_pipeline.return_value = [{"label": "test", "score": 0.9}]
             mock_load.return_value = {"pipeline": mock_pipeline}
@@ -113,7 +114,7 @@ class TestMultiModelConcurrentLoading:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_cache_hit_updates_last_used(self, managed_config_registry):
+    def test_cache_hit_updates_last_used(self, managed_config_registry, track_model_load):
         """Test cache hit updates LRU timestamp.
 
         REAL components:
@@ -142,6 +143,7 @@ class TestMultiModelConcurrentLoading:
         with patch(
             "image_annotator_lib.core.base.pipeline.ModelLoad.load_transformers_pipeline_components"
         ) as mock_load:
+            track_model_load(mock_load, pipeline=True)
             mock_pipeline = MagicMock()
             mock_pipeline.return_value = [{"label": "test", "score": 0.9}]
             mock_load.return_value = {"pipeline": mock_pipeline}
@@ -175,7 +177,7 @@ class TestMultiModelConcurrentLoading:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_sequential_model_access_lru_order(self, managed_config_registry):
+    def test_sequential_model_access_lru_order(self, managed_config_registry, track_model_load):
         """Test sequential access changes LRU order.
 
         REAL components:
@@ -191,7 +193,7 @@ class TestMultiModelConcurrentLoading:
         - Most recently accessed model is newest in LRU
         """
         # Setup: Configure 3 models
-        for i, name in enumerate(["A", "B", "C"], start=1):
+        for name in ["A", "B", "C"]:
             config = {
                 "class": "AestheticShadow",
                 "model_path": f"test/path/seq{name}",
@@ -203,6 +205,7 @@ class TestMultiModelConcurrentLoading:
         with patch(
             "image_annotator_lib.core.base.pipeline.ModelLoad.load_transformers_pipeline_components"
         ) as mock_load:
+            track_model_load(mock_load, pipeline=True)
             mock_pipeline = MagicMock()
             mock_pipeline.return_value = [{"label": "test", "score": 0.9}]
             mock_load.return_value = {"pipeline": mock_pipeline}
@@ -244,7 +247,7 @@ class TestCacheEvictionUnderMemoryPressure:
     """
 
     @pytest.mark.integration
-    def test_lru_eviction_with_memory_pressure(self, managed_config_registry):
+    def test_lru_eviction_with_memory_pressure(self, managed_config_registry, track_model_load):
         """Test LRU eviction when memory pressure occurs.
 
         REAL components:
@@ -288,6 +291,7 @@ class TestCacheEvictionUnderMemoryPressure:
             with patch(
                 "image_annotator_lib.core.base.pipeline.ModelLoad.load_transformers_pipeline_components"
             ) as mock_load:
+                track_model_load(mock_load, pipeline=True)
                 mock_pipeline = MagicMock()
                 mock_pipeline.return_value = [{"label": "test", "score": 0.9}]
                 mock_load.return_value = {"pipeline": mock_pipeline}
@@ -316,7 +320,7 @@ class TestCacheEvictionUnderMemoryPressure:
                         pass
 
     @pytest.mark.integration
-    def test_eviction_respects_lru_order(self, managed_config_registry):
+    def test_eviction_respects_lru_order(self, managed_config_registry, track_model_load):
         """Test eviction follows LRU order (oldest first).
 
         REAL components:
@@ -349,6 +353,7 @@ class TestCacheEvictionUnderMemoryPressure:
             with patch(
                 "image_annotator_lib.core.base.pipeline.ModelLoad.load_transformers_pipeline_components"
             ) as mock_load:
+                track_model_load(mock_load, pipeline=True)
                 mock_pipeline = MagicMock()
                 mock_pipeline.return_value = [{"label": "test", "score": 0.9}]
                 mock_load.return_value = {"pipeline": mock_pipeline}
@@ -393,7 +398,7 @@ class TestCacheEvictionUnderMemoryPressure:
 
     @pytest.mark.integration
     @pytest.mark.fast_integration
-    def test_no_eviction_when_memory_sufficient(self, managed_config_registry):
+    def test_no_eviction_when_memory_sufficient(self, managed_config_registry, track_model_load):
         """Test no eviction occurs when sufficient memory available.
 
         REAL components:
@@ -430,6 +435,7 @@ class TestCacheEvictionUnderMemoryPressure:
             with patch(
                 "image_annotator_lib.core.base.pipeline.ModelLoad.load_transformers_pipeline_components"
             ) as mock_load:
+                track_model_load(mock_load, pipeline=True)
                 mock_pipeline = MagicMock()
                 mock_pipeline.return_value = [{"label": "test", "score": 0.9}]
                 mock_load.return_value = {"pipeline": mock_pipeline}
@@ -464,7 +470,9 @@ class TestDeviceFallbackScenarios:
     """
 
     @pytest.mark.integration
-    def test_cuda_failure_fallback_to_cpu_cache(self, managed_config_registry, mock_cuda_unavailable):
+    def test_cuda_failure_fallback_to_cpu_cache(
+        self, managed_config_registry, mock_cuda_unavailable, track_model_load
+    ):
         """Test CUDA failure fallback preserves cache functionality.
 
         REAL components:
@@ -494,6 +502,7 @@ class TestDeviceFallbackScenarios:
         with patch(
             "image_annotator_lib.core.base.pipeline.ModelLoad.load_transformers_pipeline_components"
         ) as mock_load:
+            track_model_load(mock_load, pipeline=True)
             mock_pipeline = MagicMock()
             mock_pipeline.return_value = [{"label": "test", "score": 0.9}]
             mock_load.return_value = {"pipeline": mock_pipeline}
@@ -519,7 +528,9 @@ class TestDeviceFallbackScenarios:
             annotator.__exit__(None, None, None)
 
     @pytest.mark.integration
-    def test_mixed_device_cache_isolation(self, managed_config_registry, mock_cuda_available):
+    def test_mixed_device_cache_isolation(
+        self, managed_config_registry, mock_cuda_available, track_model_load
+    ):
         """Test CPU and CUDA models coexist in cache.
 
         REAL components:
@@ -554,6 +565,7 @@ class TestDeviceFallbackScenarios:
         with patch(
             "image_annotator_lib.core.base.pipeline.ModelLoad.load_transformers_pipeline_components"
         ) as mock_load:
+            track_model_load(mock_load, pipeline=True)
             mock_pipeline = MagicMock()
             mock_pipeline.return_value = [{"label": "test", "score": 0.9}]
             mock_load.return_value = {"pipeline": mock_pipeline}

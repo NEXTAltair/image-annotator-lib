@@ -24,6 +24,7 @@ from PIL import Image
 
 from ..webapi.annotator import WebApiAnnotator
 from .base.annotator import BaseAnnotator
+from .model_factory import ModelLoad
 from .registry import (
     find_model_class_case_insensitive,
     get_cls_obj_registry,
@@ -180,8 +181,22 @@ def get_annotator_instance(
 
     if api_keys and is_webapi:
         logger.debug(f"WebAPIモデル '{model_name}' はキャッシュせず新しいインスタンスを作成")
-        return _create_annotator_instance(model_name, api_keys=api_keys, additional_prompt=additional_prompt)
+        return _create_annotator_instance(
+            model_name, api_keys=api_keys, additional_prompt=additional_prompt
+        )
 
+    if is_webapi:
+        return _get_cached_annotator_instance(model_name, canonical_name, additional_prompt)
+
+    # Lookup and creation must be atomic so concurrent calls share one local owner.
+    with ModelLoad._RESOURCE_LOCK:
+        return _get_cached_annotator_instance(model_name, canonical_name, additional_prompt)
+
+
+def _get_cached_annotator_instance(
+    model_name: str, canonical_name: str, additional_prompt: str | None
+) -> Any:
+    """Return or create a canonical instance; local callers hold the resource lock."""
     # registry lookup は大文字小文字などの表記ゆれを吸収するため、キャッシュキーは
     # canonical 名に揃える。表記違いで同一モデルの重い components が二重に
     # ロード・保持されるのを防ぐ (Issue #162)。
@@ -271,7 +286,9 @@ def _execute_model_annotation(
 ) -> None:
     """単一モデルでのアノテーションを実行し、結果を `results_by_phash` に格納する。"""
     try:
-        annotator = get_annotator_instance(model_name, api_keys=api_keys, additional_prompt=additional_prompt)
+        annotator = get_annotator_instance(
+            model_name, api_keys=api_keys, additional_prompt=additional_prompt
+        )
         annotation_results = _annotate_model(annotator, images_list, phash_list)
         logger.debug(f"モデル '{model_name}' の評価完了。結果件数: {len(annotation_results)}")
 
@@ -366,7 +383,12 @@ def run_annotation(
     for model_name in model_names:
         logger.debug(f"モデル '{model_name}' の評価を開始...")
         _execute_model_annotation(
-            model_name, images, phash_list_final, phash_map, results_by_phash, api_keys,
+            model_name,
+            images,
+            phash_list_final,
+            phash_map,
+            results_by_phash,
+            api_keys,
             additional_prompt=additional_prompt,
         )
 

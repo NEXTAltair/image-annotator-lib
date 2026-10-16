@@ -11,6 +11,27 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
 from image_annotator_lib.core.config import config_registry
+from image_annotator_lib.core.model_factory import ModelLoad
+
+
+@pytest.fixture
+def track_model_load():
+    """Keep facade fakes consistent with a successful loader's state and ownership."""
+
+    def track(mock_load, *, pipeline=False, device=None):
+        def load(*args, **kwargs):
+            if not mock_load.return_value:
+                return mock_load.return_value
+            name = kwargs["model_name"] if "model_name" in kwargs else args[1 if pipeline else 0]
+            placement = device or (kwargs["device"] if "device" in kwargs else args[3 if pipeline else 2])
+            size = ModelLoad.get_model_size(name) or 0.0
+            ModelLoad._MODEL_SIZES[name] = size
+            ModelLoad._update_model_state(name, placement, "loaded", size)
+            return dict(mock_load.return_value)
+
+        mock_load.side_effect = load
+
+    return track
 
 
 @pytest.fixture(scope="session", autouse=True)

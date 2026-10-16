@@ -17,10 +17,10 @@ from ..config import config_registry
 from ..model_factory import ModelLoad
 from ..types import CLIPComponents, ScoreScale, TaskCapability, UnifiedAnnotationResult
 from ..utils import logger
-from .annotator import BaseAnnotator
+from .local import LocalModelAnnotator, local_model_enter, local_model_exit
 
 
-class ClipBaseAnnotator(BaseAnnotator):
+class ClipBaseAnnotator(LocalModelAnnotator):
     """CLIP モデルをベースとする Scorer 用の基底クラス。"""
 
     # ADR 0009: subclass が `scores` の各 key の値域を宣言する。
@@ -33,6 +33,7 @@ class ClipBaseAnnotator(BaseAnnotator):
         from ..utils import determine_effective_device
 
         self.device = determine_effective_device(self._config.device, self.model_name)
+        self._requested_device = self._config.device
         # base_model は必須設定でデフォルト値なし
         self.base_model = config_registry.get(self.model_name, "base_model")  # 型チェック後に代入
         logger.debug(
@@ -40,7 +41,17 @@ class ClipBaseAnnotator(BaseAnnotator):
         )
         # components の型ヒントを具体的に指定
         self.components: CLIPComponents | None = None
+        self._prepared = False
 
+    def _resolve_context_device(self) -> str:
+        """Retry the configured target while preserving nested inference placement."""
+        if not ModelLoad.is_final_model_context(self.model_name, self):
+            return self.device
+        from ..utils import determine_effective_device
+
+        return determine_effective_device(self._requested_device, self.model_name)
+
+    @local_model_enter
     def __enter__(self) -> Self:
         """CLIP モデルと分類器ヘッドをロードします。"""
         logger.debug(f"Entering context for CLIP Scorer '{self.model_name}'")
@@ -50,10 +61,15 @@ class ClipBaseAnnotator(BaseAnnotator):
             if self.model_path is None:
                 raise ValueError(f"モデル '{self.model_name}' の model_path が設定されていません。")
 
-            # ロード前にキャッシュ状態を確認する (Issue #149)。
-            # load_clip_components() は「キャッシュ済み」と「ロード失敗」の両方で None/空を返すため、
-            # 呼び出し前の状態で2ケースを区別する。
-            had_cached_state = ModelLoad._get_model_state(self.model_name) is not None
+            self.device = self._resolve_context_device()
+
+            if (
+                self._prepared
+                and self.components
+                and ModelLoad._get_model_state(self.model_name) == f"on_{self.device}"
+            ):
+                ModelLoad._update_model_state(self.model_name)
+                return self
 
             loaded_components = ModelLoad.load_clip_components(
                 model_name=self.model_name,
@@ -66,46 +82,34 @@ class ClipBaseAnnotator(BaseAnnotator):
             if loaded_components:
                 self.components = loaded_components
             elif not self.components:
-                if had_cached_state:
-                    # モデル状態が「キャッシュ済み」(None/空返却) だが、このインスタンスはコンポーネントを
-                    # 保持していない。api_keys={} 指定時の毎回インスタンス再生成などで発生 (Issue #149)。
-                    # 状態をリセットして強制再ロードする。
-                    logger.warning(
-                        f"モデル '{self.model_name}' は状態「キャッシュ済み」だが、"
-                        "このインスタンスはコンポーネントを保持していない。状態をリセットして再ロード。"
-                    )
-                    ModelLoad._release_model_state(self.model_name)
-                    loaded_components = ModelLoad.load_clip_components(
-                        model_name=self.model_name,
-                        base_model=self.base_model,
-                        model_path=self.model_path,
-                        device=self.device,
-                        activation_type=config_registry.get(self.model_name, "activation_type"),
-                        final_activation_type=config_registry.get(self.model_name, "final_activation_type"),
-                    )
-                    if loaded_components:
-                        self.components = loaded_components
-                    else:
-                        error_msg = f"Failed to load CLIP components for model '{self.model_name}'."
-                        logger.error(error_msg, exc_info=True)
-                        raise ModelLoadError(error_msg, model_path=self.model_path)
-                else:
-                    error_msg = f"Failed to load CLIP components for model '{self.model_name}'."
-                    logger.error(error_msg, exc_info=True)
-                    raise ModelLoadError(error_msg, model_path=self.model_path)
+                raise ModelLoadError(
+                    f"Failed to load CLIP components for model '{self.model_name}'.",
+                    model_path=self.model_path,
+                )
+
+            restored = ModelLoad.restore_model_to_cuda(
+                self.model_name, cast(dict[str, Any], self.components), self.device
+            )
+            if restored is not None:
+                self.components = cast(CLIPComponents, restored)
+            elif ModelLoad._get_model_state(self.model_name) == "on_cpu":
+                self.device = "cpu"
+            else:
+                raise ModelLoadError(f"Failed to restore CLIP components for model '{self.model_name}'.")
+
+            self._prepared = True
 
             logger.info(f"CLIP Scorer '{self.model_name}' の準備完了。")
 
         except (ModelLoadError, OutOfMemoryError, FileNotFoundError, ValueError) as e:
             logger.error(f"CLIP Scorer '{self.model_name}' のロード/復元中にエラー: {e}")
-            self.components = None
             raise
         except Exception as e:
             logger.exception(f"CLIP Scorer '{self.model_name}' のロード/復元中に予期せぬエラー: {e}")
-            self.components = None
             raise ModelLoadError(f"予期せぬロードエラー: {e}") from e
         return self
 
+    @local_model_exit
     def __exit__(
         self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any
     ) -> None:

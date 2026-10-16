@@ -7,13 +7,15 @@ from typing import Any, ClassVar, Self, cast
 import numpy as np
 from PIL import Image
 
-from ..core.base import BaseAnnotator
+from ..core.base.local import LocalModelAnnotator, local_model_enter, local_model_exit
 from ..core.config import config_registry
+from ..core.model_factory import ModelLoad
 from ..core.types import RatingPrediction, TaskCapability, UnifiedAnnotationResult
 from ..core.utils import determine_effective_device, logger
+from ..exceptions.errors import OutOfMemoryError
 
 
-class AnimeRatingAnnotator(BaseAnnotator):
+class AnimeRatingAnnotator(LocalModelAnnotator):
     """deepghs/anime_rating ONNX annotator.
 
     Returns model-native Sankaku-style labels: safe, r15, r18.
@@ -34,10 +36,15 @@ class AnimeRatingAnnotator(BaseAnnotator):
         )
         self.components: dict[str, Any] | None = None
         self.labels = list(self.default_labels)
+        self._prepared = False
 
+    @local_model_enter
     def __enter__(self) -> Self:
         if self.model_path is None:
             raise ValueError(f"モデル '{self.model_name}' の model_path が設定されていません。")
+        if self._prepared and self.components:
+            ModelLoad._update_model_state(self.model_name)
+            return self
 
         import onnxruntime as ort
 
@@ -47,6 +54,14 @@ class AnimeRatingAnnotator(BaseAnnotator):
             if self.device == "cuda" and "CUDAExecutionProvider" in ort.get_available_providers()
             else ["CPUExecutionProvider"]
         )
+        self.device = "cuda" if "CUDAExecutionProvider" in providers else "cpu"
+        size_mb = ModelLoad.get_model_size(self.model_name) or ModelLoad._calculate_file_size_mb(model_path)
+        ModelLoad._MODEL_SIZES[self.model_name] = size_mb
+        if not ModelLoad._check_memory_before_load(
+            size_mb, self.model_name
+        ) or not ModelLoad._clear_cache_internal(self.model_name, size_mb):
+            raise OutOfMemoryError(f"Anime rating model '{self.model_name}' cannot fit in memory")
+        ModelLoad._make_cuda_room(self.model_name, self.device)
         logger.info(f"Anime rating ONNX model '{self.model_name}' loading: {model_path}")
         session = ort.InferenceSession(str(model_path), providers=providers)
         self.labels = self._load_labels(meta_path)
@@ -55,13 +70,16 @@ class AnimeRatingAnnotator(BaseAnnotator):
             "model_path": model_path,
             "meta_path": meta_path,
         }
+        self._prepared = True
+        ModelLoad._update_model_state(self.model_name, self.device, "loaded", size_mb)
         return self
 
+    @local_model_exit
     def __exit__(
         self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: Any
     ) -> None:
         logger.debug(f"Exiting context for anime rating model '{self.model_name}'")
-        self.components = None
+        ModelLoad.release_model(self.model_name)
         if exc_type:
             logger.error(f"Anime rating model '{self.model_name}' context error: {exc_val}")
 
@@ -108,7 +126,15 @@ class AnimeRatingAnnotator(BaseAnnotator):
         session = self.components["session"]
         input_name = session.get_inputs()[0].name
         output_name = session.get_outputs()[0].name
-        return cast(np.ndarray, session.run([output_name], {input_name: processed})[0])
+        try:
+            return cast(np.ndarray, session.run([output_name], {input_name: processed})[0])
+        except Exception as error:
+            if "failed to allocate memory" in str(error).lower() or "out of memory" in str(error).lower():
+                self._discard_components()
+                raise OutOfMemoryError(
+                    f"Anime rating ONNX model '{self.model_name}' ran out of memory"
+                ) from error
+            raise
 
     def _format_predictions(self, raw_outputs: np.ndarray) -> list[UnifiedAnnotationResult]:
         from ..core.utils import get_model_capabilities

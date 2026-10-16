@@ -13,6 +13,7 @@ from PIL import Image
 from image_annotator_lib.core.base.clip import ClipBaseAnnotator
 from image_annotator_lib.core.base.pipeline import PipelineBaseAnnotator
 from image_annotator_lib.core.base.transformers import TransformersBaseAnnotator
+from image_annotator_lib.core.model_factory import ModelLoad
 from image_annotator_lib.exceptions.errors import ModelLoadError
 
 
@@ -133,7 +134,7 @@ class TestContextManagerRobustness:
             mock_load.assert_called_once()
 
     @pytest.mark.integration
-    def test_pipeline_restoration_failure_continues_on_cpu(self, pipeline_model_config):
+    def test_pipeline_restoration_failure_continues_on_cpu(self, pipeline_model_config, track_model_load):
         """Test that pipeline restoration failure allows CPU continuation.
 
         Scenario:
@@ -159,6 +160,7 @@ class TestContextManagerRobustness:
         ):
             # Mock successful load (CPU)
             mock_load.return_value = mock_cpu_components
+            track_model_load(mock_load, pipeline=True, device="cpu")
 
             # Mock restoration failure (None indicates CUDA restoration failed, CPU fallback already done)
             mock_restore.return_value = None
@@ -184,7 +186,9 @@ class TestContextManagerRobustness:
             mock_restore.assert_called_once()
 
     @pytest.mark.integration
-    def test_transformers_restoration_failure_continues_on_cpu(self, transformers_model_config):
+    def test_transformers_restoration_failure_continues_on_cpu(
+        self, transformers_model_config, track_model_load
+    ):
         """Test that transformers restoration failure allows CPU continuation.
 
         Scenario:
@@ -211,6 +215,7 @@ class TestContextManagerRobustness:
         ):
             # Mock successful load (CPU)
             mock_load.return_value = mock_cpu_components
+            track_model_load(mock_load, device="cpu")
 
             # Mock restoration failure (None indicates CUDA restoration failed, CPU fallback already done)
             mock_restore.return_value = None
@@ -264,9 +269,7 @@ class TestClipContextManagerRobustness:
 
         with (
             patch("image_annotator_lib.core.base.clip.ModelLoad.load_clip_components") as mock_load,
-            patch(
-                "image_annotator_lib.core.base.clip.ModelLoad._get_model_state", return_value=None
-            ),
+            patch("image_annotator_lib.core.base.clip.ModelLoad._get_model_state", return_value=None),
         ):
             mock_load.return_value = None
 
@@ -279,9 +282,10 @@ class TestClipContextManagerRobustness:
             mock_load.assert_called_once()
 
     @pytest.mark.integration
-    def test_clip_second_call_new_instance_with_cached_state_reloads(self, clip_model_config):
-        """キャッシュ済み状態で新インスタンスが load_clip_components() から None を受けたとき、
-        状態をリセットして強制再ロードし、正常に components を設定する。
+    def test_clip_second_call_new_instance_with_cached_state_reloads(
+        self, clip_model_config, track_model_load
+    ):
+        """新しい所有者は idle キャッシュを解放し、新世代を一度だけロードする。
 
         Regression: Issue #149 — ImprovedAesthetic / WaifuAesthetic の2バッチ目で
         `RuntimeError: CLIP プロセッサがロードされていません。` になるバグ。
@@ -292,49 +296,43 @@ class TestClipContextManagerRobustness:
             "processor": MagicMock(),
         }
 
-        call_count: dict[str, int] = {"n": 0}
-
-        def _load_side_effect(**kwargs: Any) -> dict | None:
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                return None  # 1回目: キャッシュ済み扱いで None を返す
-            return mock_components  # 2回目: 強制再ロードで実コンポーネントを返す
-
-        annotator = ConcreteTestClipAnnotator(model_name="test_clip_model")
-
-        with (
-            patch("image_annotator_lib.core.base.clip.ModelLoad.load_clip_components") as mock_load,
-            patch(
-                "image_annotator_lib.core.base.clip.ModelLoad._get_model_state",
-                return_value="on_cpu",  # キャッシュ済み状態をシミュレート
-            ),
-            patch("image_annotator_lib.core.base.clip.ModelLoad._release_model_state") as mock_release,
-        ):
-            mock_load.side_effect = _load_side_effect
-
-            with annotator as ctx:
-                assert ctx.components is mock_components
-
-            mock_release.assert_called_once_with("test_clip_model")
+        old = ConcreteTestClipAnnotator(model_name="test_clip_model")
+        replacement = ConcreteTestClipAnnotator(model_name="test_clip_model")
+        with patch("image_annotator_lib.core.base.clip.ModelLoad.load_clip_components") as mock_load:
+            mock_load.return_value = mock_components
+            track_model_load(mock_load)
+            with old:
+                old_components = old.components
+            assert ModelLoad._get_model_state(old.model_name) == "on_cpu"
+            with replacement:
+                assert old.components is None
+                assert old_components == {}
+                assert replacement.components == mock_components
+                assert replacement.components is not old_components
+                assert ModelLoad._MODEL_OWNERS[replacement.model_name] is replacement
             assert mock_load.call_count == 2
 
     @pytest.mark.integration
-    def test_clip_second_call_retry_also_fails_raises_model_load_error(self, clip_model_config):
-        """キャッシュ済み状態でリセット後の再ロードも失敗した場合は ModelLoadError を上げる。"""
-        annotator = ConcreteTestClipAnnotator(model_name="test_clip_model")
-
-        with (
-            patch("image_annotator_lib.core.base.clip.ModelLoad.load_clip_components") as mock_load,
-            patch(
-                "image_annotator_lib.core.base.clip.ModelLoad._get_model_state",
-                return_value="on_cpu",
-            ),
-            patch("image_annotator_lib.core.base.clip.ModelLoad._release_model_state"),
-        ):
-            mock_load.return_value = None  # 両回ともNone
-
+    def test_clip_second_call_replacement_load_failure_raises_model_load_error(
+        self, clip_model_config, track_model_load
+    ):
+        """idle キャッシュの新所有者ロード失敗は即エラーになり、lease を残さない。"""
+        old = ConcreteTestClipAnnotator(model_name="test_clip_model")
+        replacement = ConcreteTestClipAnnotator(model_name="test_clip_model")
+        with patch("image_annotator_lib.core.base.clip.ModelLoad.load_clip_components") as mock_load:
+            mock_load.return_value = {
+                "clip_model": MagicMock(),
+                "model": MagicMock(),
+                "processor": MagicMock(),
+            }
+            track_model_load(mock_load)
+            with old:
+                pass
+            mock_load.return_value = None
             with pytest.raises(ModelLoadError):
-                with annotator:
+                with replacement:
                     pass
-
             assert mock_load.call_count == 2
+            assert replacement.components is None
+            assert not ModelLoad.is_model_active(replacement.model_name)
+            assert ModelLoad._get_model_state(replacement.model_name) is None

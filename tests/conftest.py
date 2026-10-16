@@ -7,6 +7,7 @@
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from threading import RLock
 
 import pytest
 from PIL import Image
@@ -42,6 +43,40 @@ def _remove_test_config_entries(config_registry) -> None:
             test_models = [k for k in config_store if "test" in k.lower() or k == "dummy-model"]
             for model in test_models:
                 config_store.pop(model, None)
+
+
+@pytest.fixture(autouse=True)
+def isolate_model_resources(monkeypatch):
+    """Give each test independent loader/facade ledgers and context ownership.
+
+    ModelLoad exposes aliases of LoaderBase's maps. Replacing only one alias, or
+    clearing only the old memory ledger, leaves owners and deferred releases in
+    later tests and changes whether their models are eligible for eviction.
+    """
+    from image_annotator_lib.core.loaders.loader_base import LoaderBase
+    from image_annotator_lib.core.model_factory import ModelLoad
+
+    for name in (
+        "_MODEL_STATES",
+        "_MODEL_SIZES",
+        "_MEMORY_USAGE",
+        "_HOST_MEMORY_USAGE",
+        "_MODEL_LAST_USED",
+        "_COMPONENT_RELEASERS",
+        "_MODEL_OWNERS",
+        "_ACTIVE_CONTEXTS",
+        "_ACTIVE_THREADS",
+    ):
+        shared = {}
+        monkeypatch.setattr(LoaderBase, name, shared, raising=False)
+        monkeypatch.setattr(ModelLoad, name, shared, raising=False)
+    for name in ("_RELEASE_PENDING", "_CLEANUP_PENDING", "_PREPARING_MODELS", "_EXITING_MODELS"):
+        shared = set()
+        monkeypatch.setattr(LoaderBase, name, shared, raising=False)
+        monkeypatch.setattr(ModelLoad, name, shared, raising=False)
+    resource_lock = RLock()
+    monkeypatch.setattr(LoaderBase, "_RESOURCE_LOCK", resource_lock, raising=False)
+    monkeypatch.setattr(ModelLoad, "_RESOURCE_LOCK", resource_lock, raising=False)
 
 
 @pytest.fixture(autouse=True)
