@@ -194,3 +194,38 @@ class TestGetModelCapabilities:
         capabilities = get_model_capabilities("wd-vit-tagger-v3-tags-only")
 
         assert capabilities == {TaskCapability.TAGS}
+
+
+class TestInferCapabilitiesFromTypeLogLevel:
+    """`_infer_capabilities_from_type` のログは per-item 詳細のため TRACE で出力される"""
+
+    @staticmethod
+    def _collect_records(level: str, model_name: str, config_values: dict[str, str]) -> list[str]:
+        from loguru import logger
+
+        from image_annotator_lib.core.utils import _infer_capabilities_from_type
+
+        messages: list[str] = []
+        sink_id = logger.add(lambda message: messages.append(str(message)), level=level, format="{message}")
+        try:
+            with patch("image_annotator_lib.core.config.config_registry") as mock_registry:
+                mock_registry.get.side_effect = lambda _name, key, default="": config_values.get(
+                    key, default
+                )
+                capabilities = _infer_capabilities_from_type(model_name)
+        finally:
+            logger.remove(sink_id)
+        assert capabilities is not None
+        return messages
+
+    def test_infer_log_not_emitted_at_debug_level(self):
+        """DEBUG sink には推論ログが出ない (rating 対応 tagger でも同様)"""
+        messages = self._collect_records("DEBUG", "wd-tagger", {"type": "tagger", "class": "WDTagger"})
+
+        assert not [m for m in messages if "capabilit" in m]
+
+    def test_infer_log_emitted_at_trace_level(self):
+        """TRACE sink では推論ログが引き続き確認できる"""
+        messages = self._collect_records("TRACE", "wd-tagger", {"type": "tagger", "class": "WDTagger"})
+
+        assert any("capabilitiesをtypeから推論" in m for m in messages)
