@@ -266,6 +266,11 @@ class AnnotationErrorCode(StrEnum):
     ANNOTATION_OUTPUT_UNPARSEABLE = "ANNOTATION_OUTPUT_UNPARSEABLE"
     ANNOTATION_SCHEMA_INVALID = "ANNOTATION_SCHEMA_INVALID"
     EMPTY_ANNOTATION = "EMPTY_ANNOTATION"
+    # ADR 0013 (#172): ローカル推論のメモリ不足。OUT_OF_MEMORY はバックエンドが推論中に
+    # OOM を報告した (モデルは解放済み)、INSUFFICIENT_MEMORY は推論前の見積もりで
+    # 空き RAM が足りず推論しなかったことを表す。
+    OUT_OF_MEMORY = "OUT_OF_MEMORY"
+    INSUFFICIENT_MEMORY = "INSUFFICIENT_MEMORY"
     UNKNOWN = "UNKNOWN"
 
 
@@ -301,6 +306,9 @@ class UnifiedAnnotationResult(BaseModel):
     # メタデータ(Optional)
     provider_name: str | None = None
     framework: str | None = None
+    # ADR 0013 (#172): バックエンド自身の判定による実際の実行先 ("cpu" / "cuda" / "cuda:N")。
+    # 現在は TensorFlow 系のみ設定する。default 付き = 非破壊追加。
+    execution_device: str | None = None
     raw_output: dict[str, Any] | None = None
 
     # === 厳密なcapabilityバリデーション ===

@@ -12,3 +12,4 @@
 * [OKF YAML Frontmatter for Documentation](0010-okf-frontmatter-for-docs.md)
 * [Typed Clef Decision API and Consumer Responsibilities](0011-typed-clef-decision-api.md)
 * [Local Model Context Ownership and Resource Budgets](0012-local-model-resource-ownership.md)
+* [TensorFlow Inference Chunking, Memory Estimate and Runtime Report](0013-tensorflow-inference-memory-control.md)

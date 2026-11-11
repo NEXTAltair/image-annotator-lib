@@ -11,7 +11,7 @@ from PIL import Image
 from ...exceptions.errors import OutOfMemoryError
 from ..config import config_registry
 from ..model_config import BaseModelConfig, ModelConfigFactory
-from ..types import LoaderComponents, UnifiedAnnotationResult
+from ..types import AnnotationErrorCode, LoaderComponents, UnifiedAnnotationResult
 from ..utils import logger
 
 
@@ -121,7 +121,9 @@ class BaseAnnotator(ABC):
             return self._build_results(images, formatted_outputs)
         except OutOfMemoryError as mem_e:
             logger.error(f"メモリ不足エラー: {mem_e}")
-            return self._create_error_results(images, "メモリ不足エラー")
+            return self._create_error_results(
+                images, "メモリ不足エラー", error_code=AnnotationErrorCode.OUT_OF_MEMORY
+            )
         except Exception as e:
             logger.exception(f"予期せぬエラー: {e}")
             return self._create_error_results(images, f"予期せぬエラー: {e}")
@@ -181,11 +183,14 @@ class BaseAnnotator(ABC):
             results.append(formatted_output)
         return results
 
-    def _create_error_result(self, error_message: str) -> UnifiedAnnotationResult:
+    def _create_error_result(
+        self, error_message: str, error_code: AnnotationErrorCode | None = None
+    ) -> UnifiedAnnotationResult:
         """エラー発生時のアノテーション結果を生成する。
 
         Args:
             error_message: エラーメッセージ。
+            error_code: エラー種別 (例: OOM は ``OUT_OF_MEMORY``)。None は分類なし。
 
         Returns:
             エラー情報を含むUnifiedAnnotationResult。
@@ -197,23 +202,26 @@ class BaseAnnotator(ABC):
             model_name=self.model_name,
             capabilities=capabilities,
             error=error_message,
+            error_code=error_code,
         )
 
     def _create_error_results(
         self,
         images: list[Image.Image],
         error_message: str,
+        error_code: AnnotationErrorCode | None = None,
     ) -> list[UnifiedAnnotationResult]:
         """全画像に対してエラー結果を一括生成する。
 
         Args:
             images: 元画像リスト。
             error_message: エラーメッセージ。
+            error_code: エラー種別。None は分類なし。
 
         Returns:
             エラー結果のリスト。
         """
-        return [self._create_error_result(error_message) for _ in images]
+        return [self._create_error_result(error_message, error_code) for _ in images]
 
     def _load_config_from_registry(self, model_name: str) -> BaseModelConfig:
         """config_registryからConfig Objectを生成します (後方互換性用)。

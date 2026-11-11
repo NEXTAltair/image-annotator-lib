@@ -83,6 +83,16 @@ class LocalMLModelConfig(BaseModelConfig):
     gpu_memory_limit_gb: float | None = Field(default=None, gt=0, description="GPU メモリ上限 (GB)")
     model_variant: str | None = Field(default=None, description="同一リポジトリ内のモデルvariant名")
     tag_threshold: float | None = Field(default=None, ge=0, le=1, description="タグ出力閾値")
+    # ADR 0013 (#172): TensorFlow 系の推論小分けと推論前メモリ見積もり。None は既定値を使う。
+    inference_batch_size: int | None = Field(
+        default=None, gt=0, description="1 回の推論に渡す最大枚数 (TensorFlow 系、既定 8)"
+    )
+    inference_memory_multiplier: float | None = Field(
+        default=None, gt=0, description="CPU 推論の必要量見積もりで入力テンソルに掛ける倍率"
+    )
+    memory_safety_margin_gb: float | None = Field(
+        default=None, ge=0, description="推論前の見積もりで空き RAM から差し引く安全余裕 (GB)"
+    )
 
     @field_validator("model_path")
     @classmethod

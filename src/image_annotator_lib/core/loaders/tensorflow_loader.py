@@ -28,6 +28,19 @@ if __name__ != "__main__":
 class TensorFlowLoader(LoaderBase):
     """TensorFlow モデル (SavedModel, H5) のローダー。"""
 
+    def __init__(self, model_name: str, device: str) -> None:
+        """TensorFlow ローダーを初期化する。
+
+        ADR 0013 (#172): device は TensorflowBaseAnnotator が TensorFlow 自身の GPU 可用性で
+        決定済みのため、PyTorch の CUDA 可用性で再判定しない。
+
+        Args:
+            model_name: モデル名。
+            device: TensorFlow 判定済みの実行先 ("cpu" / "cuda" / "cuda:N")。
+        """
+        self.model_name = model_name
+        self.device = device
+
     def _resolve_model_dir_internal(self, model_path: str) -> Path | None:
         """TensorFlow モデルディレクトリを解決する。"""
         try:

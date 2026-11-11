@@ -17,12 +17,14 @@ from .core.constants import (
     SYSTEM_CONFIG_PATH,
     USER_CONFIG_PATH,
 )
+from .core.inference_runtime import InferenceRuntimeInfo, get_inference_runtime_info
 from .core.model_factory import ModelLoad
 from .core.registry import (
     initialize_registry,
     list_available_annotators,
 )
-from .core.types import AnnotationResult, AnnotatorInfo, ModelType
+from .core.tensorflow_runtime import set_tensorflow_cpu_threads
+from .core.types import AnnotationErrorCode, AnnotationResult, AnnotatorInfo, ModelType
 from .core.utils import init_logger
 from .exceptions.errors import (
     AnnotatorError,
@@ -69,6 +71,7 @@ __all__ = [
     "MODEL_RUNTIME_CACHE_PATH",
     "SYSTEM_CONFIG_PATH",
     "USER_CONFIG_PATH",
+    "AnnotationErrorCode",
     "AnnotationResult",
     "AnnotatorError",
     "AnnotatorInfo",
@@ -86,6 +89,7 @@ __all__ = [
     "BatchSubmitItem",
     "BatchSubmitRequest",
     "BatchSubmitResult",
+    "InferenceRuntimeInfo",
     "ModelInstallCancelledError",
     "ModelInstallProgress",
     "ModelLoad",
@@ -101,6 +105,7 @@ __all__ = [
     "discover_available_vision_models",
     "fetch_batch_results",
     "get_available_models",
+    "get_inference_runtime_info",
     "install_model",
     "is_model_deprecated",
     "is_model_installed",
@@ -109,6 +114,7 @@ __all__ = [
     "list_available_annotators",
     "list_batch_capable_models",
     "retrieve_batch",
+    "set_tensorflow_cpu_threads",
     "submit_batch",
 ]
 

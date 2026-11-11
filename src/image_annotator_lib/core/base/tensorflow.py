@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 from abc import abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -14,10 +15,12 @@ if TYPE_CHECKING:
 
 # --- ローカルインポート ---
 from ...exceptions.errors import ModelLoadError, OutOfMemoryError
+from .. import tensorflow_runtime
 from ..config import config_registry
+from ..inference_runtime import InferenceRuntimeInfo, record_inference_runtime_info
 from ..model_config import BaseModelConfig
 from ..model_factory import ModelLoad
-from ..types import TensorFlowComponents, UnifiedAnnotationResult
+from ..types import AnnotationErrorCode, TensorFlowComponents, UnifiedAnnotationResult
 from ..utils import logger
 from .local import LocalModelAnnotator, local_model_enter, local_model_exit
 
@@ -27,15 +30,17 @@ class TensorflowBaseAnnotator(LocalModelAnnotator):
 
     def __init__(self, model_name: str, config: BaseModelConfig | None = None):
         super().__init__(model_name=model_name, config=config)
-        # device 判定はローカル ML 系 base class の責務 (Issue #35 で BaseAnnotator から移譲)
-        from ..utils import determine_effective_device
-
+        # device 判定はローカル ML 系 base class の責務 (Issue #35 で BaseAnnotator から移譲)。
+        # ADR 0013 (#172): PyTorch の CUDA 可用性ではなく TensorFlow 自身の GPU 可用性で判定する。
         try:
             import tensorflow as tf
         except ImportError as e:
             raise ImportError("TensorFlow がインストールされていません。") from e
 
-        self.device = determine_effective_device(self._config.device, self.model_name)
+        # スレッド数は TF ランタイム初期化前にしか変えられないため、最初に適用する
+        tensorflow_runtime.apply_tensorflow_thread_limits()
+        self.requested_device = self._config.device
+        self.device = tensorflow_runtime.determine_tensorflow_device(self._config.device, self.model_name)
         try:
             gpus = tf.config.list_physical_devices("GPU")
             if gpus:
@@ -145,8 +150,160 @@ class TensorflowBaseAnnotator(LocalModelAnnotator):
         raise NotImplementedError("TensorFlow サブクラスは _preprocess_images を実装する必要があります。")
 
     def _run_inference(self, processed: np.ndarray[Any, np.dtype[Any]]) -> tf.Tensor:
-        """前処理済みバッチで推論を実行します (TensorFlow用)。"""
-        return self._run_inference_tf(processed)
+        """前処理済みバッチを、判定済みの実行先に配置して推論します (TensorFlow用)。"""
+        import tensorflow as tf
+
+        with tf.device(tensorflow_runtime.tensorflow_device_name(self.device)):
+            return self._run_inference_tf(processed)
+
+    def _input_shape(self) -> tuple[int, int, int] | None:
+        """1 枚分の入力テンソルの形状 (H, W, C)。不明なら None (推論前の見積もりを省略)。"""
+        return None
+
+    def _inference_batch_size(self) -> int:
+        """設定 ``inference_batch_size`` (未設定なら既定 8)。"""
+        value = getattr(self._config, "inference_batch_size", None)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+        return tensorflow_runtime.DEFAULT_INFERENCE_BATCH_SIZE
+
+    def _estimated_bytes_per_image(self) -> int:
+        """1 枚あたりの推論の必要 RAM の見積もり (bytes)。0 は見積もりなし。
+
+        入力テンソル (float32) のバイト数に、CPU 推論では作業領域の倍率を掛ける。
+        GPU 推論では作業領域は VRAM 側に確保されるため、ホスト側は入力分だけを見る。
+        """
+        shape = self._input_shape()
+        if shape is None:
+            return 0
+        height, width, channels = shape
+        input_bytes = height * width * channels * np.dtype(np.float32).itemsize
+        if self.device.startswith("cuda"):
+            return input_bytes
+        value = getattr(self._config, "inference_memory_multiplier", None)
+        multiplier = (
+            float(value)
+            if isinstance(value, int | float) and not isinstance(value, bool) and value > 0
+            else tensorflow_runtime.DEFAULT_INFERENCE_MEMORY_MULTIPLIER
+        )
+        return int(input_bytes * multiplier)
+
+    def _memory_safety_margin_bytes(self) -> int:
+        """設定 ``memory_safety_margin_gb`` (未設定なら既定 2GB) を bytes で返す。"""
+        value = getattr(self._config, "memory_safety_margin_gb", None)
+        margin_gb = (
+            float(value)
+            if isinstance(value, int | float) and not isinstance(value, bool) and value >= 0
+            else tensorflow_runtime.DEFAULT_MEMORY_SAFETY_MARGIN_GB
+        )
+        return tensorflow_runtime.gb_to_bytes(margin_gb)
+
+    def _execute_pipeline(self, images: list[Image.Image]) -> list[Any]:
+        """画像を設定枚数ずつ小分けにして推論する (ADR 0013)。
+
+        各回の前に空き RAM から推論枚数を見積もり、足りなければ枚数を減らす。
+        1 枚分も足りなければ残りを ``INSUFFICIENT_MEMORY`` のエラー結果にする。
+        推論中の OOM ではモデルを解放し (LocalModelAnnotator が世代を無効化)、
+        残りを ``OUT_OF_MEMORY`` のエラー結果にする。再試行はしない。
+        完了済みの結果は保持し、出力の順序は入力画像の順序と一致する。
+        """
+        total = len(images)
+        configured = self._inference_batch_size()
+        per_image_bytes = self._estimated_bytes_per_image()
+        margin_bytes = self._memory_safety_margin_bytes()
+        outputs: list[Any] = []
+        effective: int | None = None
+        out_of_memory = False
+        insufficient_memory = False
+        reduced_logged = False
+        index = 0
+        logger.info(
+            f"TensorFlow 推論開始: model='{self.model_name}', 実行先={self.device}, "
+            f"画像数={total}, 推論枚数上限={configured}"
+        )
+        try:
+            while index < total:
+                remaining = total - index
+                available = tensorflow_runtime.available_memory_bytes()
+                size = tensorflow_runtime.plan_inference_chunk_size(
+                    configured, remaining, per_image_bytes, available, margin_bytes
+                )
+                if size < 1:
+                    insufficient_memory = True
+                    message = (
+                        f"推論前の見積もりで RAM 不足: 1 枚あたり "
+                        f"{tensorflow_runtime.bytes_to_gb(per_image_bytes):.3f}GB, 空き "
+                        f"{tensorflow_runtime.bytes_to_gb(available):.3f}GB, 安全余裕 "
+                        f"{tensorflow_runtime.bytes_to_gb(margin_bytes):.3f}GB"
+                    )
+                    logger.error(
+                        f"モデル '{self.model_name}': {message}。残り {remaining} 枚を推論しません。"
+                    )
+                    outputs.extend(
+                        self._create_error_results(
+                            images[index:], message, error_code=AnnotationErrorCode.INSUFFICIENT_MEMORY
+                        )
+                    )
+                    break
+                if size < min(configured, remaining) and not reduced_logged:
+                    reduced_logged = True
+                    logger.warning(
+                        f"モデル '{self.model_name}': 空き RAM "
+                        f"{tensorflow_runtime.bytes_to_gb(available):.3f}GB に合わせて推論枚数を "
+                        f"{configured} から {size} に減らします。"
+                    )
+                chunk = images[index : index + size]
+                try:
+                    outputs.extend(super()._execute_pipeline(chunk))
+                except OutOfMemoryError as error:
+                    out_of_memory = True
+                    self._clear_tensorflow_session()
+                    message = f"推論中にメモリ不足 (OOM): {error}"
+                    logger.error(
+                        f"モデル '{self.model_name}': {message}。モデルを解放し、残り {remaining} 枚を"
+                        " エラー結果にします。"
+                    )
+                    outputs.extend(
+                        self._create_error_results(
+                            images[index:], message, error_code=AnnotationErrorCode.OUT_OF_MEMORY
+                        )
+                    )
+                    break
+                effective = size if effective is None else min(effective, size)
+                index += size
+        finally:
+            intra_threads, inter_threads = tensorflow_runtime.current_tensorflow_threads()
+            record_inference_runtime_info(
+                InferenceRuntimeInfo(
+                    model_name=self.model_name,
+                    framework="tensorflow",
+                    requested_device=self.requested_device,
+                    execution_device=self.device,
+                    configured_batch_size=configured,
+                    effective_batch_size=effective,
+                    total_images=total,
+                    processed_images=index,
+                    out_of_memory=out_of_memory,
+                    insufficient_memory=insufficient_memory,
+                    intra_op_threads=intra_threads,
+                    inter_op_threads=inter_threads,
+                )
+            )
+        for output in outputs:
+            if isinstance(output, UnifiedAnnotationResult):
+                output.execution_device = self.device
+        logger.info(
+            f"TensorFlow 推論完了: model='{self.model_name}', 実行先={self.device}, 成功={index}/{total}, "
+            f"推論枚数={effective}, OOM={out_of_memory}, 見積もり不足={insufficient_memory}"
+        )
+        return outputs
+
+    def _clear_tensorflow_session(self) -> None:
+        """OOM 後に TensorFlow のグラフ状態を捨て、ホスト側の参照を回収する。"""
+        import tensorflow as tf
+
+        tf.keras.backend.clear_session()
+        gc.collect()
 
     @abstractmethod
     def _format_predictions(self, raw_output: tf.Tensor) -> list[UnifiedAnnotationResult]:

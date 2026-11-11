@@ -26,6 +26,7 @@ docs 全体の frontmatter 規約は [ADR 0010](0010-okf-frontmatter-for-docs.md
 | [0010](0010-okf-frontmatter-for-docs.md) | OKF YAML Frontmatter for Documentation | 2026-06-29 | Accepted |
 | [0011](0011-typed-clef-decision-api.md) | Typed Clef Decision API and Consumer Responsibilities | 2026-10-08 | Accepted |
 | [0012](0012-local-model-resource-ownership.md) | Local Model Context Ownership and Resource Budgets | 2026-10-10 | Accepted |
+| [0013](0013-tensorflow-inference-memory-control.md) | TensorFlow Inference Chunking, Memory Estimate and Runtime Report | 2026-11-11 | Accepted |
 <!-- OKF-TABLE:END -->
 
 > このテーブルは `make adr-index` が frontmatter から生成する。手編集しない。
