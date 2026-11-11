@@ -191,7 +191,11 @@ def test_predict_keeps_completed_chunks_and_marks_rest_out_of_memory(monkeypatch
 def test_runtime_info_reports_requested_and_execution_device(monkeypatch):
     _register(monkeypatch, device="cuda")
     fake_tf = SimpleNamespace(
-        config=SimpleNamespace(list_physical_devices=lambda kind: [], threading=FakeThreading())
+        config=SimpleNamespace(
+            list_physical_devices=lambda kind: [],
+            get_visible_devices=lambda kind: [],
+            threading=FakeThreading(),
+        )
     )
     monkeypatch.setattr(tensorflow_runtime, "_tensorflow_module", lambda: fake_tf)
     # PyTorch 側が CUDA ありと判定しても TF 判定が優先される
@@ -219,10 +223,50 @@ def test_runtime_info_reports_requested_and_execution_device(monkeypatch):
 )
 def test_determine_tensorflow_device_uses_tensorflow_gpu_list(monkeypatch, requested, gpu_count, expected):
     gpus = [SimpleNamespace(name=f"GPU:{index}") for index in range(gpu_count)]
-    fake_tf = SimpleNamespace(config=SimpleNamespace(list_physical_devices=lambda kind: gpus))
+    fake_tf = SimpleNamespace(
+        config=SimpleNamespace(
+            list_physical_devices=lambda kind: gpus, get_visible_devices=lambda kind: gpus
+        )
+    )
     monkeypatch.setattr(tensorflow_runtime, "_tensorflow_module", lambda: fake_tf)
 
     assert tensorflow_runtime.determine_tensorflow_device(requested, "m") == expected
+
+
+def test_determine_tensorflow_device_ignores_physical_gpus_hidden_from_tensorflow(monkeypatch):
+    # tf.config.set_visible_devices([], "GPU") で隠された物理 GPU は実行先にしない
+    physical = [SimpleNamespace(name="GPU:0")]
+    fake_tf = SimpleNamespace(
+        config=SimpleNamespace(
+            list_physical_devices=lambda kind: physical, get_visible_devices=lambda kind: []
+        )
+    )
+    monkeypatch.setattr(tensorflow_runtime, "_tensorflow_module", lambda: fake_tf)
+
+    assert tensorflow_runtime.determine_tensorflow_device("cuda", "m") == "cpu"
+
+
+def test_hidden_gpu_uses_cpu_device_and_cpu_memory_estimate(monkeypatch):
+    # 実行先・見積もり倍率・公開 API が同じ判定 (cpu) を使う
+    _register(monkeypatch, device="cuda", inference_memory_multiplier=10.0)
+    fake_tf = SimpleNamespace(
+        config=SimpleNamespace(
+            list_physical_devices=lambda kind: [SimpleNamespace(name="GPU:0")],
+            get_visible_devices=lambda kind: [],
+            threading=FakeThreading(),
+        )
+    )
+    monkeypatch.setattr(tensorflow_runtime, "_tensorflow_module", lambda: fake_tf)
+
+    annotator = _annotator(FakeTensorflowModel())
+    results = annotator.predict(_images(1))
+
+    assert annotator.device == "cpu"
+    assert annotator._estimated_bytes_per_image() == 100 * 100 * 3 * 4 * 10
+    assert results[0].execution_device == "cpu"
+    info = get_inference_runtime_info(MODEL_NAME)
+    assert info is not None
+    assert info.execution_device == "cpu"
 
 
 @pytest.mark.parametrize(("device", "name"), [("cpu", "/CPU:0"), ("cuda", "/GPU:0"), ("cuda:1", "/GPU:1")])

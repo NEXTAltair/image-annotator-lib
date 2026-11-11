@@ -51,8 +51,12 @@ VRAM の見積もりは行わない (TensorFlow は memory growth で確保し�
 
 ### 3. 実デバイスの判定
 
-TensorFlow 系の実行先は `tf.config.list_physical_devices("GPU")` で決める
-(`determine_tensorflow_device`)。CUDA 要求でも TensorFlow が GPU を検出しなければ `cpu`。推論は
+TensorFlow 系の実行先は `tf.config.get_visible_devices("GPU")` で決める
+(`determine_tensorflow_device`)。物理 GPU があっても `tf.config.set_visible_devices([], "GPU")` で
+隠されていれば TensorFlow は使わないため、物理デバイス一覧では判定しない。`list_logical_devices` は
+ランタイムを初期化し以降のスレッド数・memory growth 設定を不可能にするため使わない。
+CUDA 要求でも TensorFlow から見える GPU が無ければ `cpu`。この判定を実行先・見積もり倍率・公開 API に
+共通で使う。推論は
 `tf.device("/CPU:0" | "/GPU:N")` の中で実行し、`TensorFlowLoader` も PyTorch で再判定しない。
 実行先は結果 (`UnifiedAnnotationResult.execution_device`)、推論開始/完了の INFO ログ、
 `InferenceRuntimeInfo` に出す。

@@ -48,7 +48,7 @@ def _tensorflow_module() -> Any:
 
 
 def determine_tensorflow_device(requested_device: str, model_name: str | None = None) -> str:
-    """TensorFlow 自身の GPU 可用性から実際の実行先を決める。
+    """TensorFlow から見える (visible な) GPU から実際の実行先を決める。
 
     PyTorch の CUDA 可用性は使わない (Issue #172: torch は ``cuda`` と判定したが
     TensorFlow は GPU を検出しておらず、表示と実行先が食い違った)。
@@ -64,7 +64,11 @@ def determine_tensorflow_device(requested_device: str, model_name: str | None = 
         return "cpu"
 
     tf = _tensorflow_module()
-    gpus = list(tf.config.list_physical_devices("GPU"))
+    # 物理 GPU ではなく、実行時に TensorFlow から見える GPU で判定する。
+    # set_visible_devices([], "GPU") で隠された GPU は使われず soft placement で CPU 実行になるため。
+    # list_logical_devices はランタイムを初期化し、以降のスレッド数・memory growth 設定を
+    # できなくするので使わない (get_visible_devices は初期化しない)。
+    gpus = list(tf.config.get_visible_devices("GPU"))
     label = model_name or "N/A"
     if not gpus:
         logger.warning(
