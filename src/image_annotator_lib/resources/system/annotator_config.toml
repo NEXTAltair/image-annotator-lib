@@ -223,27 +223,32 @@ model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v3-20
 class = "DeepDanbooruTagger"
 estimated_size_gb = 0.723
 type = "tagger"
+inference_batch_size = 8
 
 [deepdanbooru-v4-20200814-sgd-e30]
 model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v4-20200814-sgd-e30/deepdanbooru-v4-20200814-sgd-e30.zip"
 class = "DeepDanbooruTagger"
 estimated_size_gb = 0.327
 type = "tagger"
+inference_batch_size = 8
 
 [deepdanbooru-v3-20200915-sgd-e30]
 model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v3-20200915-sgd-e30/deepdanbooru-v3-20200915-sgd-e30.zip"
 class = "DeepDanbooruTagger"
 estimated_size_gb = 0.698
 type = "tagger"
+inference_batch_size = 8
 
 [deepdanbooru-v3-20200101-sgd-e30]
 model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v3-20200101-sgd-e30/deepdanbooru-v3-20200101-sgd-e30.zip"
 class = "DeepDanbooruTagger"
 estimated_size_gb = 0.687
 type = "tagger"
+inference_batch_size = 8
 
 [deepdanbooru-v1-20191108-sgd-e30]
 model_path = "https://github.com/KichangKim/DeepDanbooru/releases/download/v1-20191108-sgd-e30/deepdanbooru-v1-20191108-sgd-e30.zip"
 class = "DeepDanbooruTagger"
 estimated_size_gb = 0.66
 type = "tagger"
+inference_batch_size = 8

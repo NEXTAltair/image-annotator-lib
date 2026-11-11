@@ -77,17 +77,24 @@ class DeepDanbooruTagger(TensorflowBaseAnnotator):
             logger.exception(f"タグファイルの読み込み中に予期せぬエラーが発生しました: {e}")
             raise e  # エラーを再送出
 
+    def _target_size(self) -> tuple[int, int]:
+        """モデル名のバージョンから入力画像サイズ (幅, 高さ) を決める。"""
+        # TODO: 設定ファイルで明示的に指定する方が良いかもしれない
+        if "v1-" in self.model_name:
+            return (299, 299)
+        return (512, 512)  # v3, v4 and potentially others
+
+    def _input_shape(self) -> tuple[int, int, int]:
+        """推論前メモリ見積もり用の 1 枚分の入力形状 (H, W, C) (ADR 0013)。"""
+        width, height = self._target_size()
+        return (height, width, 3)
+
     # メソッド名を _preprocess_images に変更、引数型を修正
     def _preprocess_images(self, images: list[Image.Image]) -> np.ndarray[Any, np.dtype[np.float32]]:
         """画像リストを前処理し、単一の NumPy 配列バッチを返します。"""
         # モデル名からバージョンを判断してターゲットサイズを決定
-        # TODO: 設定ファイルで明示的に指定する方が良いかもしれない
-        if "v1-" in self.model_name:
-            target_size = (299, 299)
-            logger.debug("Using target size 299x299 for v1 model.")
-        else:
-            target_size = (512, 512)  # v3, v4 and potentially others
-            logger.debug("Using target size 512x512 for v3/v4 model.")
+        target_size = self._target_size()
+        logger.debug(f"Using target size {target_size[0]}x{target_size[1]} for '{self.model_name}'.")
 
         # 空リストの場合は空のバッチを返す
         if not images:

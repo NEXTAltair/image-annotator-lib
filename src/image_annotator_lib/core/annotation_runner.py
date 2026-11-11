@@ -24,6 +24,7 @@ from PIL import Image
 
 from ..webapi.annotator import WebApiAnnotator
 from .base.annotator import BaseAnnotator
+from .base.local import _is_memory_failure
 from .model_factory import ModelLoad
 from .registry import (
     find_model_class_case_insensitive,
@@ -31,7 +32,7 @@ from .registry import (
     get_webapi_metadata,
     initialize_registry,
 )
-from .types import PHashAnnotationResults, UnifiedAnnotationResult
+from .types import AnnotationErrorCode, PHashAnnotationResults, UnifiedAnnotationResult
 from .utils import calculate_phash, get_model_capabilities, logger
 
 _MODEL_INSTANCE_REGISTRY: dict[str, Any] = {}
@@ -338,8 +339,12 @@ def _record_model_error(
 
         capabilities = {TaskCapability.TAGS}
         logger.warning(f"モデル '{model_name}' のcapabilitiesが未設定のため、デフォルト値 {{TAGS}} を使用")
+    # ADR 0013 (#172): メモリ不足は他のエラーと区別できるよう error_code を付ける
+    error_code = AnnotationErrorCode.OUT_OF_MEMORY if _is_memory_failure(error) else None
     error_results = [
-        UnifiedAnnotationResult(model_name=model_name, capabilities=capabilities, error=error_message)
+        UnifiedAnnotationResult(
+            model_name=model_name, capabilities=capabilities, error=error_message, error_code=error_code
+        )
         for _ in phash_list
     ]
     _process_model_results(model_name, error_results, results_by_phash, phash_map)

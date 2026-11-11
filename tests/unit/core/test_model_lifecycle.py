@@ -77,7 +77,9 @@ def transient_backend(monkeypatch, request):
         annotator_class = ClipBaseAnnotator
     else:
         fake_tensorflow = Mock()
-        fake_tensorflow.config.list_physical_devices.return_value = []
+        # ADR 0013: TF 系の実行先は TF 自身の GPU 検出で決まる。CUDA 経路を検証するため GPU ありにする
+        fake_tensorflow.config.list_physical_devices.return_value = [SimpleNamespace(name="GPU:0")]
+        fake_tensorflow.config.get_visible_devices.return_value = [SimpleNamespace(name="GPU:0")]
         fake_tensorflow.keras.backend.clear_session = clear_session
         monkeypatch.setitem(sys.modules, "tensorflow", fake_tensorflow)
         loader_class = TensorFlowLoader
