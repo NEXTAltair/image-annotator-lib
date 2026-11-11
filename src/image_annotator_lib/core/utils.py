@@ -361,12 +361,13 @@ def _infer_capabilities_from_type(model_name: str) -> set[Any] | None:
         model_class = config_registry.get(model_name, "class", "")
         if model_class in RATING_CAPABLE_TAGGER_CLASSES:
             inferred = [*inferred, TaskCapability.RATINGS]
-            logger.debug(
+            logger.trace(
                 f"モデル '{model_name}' (class={model_class}) は rating 対応 tagger のため "
                 f"RATINGS capability を付与"
             )
 
-    logger.debug(f"モデル '{model_name}' のcapabilitiesをtypeから推論: {model_type} -> {inferred}")
+    # モデルごとに呼ばれる per-item 詳細のため TRACE (DEBUG ログを埋めない)
+    logger.trace(f"モデル '{model_name}' のcapabilitiesをtypeから推論: {model_type} -> {inferred}")
     return set(inferred)
 
 
