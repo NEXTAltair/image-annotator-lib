@@ -1,4 +1,5 @@
 import os
+from collections.abc import Iterable, Sequence
 
 from PIL import Image
 
@@ -26,6 +27,7 @@ from .core.registry import (
 from .core.tensorflow_runtime import set_tensorflow_cpu_threads
 from .core.types import AnnotationErrorCode, AnnotationResult, AnnotatorInfo, ModelType
 from .core.utils import init_logger
+from .detection.types import BoundingBox, Detection, DetectorInfo, ImageDetections
 from .exceptions.errors import (
     AnnotatorError,
     ModelInstallCancelledError,
@@ -89,6 +91,10 @@ __all__ = [
     "BatchSubmitItem",
     "BatchSubmitRequest",
     "BatchSubmitResult",
+    "BoundingBox",
+    "Detection",
+    "DetectorInfo",
+    "ImageDetections",
     "InferenceRuntimeInfo",
     "ModelInstallCancelledError",
     "ModelInstallProgress",
@@ -102,6 +108,7 @@ __all__ = [
     "annotate",
     "cancel_batch",
     "config_registry",
+    "detect_objects",
     "discover_available_vision_models",
     "fetch_batch_results",
     "get_available_models",
@@ -113,6 +120,8 @@ __all__ = [
     "list_annotator_info",
     "list_available_annotators",
     "list_batch_capable_models",
+    "list_detectors",
+    "release_detectors",
     "retrieve_batch",
     "set_tensorflow_cpu_threads",
     "submit_batch",
@@ -159,6 +168,58 @@ def annotate(
         _cached_annotate = _annotate_impl
 
     return _cached_annotate(images_list, model_name_list, phash_list, api_keys, additional_prompt)
+
+
+def detect_objects(
+    images: Sequence[Image.Image],
+    detector: str,
+    classes: Iterable[str] | None = None,
+    min_score: float | None = None,
+    nms_iou: float = 0.5,
+) -> list[ImageDetections]:
+    """画像から人物・顔・頭部などを検出し、ピクセル座標の矩形を返す。
+
+    `image_annotator_lib.detection.detect_objects` への遅延 import ラッパー。
+    EXIF の向き補正は行わないため、呼び出し側が EXIF 適用済みの画像を渡す。
+
+    Args:
+        images: 対象の PIL 画像。1 枚以上。
+        detector: 検出器名 (`list_detectors()` の `name`)。
+        classes: 返すクラス名。None なら検出器の全クラス。
+        min_score: 残す最小 score。None なら検出器の既定値。
+        nms_iou: NMS の IoU 閾値。
+
+    Returns:
+        入力と同じ順序の ImageDetections のリスト。
+    """
+    from .detection.runtime import detect_objects as _detect_objects_impl
+
+    return _detect_objects_impl(images, detector, classes=classes, min_score=min_score, nms_iou=nms_iou)
+
+
+def list_detectors() -> list[DetectorInfo]:
+    """利用可能な検出器のメタデータを名前順で返す (遅延 import ラッパー)。
+
+    Returns:
+        DetectorInfo のリスト。
+    """
+    from .detection.runtime import list_detectors as _list_detectors_impl
+
+    return _list_detectors_impl()
+
+
+def release_detectors(names: Iterable[str] | None = None) -> int:
+    """キャッシュ済みの検出器セッションを破棄する (遅延 import ラッパー)。
+
+    Args:
+        names: 破棄する検出器名。None なら全て。
+
+    Returns:
+        破棄したセッション数。
+    """
+    from .detection.runtime import release_detectors as _release_detectors_impl
+
+    return _release_detectors_impl(names)
 
 
 # You might want to add version information here later
