@@ -446,6 +446,19 @@ def test_detect_objects_caches_session_until_released(install_session) -> None:
     assert release_detectors() == 0
 
 
+def test_release_detectors_ignores_duplicate_names(install_session) -> None:
+    """重複した検出器名を渡しても KeyError にならず、後続の名前も破棄される。"""
+    session = _FakeSession([_yolo_output([[1, 1, 1, 1, 0.0]])])
+    install_session(session)
+    image = Image.new("RGB", (16, 16))
+    face = "face_detect_v1.4_s"
+    detect_objects([image], detector=PERSON)
+    detect_objects([image], detector=face)
+
+    assert release_detectors([PERSON, PERSON, face]) == 2
+    assert release_detectors() == 0
+
+
 def test_detect_objects_classes_filter_accepts_known_class(install_session) -> None:
     install_session(_FakeSession([_yolo_output([[100, 100, 10, 10, 0.9]])]))
     (result,) = detect_objects([Image.new("RGB", (640, 640))], detector=PERSON, classes=["person"])

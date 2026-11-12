@@ -154,18 +154,18 @@ def release_detectors(names: Iterable[str] | None = None) -> int:
     """キャッシュ済みの検出器セッションを破棄する。
 
     Args:
-        names: 破棄する検出器名。None なら全て。キャッシュに無い名前は無視する。
+        names: 破棄する検出器名。None なら全て。キャッシュに無い名前と重複は無視する。
 
     Returns:
-        破棄したセッション数。
+        実際に破棄したセッション数。
     """
     with _SESSION_LOCK:
-        targets = list(_SESSION_CACHE) if names is None else [n for n in names if n in _SESSION_CACHE]
-        for name in targets:
-            del _SESSION_CACHE[name]
-    if targets:
-        logger.debug(f"検出器セッションを破棄: {targets}")
-    return len(targets)
+        # 重複名で 2 回目の削除が KeyError にならないよう、順序を保って重複を除く
+        requested = list(_SESSION_CACHE) if names is None else list(dict.fromkeys(names))
+        released = [name for name in requested if _SESSION_CACHE.pop(name, None) is not None]
+    if released:
+        logger.debug(f"検出器セッションを破棄: {released}")
+    return len(released)
 
 
 def _resolve_detector(detector: str) -> DetectorInfo:
