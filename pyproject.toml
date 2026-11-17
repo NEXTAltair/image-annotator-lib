@@ -41,7 +41,9 @@ dependencies = [
     "accelerate>=0.26.0",
     "diffusers>=0.24.0",
     "huggingface_hub>=1.1.0",  # >=1.1.0: snapshot_download の byte 集約 progress (tqdm_class) が必要 (PR #151)
-    "onnxruntime>=1.16.0",
+    # CPU/GPU 版は同じ onnxruntime モジュールを配置するため同時に導入しない (#175)。
+    # GPU 版にも CPUExecutionProvider が含まれる。macOS のみ CPU 版を使う。
+    "onnxruntime>=1.16.0;platform_system=='Darwin'",
     "onnxruntime-gpu>=1.16.0;platform_system!='Darwin'",
     "safetensors>=0.4.0",
     "timm>=0.9.0",
