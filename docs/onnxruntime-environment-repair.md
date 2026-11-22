@@ -146,6 +146,6 @@ CUDA / cuDNN の互換が要るため、GPU のある環境で別途確認する
   (後から入れた方が勝つ、片方の削除だけで他方の共有ファイルが消える) と、両方を削除してから
   `--reinstall-package` で入れ直すと完全に戻ることを Linux で確認した。実物の onnxruntime の wheel での
   再現は行っていない。
-- `uv sync --frozen --dev` による復旧と、`pip` の手順は実行していない (共有の lockfile・環境に触れるため)。
+- `uv sync --frozen --dev` による復旧と、`pip` の手順は実行していない (共有の lockfile と共有 venv を書き換えるため)。
 - Windows PowerShell のコマンドは、パス区切りとインタプリタの場所以外は Linux と同じ操作である。
   Windows 上での実行は、確認 Issue に分離した実機確認で行う。
