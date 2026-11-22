@@ -31,8 +31,6 @@ depends_on: [tensorflow, psutil]
 TensorFlow 系 (`TensorflowBaseAnnotator`) は、`predict` に渡された画像を設定枚数ずつ前処理・推論・整形する。
 既定は 8 枚で、モデル設定 `inference_batch_size` で上書きできる。結果は入力画像の順序で連結し、
 画像と結果の対応を保つ。他のバックエンドの一括方式は変えない (#164 と方向が逆のため一律にしない)。
-ONNX 系 (`ONNXBaseAnnotator`) は 1 枚ずつ推論していたため逆方向 (まとめる) で、同じ設定キーを共有する: 入力の batch 軸が動的なモデルだけ、`inference_batch_size` 枚 (既定 8) ごとに前処理して 1 回の `session.run` で推論する。
-静的 batch 軸、shape が揃わない入力、出力が画像ごとに分割できないモデルは 1 枚ずつのままで、推論中の OOM は 4. と同じく完了済みの結果を保持して残りを `OUT_OF_MEMORY` にする。推論前の見積もり (2.) と `InferenceRuntimeInfo` は ONNX 系には広げていない。
 
 ### 2. 推論前の見積もり
 

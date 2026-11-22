@@ -22,6 +22,7 @@ from image_annotator_lib.core import onnx_runtime
 from image_annotator_lib.core.base.onnx import ONNXBaseAnnotator
 from image_annotator_lib.core.config import config_registry
 from image_annotator_lib.core.types import AnnotationErrorCode
+from image_annotator_lib.core.utils import logger
 from image_annotator_lib.exceptions.errors import OutOfMemoryError
 
 MODEL_NAME = "onnx-batch-test-model"
@@ -124,7 +125,11 @@ class FakeSession:
         split_output: bool = True,
         fail_on_call: int | None = None,
         failure: Exception | None = None,
+        fail_always: Exception | None = None,
+        fail_when_batched: Exception | None = None,
     ) -> None:
+        self._fail_always = fail_always
+        self._fail_when_batched = fail_when_batched
         self._input_shape = input_shape
         self._split_output = split_output
         self._fail_on_call = fail_on_call
@@ -155,6 +160,10 @@ class FakeSession:
             self.providers = self.providers_after_first_run
         if self._fail_on_call == call_number and self._failure is not None:
             raise self._failure
+        if self._fail_always is not None:
+            raise self._fail_always
+        if self._fail_when_batched is not None and batch.shape[0] > 1:
+            raise self._fail_when_batched
         means = batch.reshape(batch.shape[0], -1).mean(axis=1, keepdims=True)
         rows = np.repeat(means, TAG_COUNT, axis=1).astype(np.float32) / 255.0
         if not self._split_output:
@@ -426,15 +435,61 @@ def test_oom_in_later_chunk_keeps_completed_results_and_marks_rest() -> None:
 
 @pytest.mark.unit
 @pytest.mark.fast
-def test_non_oom_error_returns_one_error_result_per_image() -> None:
+def test_non_oom_error_in_sequential_run_returns_one_error_result_per_image() -> None:
     _set_batch_size(4)
-    session = FakeSession(["batch", 3, SIZE, SIZE], fail_on_call=2, failure=RuntimeError("boom"))
+    session = FakeSession(["batch", 3, SIZE, SIZE], fail_always=RuntimeError("boom"))
     annotator = _annotator(session)
 
     results = annotator.predict(_images(10))
 
     assert len(results) == 10
     assert all(result.error and "boom" in result.error for result in results)
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_non_oom_error_in_batched_run_falls_back_to_sequential_and_is_remembered() -> None:
+    """入力・出力を動的 batch と宣言しつつ batch>1 でだけ失敗するモデルは、従来どおり 1 枚ずつ成功する。"""
+    _set_batch_size(4)
+    session = FakeSession(
+        ["batch", 3, SIZE, SIZE], fail_when_batched=RuntimeError("Reshape: shape mismatch for batch > 1")
+    )
+    annotator = _annotator(session)
+    warnings: list[str] = []
+    sink_id = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        results = annotator.predict(_images(10))
+        first_shapes = [shape[0] for shape in session.run_shapes]
+        session.run_shapes.clear()
+        second = annotator.predict(_images(10))
+    finally:
+        logger.remove(sink_id)
+
+    assert len(results) == 10
+    assert all(result.error is None for result in results)
+    # 最初の 4 枚のまとめが失敗し、同じ画像を 1 枚ずつ投げ直す。以降はまとめない。
+    assert first_shapes == [4] + [1] * 10
+    # 以後の predict も 1 枚ずつで全件成功する (instance が寿命中まとめない)。
+    assert all(result.error is None for result in second)
+    assert [shape[0] for shape in session.run_shapes] == [1] * 10
+    assert annotator._batching_disabled is True
+    assert sum("1 枚ずつ推論" in message for message in warnings) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_batched_fallback_results_match_sequential_results() -> None:
+    _set_batch_size(4)
+    images = _images(6)
+    failing = _annotator(
+        FakeSession(["batch", 3, SIZE, SIZE], fail_when_batched=RuntimeError("Reshape failed"))
+    )
+    sequential = _annotator(FakeSession(["batch", 3, SIZE, SIZE]))
+    _reconfigure(sequential, 1)
+
+    np.testing.assert_allclose(
+        _probabilities(failing.predict(images)), _probabilities(sequential.predict(images)), atol=1e-7
+    )
 
 
 @pytest.mark.unit

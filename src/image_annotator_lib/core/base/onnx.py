@@ -519,8 +519,19 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
         input_name: str,
         output_name: str,
         input_data: np.ndarray[Any, np.dtype[Any]],
+        *,
+        log_failure: bool = True,
     ) -> Any:
-        """session.run を 1 回実行し、provider を読み直す。OOM は ``OutOfMemoryError`` に変換する。"""
+        """session.run を 1 回実行し、provider を読み直す。OOM は ``OutOfMemoryError`` に変換する。
+
+        Args:
+            session: ONNX の InferenceSession。
+            input_name: 入力テンソル名。
+            output_name: 出力テンソル名。
+            input_data: 入力配列。
+            log_failure: OOM 以外の失敗を ERROR (トレースバック付き) で記録するか。まとめ推論の失敗は
+                呼び出し側が 1 枚ずつの推論に戻して扱うため False にする。
+        """
         try:
             raw_output = session.run([output_name], {input_name: input_data})
             self._session_run_count += 1
@@ -538,7 +549,8 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
                 # 次回クリーンに再ロードさせる (GC / CUDA キャッシュ解放も走る)。
                 self._discard_components()
                 raise OutOfMemoryError(error_message) from e
-            logger.exception(f"ONNX Runtime エラー: モデル {self.model_name} の推論中: {e}")
+            if log_failure:
+                logger.exception(f"ONNX Runtime エラー: モデル {self.model_name} の推論中: {e}")
             raise
 
     def _run_batched_group(
@@ -550,10 +562,23 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
     ) -> list[np.ndarray[Any, np.dtype[Any]]] | None:
         """複数画像を連結して 1 回で推論し、画像ごとの出力 ([1, ...]) に分割して返す。
 
-        出力の先頭軸が画像数と一致しない (分割できない) 場合は None を返す。
+        出力の先頭軸が画像数と一致しない (分割できない) 場合、または OOM 以外の例外でまとめ推論が
+        失敗した場合は、WARNING を 1 回出して以降のまとめを止め、None を返す (呼び出し側が 1 枚ずつ
+        推論し直す)。モデルが batch>1 でだけ失敗する場合でも、従来の 1 枚ずつなら成功するため。
+        OOM は従来どおり ``OutOfMemoryError`` を送出する。
         """
         batch = np.concatenate(group, axis=0)
-        output = self._session_run(session, input_name, output_name, batch)
+        try:
+            output = self._session_run(session, input_name, output_name, batch, log_failure=False)
+        except OutOfMemoryError:
+            raise
+        except Exception as error:
+            logger.warning(
+                f"モデル {self.model_name}: {len(group)} 枚をまとめた推論が失敗したため "
+                f"({type(error).__name__}: {error})、以降は 1 枚ずつ推論します。"
+            )
+            self._batching_disabled = True
+            return None
         if isinstance(output, np.ndarray) and output.ndim >= 1 and output.shape[0] == len(group):
             return [output[i : i + 1] for i in range(len(group))]
         shape = getattr(output, "shape", None)

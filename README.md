@@ -374,6 +374,28 @@ api_model_id = "provider-model-id"
 model_name_on_provider = "provider-model-name"
 ```
 
+#### ONNX モデルの複数画像まとめ推論 (`inference_batch_size`)
+
+ONNX 系 (`ONNXBaseAnnotator`) は、入力の batch 軸が動的 (ONNX の shape で文字列または未記載) なモデルに限り、
+モデル設定 `inference_batch_size` 枚 (未設定は 8) ごとに連結して 1 回の `session.run` で推論します。
+TensorFlow 系と同じ設定キーです。
+
+```toml
+[your-onnx-model]
+inference_batch_size = 4  # 1 回に投げる最大枚数。1 にすると従来どおり 1 枚ずつ
+```
+
+- 前処理も同じ枚数ずつ行い、前処理済み配列と連結した入力は 1 回分だけ保持します。
+  枚数に比例して VRAM / RAM の使用量が増えるため、メモリが足りない環境では値を下げてください。
+- 次のモデル・入力は 1 枚ずつ推論します: 静的 batch (1 や N) のモデル、shape や dtype が揃わない入力、
+  出力の batch 軸が固定のモデル。まとめた推論が出力を画像ごとに分割できない、または OOM 以外の
+  例外で失敗した場合は、WARNING を 1 回出してその回を 1 枚ずつ投げ直し、そのモデルの instance では
+  以降もまとめません。
+- 推論中に OOM が起きた場合はモデルを解放し、完了済みの画像の結果を残して、残りの画像を
+  `OUT_OF_MEMORY` のエラー結果にします (再試行しません)。結果の数と順序は入力画像と一致します。
+- batch サイズによって GPU の行列演算の丸めが変わり、閾値付近のタグが 1 枚ずつの場合と入れ替わる
+  可能性があります (実 GPU・実モデルでは未検証)。
+
 ### 4. テストの追加
 
 適切なテストカテゴリにテストを追加：
