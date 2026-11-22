@@ -94,6 +94,9 @@ else:
 モデルを先に解放する場合は `image_annotator_lib.decisions.shutdown_local_runtime()` を呼びます。
 ローカル通信用の一時キーは専用の非公開ファイルで自動管理し、停止時に削除します。
 Windows ではこの一時ディレクトリの保護に Python 3.12.4 以降が必要です。
+Linux と Windows では、利用側のプロセスが強制終了・クラッシュしても、起動したサーバー本体は
+OS が停止します。サーバーが作った子プロセスへの扱いや OS ごとの例外は
+[所有権と回収](docs/local-clef-process-lifetime.md) を参照してください。
 
 タグ・キャプション生成の `annotate()` と判定の API は別です。詳細な契約、画像制限、
 タグ一件・キャプション一件の例、LoRAIro との分担は

@@ -20,6 +20,7 @@ from image_annotator_lib.decisions import (
     DecisionRequest,
     LocalDecisionClient,
     NoulQuestion,
+    process_lifetime,
 )
 from image_annotator_lib.decisions import runtime as runtime_module
 from image_annotator_lib.decisions.runtime import (
@@ -64,7 +65,13 @@ def settings(tmp_path: Path) -> RuntimeSettings:
 
 
 @pytest.fixture(autouse=True)
-def isolate_runtime() -> Any:
+def isolate_runtime(monkeypatch: pytest.MonkeyPatch) -> Any:
+    # FakeProcess には結び付ける OS プロセスが無い。Job Object と launcher の報告は
+    # test_decision_process_lifetime.py と実プロセスのテストで検証する。
+    if sys.platform == "win32":
+        monkeypatch.setattr(process_lifetime, "_spawn_in_job", lambda launch: launch(0x4))
+    if sys.platform == "linux":
+        monkeypatch.setattr(process_lifetime, "_confirm_launch", lambda go, report: None)
     runtime_module.shutdown_local_runtime()
     yield
     runtime_module.shutdown_local_runtime()
@@ -123,7 +130,12 @@ def test_runtime_launch_is_hidden_loopback_and_ready_before_use(
     runtime.start(2)
     assert len(calls) == 1 and len(requests) == 4
     args, kwargs = calls[0]
-    assert args[0] == str(settings.server_path)
+    if sys.platform == "linux":
+        go, report = kwargs["pass_fds"]
+        launcher = process_lifetime._parent_bound_command([str(settings.server_path), "-m"], go, report)
+        assert args[: len(launcher)] == launcher
+    else:
+        assert args[:2] == [str(settings.server_path), "-m"]
     assert args[args.index("--host") + 1] == "127.0.0.1"
     assert args[args.index("-ngl") + 1] == str(n_gpu_layers)
     assert args[args.index("-ub") + 1] == "4096"
@@ -148,7 +160,8 @@ def test_runtime_launch_is_hidden_loopback_and_ready_before_use(
     else:
         assert "--device" not in args and "--no-mmproj-offload" not in args
     assert kwargs["shell"] is False
-    assert kwargs["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    suspended = 0x4 if sys.platform == "win32" else 0
+    assert kwargs["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW", 0) | suspended
     assert kwargs["stdin"] == kwargs["stdout"] == kwargs["stderr"] == subprocess.DEVNULL
     assert options[0]["trust_env"] is options[0]["follow_redirects"] is False
     assert requests[0].url.host == "127.0.0.1" and requests[0].url.path == "/health"
