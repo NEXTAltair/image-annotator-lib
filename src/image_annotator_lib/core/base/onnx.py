@@ -18,7 +18,7 @@ from ..types import (
     UnifiedAnnotationResult,
 )
 from ..utils import logger
-from .local import LocalModelAnnotator, local_model_enter, local_model_exit
+from .local import LocalModelAnnotator, _is_memory_failure, local_model_enter, local_model_exit
 
 
 class ONNXBaseAnnotator(LocalModelAnnotator):
@@ -562,17 +562,21 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
     ) -> list[np.ndarray[Any, np.dtype[Any]]] | None:
         """複数画像を連結して 1 回で推論し、画像ごとの出力 ([1, ...]) に分割して返す。
 
-        出力の先頭軸が画像数と一致しない (分割できない) 場合、または OOM 以外の例外でまとめ推論が
+        出力の先頭軸が画像数と一致しない (分割できない) 場合、またはメモリ不足以外の例外でまとめ推論が
         失敗した場合は、WARNING を 1 回出して以降のまとめを止め、None を返す (呼び出し側が 1 枚ずつ
         推論し直す)。モデルが batch>1 でだけ失敗する場合でも、従来の 1 枚ずつなら成功するため。
-        OOM は従来どおり ``OutOfMemoryError`` を送出する。
+        メモリ不足 (``OutOfMemoryError`` / ``MemoryError`` など ``_is_memory_failure`` が認識するもの) は
+        そのまま送出する。
         """
         batch = np.concatenate(group, axis=0)
         try:
             output = self._session_run(session, input_name, output_name, batch, log_failure=False)
-        except OutOfMemoryError:
-            raise
         except Exception as error:
+            # メモリ不足 (OutOfMemoryError / MemoryError / それらを原因に持つ例外) は「batch 非対応」では
+            # ないので 1 枚ずつ再試行せず、外側 (LocalModelAnnotator._execute_pipeline) の OOM 処理
+            # (session 破棄と OUT_OF_MEMORY 結果) へ送る。
+            if _is_memory_failure(error):
+                raise
             logger.warning(
                 f"モデル {self.model_name}: {len(group)} 枚をまとめた推論が失敗したため "
                 f"({type(error).__name__}: {error})、以降は 1 枚ずつ推論します。"

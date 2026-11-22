@@ -476,6 +476,73 @@ def test_non_oom_error_in_batched_run_falls_back_to_sequential_and_is_remembered
     assert sum("1 枚ずつ推論" in message for message in warnings) == 1
 
 
+def _wrapped_memory_error() -> RuntimeError:
+    """MemoryError を原因に持つ別の例外 (ラップされたメモリ不足)。"""
+    try:
+        try:
+            raise MemoryError("Unable to allocate 1.2 GiB for an array")
+        except MemoryError as cause:
+            raise RuntimeError("wrapped inference failure") from cause
+    except RuntimeError as error:
+        return error
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+@pytest.mark.parametrize(
+    "failure",
+    [
+        MemoryError("Unable to allocate 1.2 GiB for an array"),
+        RuntimeError("Failed to allocate memory for requested buffer"),
+        RuntimeError("CUDA out of memory"),
+        _wrapped_memory_error(),
+    ],
+    ids=["MemoryError", "ORT文字列_allocate", "ORT文字列_out_of_memory", "MemoryErrorを原因に持つ例外"],
+)
+def test_memory_failure_in_batched_run_is_not_retried_sequentially(failure: Exception) -> None:
+    """まとめ推論中のメモリ不足は「batch 非対応」として 1 枚ずつ再試行せず、OOM として扱う。
+
+    圧迫された session のまま推論を続けず、session を破棄し、完了済みの結果を保持して残りを
+    ``OUT_OF_MEMORY`` のエラー結果にする。
+    """
+    _set_batch_size(4)
+    session = FakeSession(["batch", 3, SIZE, SIZE], fail_when_batched=failure)
+    annotator = _annotator(session)
+    warnings: list[str] = []
+    sink_id = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        with patch("image_annotator_lib.core.model_factory.ModelLoad.invalidate_model") as invalidate:
+            results = annotator.predict(_images(10))
+    finally:
+        logger.remove(sink_id)
+
+    assert len(results) == 10
+    assert all(result.error_code == AnnotationErrorCode.OUT_OF_MEMORY for result in results)
+    assert [shape[0] for shape in session.run_shapes] == [4]  # 1 枚ずつの再試行も後続の推論もしない
+    invalidate.assert_called_with(MODEL_NAME, annotator)
+    assert annotator.components is None
+    assert annotator._batching_disabled is False  # 「batch 非対応」とは判定していない
+    assert not any("1 枚ずつ推論" in message for message in warnings)
+
+
+@pytest.mark.unit
+@pytest.mark.fast
+def test_memory_failure_after_completed_chunk_keeps_completed_results() -> None:
+    _set_batch_size(4)
+    session = FakeSession(
+        ["batch", 3, SIZE, SIZE], fail_on_call=2, failure=MemoryError("Unable to allocate 1.2 GiB")
+    )
+    annotator = _annotator(session)
+
+    with patch("image_annotator_lib.core.model_factory.ModelLoad.invalidate_model"):
+        results = annotator.predict(_images(10))
+
+    assert len(results) == 10
+    assert [r.error for r in results[:4]] == [None] * 4
+    assert all(r.error_code == AnnotationErrorCode.OUT_OF_MEMORY for r in results[4:])
+    assert [shape[0] for shape in session.run_shapes] == [4, 4]
+
+
 @pytest.mark.unit
 @pytest.mark.fast
 def test_batched_fallback_results_match_sequential_results() -> None:
