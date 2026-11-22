@@ -10,9 +10,15 @@ from PIL import Image
 from ...exceptions.errors import OutOfMemoryError
 from .. import onnx_runtime
 from ..model_factory import ModelLoad
-from ..types import ONNXComponents, RatingPrediction, TaskCapability, UnifiedAnnotationResult
+from ..types import (
+    AnnotationErrorCode,
+    ONNXComponents,
+    RatingPrediction,
+    TaskCapability,
+    UnifiedAnnotationResult,
+)
 from ..utils import logger
-from .local import LocalModelAnnotator, local_model_enter, local_model_exit
+from .local import LocalModelAnnotator, _is_memory_failure, local_model_enter, local_model_exit
 
 
 class ONNXBaseAnnotator(LocalModelAnnotator):
@@ -39,6 +45,11 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
         # 成功して初めて「再利用可能」とみなす。途中で失敗した components を
         # 次回呼び出しで使い回さないためのフラグ。
         self._prepared: bool = False
+        # Issue #164: 動的 batch 軸でも出力が画像ごとに分割できないと分かったモデルは、
+        # 以降まとめ直さず 1 枚ずつ推論する (毎回まとめ分を無駄にしない)。
+        self._batching_disabled: bool = False
+        # 直近の predict 1 回で呼んだ session.run の回数 (ログ用)。
+        self._session_run_count: int = 0
 
     @local_model_enter
     def __enter__(self) -> Self:
@@ -464,38 +475,191 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
             results.append(input_data.astype(np.float32))
         return results
 
+    def _inference_batch_size(self) -> int:
+        """設定 ``inference_batch_size`` (未設定なら ``DEFAULT_INFERENCE_BATCH_SIZE``) を返す。"""
+        value = getattr(self._config, "inference_batch_size", None)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+        return onnx_runtime.DEFAULT_INFERENCE_BATCH_SIZE
+
+    @staticmethod
+    def _is_dynamic_axis(dim: Any) -> bool:
+        """ONNX の shape 要素が動的か (文字列 = dim_param、None = 記載なし)。静的なのは int。"""
+        return dim is None or isinstance(dim, str)
+
+    def _can_batch(self, session: Any) -> bool:
+        """入力の batch 軸が動的で、出力の batch 軸も固定でなく、まとめ推論を試せるか。
+
+        静的 batch (1 や N) のモデルは、1 枚ずつ投げる従来の動作を保つ。出力の batch 軸が
+        固定 (例: 入力は動的でも内部で batch 軸を潰す) と宣言されていれば、分割できないので試さない。
+        """
+        if self._batching_disabled:
+            return False
+        input_shape = session.get_inputs()[0].shape
+        if not isinstance(input_shape, list | tuple) or not input_shape:
+            return False
+        if not self._is_dynamic_axis(input_shape[0]):
+            return False
+        output_shape = session.get_outputs()[0].shape
+        if isinstance(output_shape, list | tuple):
+            return bool(output_shape) and self._is_dynamic_axis(output_shape[0])
+        return True
+
+    @staticmethod
+    def _is_stackable(group: list[np.ndarray[Any, np.dtype[Any]]]) -> bool:
+        """各配列が batch 軸 1 の同一 shape / dtype で、axis=0 で連結できるか。"""
+        first = group[0]
+        if first.ndim < 1 or first.shape[0] != 1:
+            return False
+        return all(item.shape == first.shape and item.dtype == first.dtype for item in group)
+
+    def _session_run(
+        self,
+        session: Any,
+        input_name: str,
+        output_name: str,
+        input_data: np.ndarray[Any, np.dtype[Any]],
+        *,
+        log_failure: bool = True,
+    ) -> Any:
+        """session.run を 1 回実行し、provider を読み直す。OOM は ``OutOfMemoryError`` に変換する。
+
+        Args:
+            session: ONNX の InferenceSession。
+            input_name: 入力テンソル名。
+            output_name: 出力テンソル名。
+            input_data: 入力配列。
+            log_failure: OOM 以外の失敗を ERROR (トレースバック付き) で記録するか。まとめ推論の失敗は
+                呼び出し側が 1 枚ずつの推論に戻して扱うため False にする。
+        """
+        try:
+            raw_output = session.run([output_name], {input_name: input_data})
+            self._session_run_count += 1
+            self._sync_execution_device(session)
+            return raw_output[0]
+        except Exception as e:
+            if "Failed to allocate memory" in str(e) or "out of memory" in str(e).lower():
+                error_message = f"ONNX Runtime メモリ不足: モデル {self.model_name} の推論中"
+                logger.error(error_message)
+                logger.error(f"元のONNX Runtimeエラー: {e}")
+                # Issue #162: `BaseAnnotator.predict()` は OutOfMemoryError を握って
+                # エラー結果に変換するため、`__exit__` からは正常終了に見える。
+                # セッションを保持したままだと後続チャンクが同じ逼迫した
+                # セッションを再利用し続けるので、ここで明示的に無効化して
+                # 次回クリーンに再ロードさせる (GC / CUDA キャッシュ解放も走る)。
+                self._discard_components()
+                raise OutOfMemoryError(error_message) from e
+            if log_failure:
+                logger.exception(f"ONNX Runtime エラー: モデル {self.model_name} の推論中: {e}")
+            raise
+
+    def _run_batched_group(
+        self,
+        session: Any,
+        input_name: str,
+        output_name: str,
+        group: list[np.ndarray[Any, np.dtype[Any]]],
+    ) -> list[np.ndarray[Any, np.dtype[Any]]] | None:
+        """複数画像を連結して 1 回で推論し、画像ごとの出力 ([1, ...]) に分割して返す。
+
+        出力の先頭軸が画像数と一致しない (分割できない) 場合、またはメモリ不足以外の例外でまとめ推論が
+        失敗した場合は、WARNING を 1 回出して以降のまとめを止め、None を返す (呼び出し側が 1 枚ずつ
+        推論し直す)。モデルが batch>1 でだけ失敗する場合でも、従来の 1 枚ずつなら成功するため。
+        メモリ不足 (``OutOfMemoryError`` / ``MemoryError`` など ``_is_memory_failure`` が認識するもの) は
+        そのまま送出する。
+        """
+        batch = np.concatenate(group, axis=0)
+        try:
+            output = self._session_run(session, input_name, output_name, batch, log_failure=False)
+        except Exception as error:
+            # メモリ不足 (OutOfMemoryError / MemoryError / それらを原因に持つ例外) は「batch 非対応」では
+            # ないので 1 枚ずつ再試行せず、外側 (LocalModelAnnotator._execute_pipeline) の OOM 処理
+            # (session 破棄と OUT_OF_MEMORY 結果) へ送る。
+            if _is_memory_failure(error):
+                raise
+            logger.warning(
+                f"モデル {self.model_name}: {len(group)} 枚をまとめた推論が失敗したため "
+                f"({type(error).__name__}: {error})、以降は 1 枚ずつ推論します。"
+            )
+            self._batching_disabled = True
+            return None
+        if isinstance(output, np.ndarray) and output.ndim >= 1 and output.shape[0] == len(group):
+            return [output[i : i + 1] for i in range(len(group))]
+        shape = getattr(output, "shape", None)
+        logger.warning(
+            f"モデル {self.model_name}: {len(group)} 枚をまとめた出力 (shape={shape}) が画像ごとに分割できないため、"
+            "以降は 1 枚ずつ推論します。"
+        )
+        self._batching_disabled = True
+        return None
+
     def _run_inference(
         self, processed: list[np.ndarray[Any, np.dtype[Any]]]
     ) -> list[np.ndarray[Any, np.dtype[Any]]]:
-        """バッチの各画像に対してONNX推論を実行します。"""
+        """前処理済みの各画像に対して ONNX 推論を実行し、画像ごとの出力を入力順に返します。
+
+        動的 batch 軸のモデルでは、``inference_batch_size`` 枚ごとに連結して 1 回の
+        ``session.run`` で推論する (Issue #164)。静的 batch のモデル、shape が揃わない入力、
+        出力が分割できないモデルは 1 枚ずつ推論する。
+        """
         if not self.components or "session" not in self.components or self.components["session"] is None:
             raise RuntimeError("ONNX セッションがロードされていません。")
         session = self.components["session"]
         input_name = session.get_inputs()[0].name
         output_name = session.get_outputs()[0].name
 
-        results = []
-        for input_data in processed:
-            try:
-                raw_output = session.run([output_name], {input_name: input_data})
-                self._sync_execution_device(session)
-                results.append(raw_output[0])
-            except Exception as e:
-                if "Failed to allocate memory" in str(e) or "out of memory" in str(e).lower():
-                    error_message = f"ONNX Runtime メモリ不足: モデル {self.model_name} の推論中"
-                    logger.error(error_message)
-                    logger.error(f"元のONNX Runtimeエラー: {e}")
-                    # Issue #162: `BaseAnnotator.predict()` は OutOfMemoryError を握って
-                    # エラー結果に変換するため、`__exit__` からは正常終了に見える。
-                    # セッションを保持したままだと後続チャンクが同じ逼迫した
-                    # セッションを再利用し続けるので、ここで明示的に無効化して
-                    # 次回クリーンに再ロードさせる (GC / CUDA キャッシュ解放も走る)。
-                    self._discard_components()
-                    raise OutOfMemoryError(error_message) from e
-                else:
-                    logger.exception(f"ONNX Runtime エラー: モデル {self.model_name} の推論中: {e}")
-                    raise
+        group_size = self._inference_batch_size() if self._can_batch(session) else 1
+        results: list[np.ndarray[Any, np.dtype[Any]]] = []
+        index = 0
+        while index < len(processed):
+            group = processed[index : index + group_size]
+            index += len(group)
+            if len(group) > 1 and self._is_stackable(group):
+                split = self._run_batched_group(session, input_name, output_name, group)
+                if split is not None:
+                    results.extend(split)
+                    continue
+                # 分割できなかった回は、同じ画像を 1 枚ずつ投げ直す。
+                group_size = 1
+            results.extend(self._session_run(session, input_name, output_name, item) for item in group)
         return results
+
+    def _execute_pipeline(self, images: list[Image.Image]) -> list[Any]:
+        """画像を ``inference_batch_size`` 枚ずつ前処理・推論・整形する (Issue #164)。
+
+        前処理済み配列と連結した入力は 1 回分だけ保持し、全画像分を同時に持たない。
+        推論中の OOM ではモデルを解放し (``_session_run``)、完了済みの回の結果は保持して、
+        残りの画像を ``OUT_OF_MEMORY`` のエラー結果にする。再試行はしない。
+        結果の順序と数は入力画像と一致する。
+        """
+        total = len(images)
+        chunk_size = self._inference_batch_size()
+        self._session_run_count = 0
+        outputs: list[Any] = []
+        index = 0
+        logger.info(f"ONNX 推論開始: model='{self.model_name}', 画像数={total}, 推論枚数上限={chunk_size}")
+        while index < total:
+            chunk = images[index : index + chunk_size]
+            try:
+                outputs.extend(super()._execute_pipeline(chunk))
+            except OutOfMemoryError as error:
+                message = f"推論中にメモリ不足 (OOM): {error}"
+                logger.error(
+                    f"モデル '{self.model_name}': {message}。完了済み {index} 枚の結果を保持し、"
+                    f"残り {total - index} 枚をエラー結果にします。"
+                )
+                outputs.extend(
+                    self._create_error_results(
+                        images[index:], message, error_code=AnnotationErrorCode.OUT_OF_MEMORY
+                    )
+                )
+                break
+            index += len(chunk)
+        logger.info(
+            f"ONNX 推論完了: model='{self.model_name}', 実行先={self.execution_device}, "
+            f"成功={min(index, total)}/{total}, session.run 回数={self._session_run_count}"
+        )
+        return outputs
 
     def _format_predictions(
         self, raw_outputs: list[np.ndarray[Any, np.dtype[Any]]]

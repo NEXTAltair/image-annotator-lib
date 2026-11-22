@@ -85,7 +85,12 @@ class LocalMLModelConfig(BaseModelConfig):
     tag_threshold: float | None = Field(default=None, ge=0, le=1, description="タグ出力閾値")
     # ADR 0013 (#172): TensorFlow 系の推論小分けと推論前メモリ見積もり。None は既定値を使う。
     inference_batch_size: int | None = Field(
-        default=None, gt=0, description="1 回の推論に渡す最大枚数 (TensorFlow 系、既定 8)"
+        default=None,
+        gt=0,
+        description=(
+            "1 回の推論に渡す最大枚数 (既定 8)。TensorFlow 系と、ONNX 系のうち入力の batch 軸が動的なモデルに効く。"
+            "ONNX 系は静的 batch・shape 不揃い・分割できない出力では 1 枚ずつ。1 で従来の 1 枚ずつ"
+        ),
     )
     inference_memory_multiplier: float | None = Field(
         default=None, gt=0, description="CPU 推論の必要量見積もりで入力テンソルに掛ける倍率"
