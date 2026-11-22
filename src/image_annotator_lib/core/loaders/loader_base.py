@@ -292,6 +292,8 @@ class LoaderBase(ABC):
                 f"モデル '{self.model_name}' ({model_type}) ロード開始 (デバイス: {self.device})..."
             )
             components = self._load_components_internal(model_path=model_path, **kwargs)
+            # 要求した実行先ではなく、実際にロードされた実行先を状態台帳・ログに記録する。
+            self.device = self._resolve_execution_device(components)
 
             # 5. 成功時の状態更新
             host_size = self._loaded_host_size_mb(components, model_size_mb)
@@ -308,6 +310,15 @@ class LoaderBase(ABC):
         except Exception as e:
             LoaderBase._handle_load_error(self.model_name, e)
             return None
+
+    def _resolve_execution_device(self, components: LoaderComponents) -> str:
+        """ロード済みコンポーネントが実際に使う実行先を返す。
+
+        既定はロード前に決めた ``self.device`` のまま。バックエンドがロード時に別の実行先へ
+        フォールバックし得る場合 (ONNX Runtime の CPU フォールバック等) は、サブクラスで
+        実際の実行先を返す。
+        """
+        return self.device
 
     def _expected_host_size_mb(self, model_size_mb: float) -> float:
         """Unknown placement conservatively reserves the full weight size on host."""

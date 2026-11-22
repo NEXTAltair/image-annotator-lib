@@ -7,11 +7,12 @@ from typing import Any, ClassVar, Self, cast
 import numpy as np
 from PIL import Image
 
+from ..core import onnx_runtime
 from ..core.base.local import LocalModelAnnotator, local_model_enter, local_model_exit
 from ..core.config import config_registry
 from ..core.model_factory import ModelLoad
 from ..core.types import RatingPrediction, TaskCapability, UnifiedAnnotationResult
-from ..core.utils import determine_effective_device, logger
+from ..core.utils import logger
 from ..exceptions.errors import OutOfMemoryError
 
 
@@ -30,7 +31,9 @@ class AnimeRatingAnnotator(LocalModelAnnotator):
 
     def __init__(self, model_name: str):
         super().__init__(model_name=model_name)
-        self.device = determine_effective_device(self._config.device, self.model_name)
+        self.requested_device = self._config.device
+        self.device = onnx_runtime.determine_onnx_device(self._config.device, self.model_name)
+        self.execution_device: str | None = None
         self.model_variant = config_registry.get(
             self.model_name, "model_variant", self.default_model_variant
         )
@@ -49,21 +52,27 @@ class AnimeRatingAnnotator(LocalModelAnnotator):
         import onnxruntime as ort
 
         model_path, meta_path = self._resolve_model_files(self.model_path, self.model_variant)
-        providers = (
-            ["CUDAExecutionProvider", "CPUExecutionProvider"]
-            if self.device == "cuda" and "CUDAExecutionProvider" in ort.get_available_providers()
-            else ["CPUExecutionProvider"]
-        )
-        self.device = "cuda" if "CUDAExecutionProvider" in providers else "cpu"
+        providers = onnx_runtime.select_providers(self.device)
         size_mb = ModelLoad.get_model_size(self.model_name) or ModelLoad._calculate_file_size_mb(model_path)
         ModelLoad._MODEL_SIZES[self.model_name] = size_mb
         if not ModelLoad._check_memory_before_load(
             size_mb, self.model_name
         ) or not ModelLoad._clear_cache_internal(self.model_name, size_mb):
             raise OutOfMemoryError(f"Anime rating model '{self.model_name}' cannot fit in memory")
-        ModelLoad._make_cuda_room(self.model_name, self.device)
+        if self.device.startswith("cuda"):
+            ModelLoad._make_cuda_room(self.model_name, self.device)
         logger.info(f"Anime rating ONNX model '{self.model_name}' loading: {model_path}")
         session = ort.InferenceSession(str(model_path), providers=providers)
+        # onnxruntime は CUDA EP を作れないと例外なしで CPU のみの session を返す。
+        # 状態台帳・ログ・結果は session が実際に使う provider を基準にする (Issue #175)。
+        actual_device = onnx_runtime.session_execution_device(session)
+        if self.device.startswith("cuda") and actual_device != "cuda":
+            logger.warning(
+                f"Anime rating ONNX model '{self.model_name}': {self.device} を要求しましたが、session は "
+                f"{session.get_providers()} で作成されたため CPU で実行されます。"
+            )
+        self.device = actual_device
+        self.execution_device = actual_device
         self.labels = self._load_labels(meta_path)
         self.components = {
             "session": session,
@@ -163,6 +172,7 @@ class AnimeRatingAnnotator(LocalModelAnnotator):
                     if TaskCapability.RATINGS in capabilities
                     else None,
                     framework="onnx",
+                    execution_device=self.execution_device,
                     raw_output={"ratings": score_map},
                 )
             )
