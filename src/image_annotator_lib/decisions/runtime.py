@@ -1,4 +1,8 @@
-"""Own one lazy llama.cpp Clef process, shared across decision clients."""
+"""Own one lazy llama.cpp Clef process, shared across decision clients.
+
+server は起動したプロセスが所有する。正常時は ``_LocalRuntime`` が停止と回収を行い、
+所有プロセスの異常終了時は ``process_lifetime`` の仕掛けで OS が停止させる。
+"""
 
 from __future__ import annotations
 
@@ -18,7 +22,10 @@ from pathlib import Path
 
 import httpx
 
+from .process_lifetime import LAUNCH_FAILED, ProcessLifetimeError, spawn_owned
 from .types import DecisionErrorCode
+
+_COULD_NOT_START = "Local Clef server could not start. Check the executable and its runtime dependencies."
 
 
 class LocalRuntimeError(RuntimeError):
@@ -69,7 +76,7 @@ class _LocalRuntime:
                 port = listener.getsockname()[1]
             self.base_url = f"http://127.0.0.1:{port}"
             settings = self.settings
-            self.process = subprocess.Popen(
+            self.process = spawn_owned(
                 [
                     str(settings.server_path),
                     "-m",
@@ -103,11 +110,6 @@ class _LocalRuntime:
                     *(["--device", "none", "--no-mmproj-offload"] if settings.n_gpu_layers == 0 else []),
                 ],
                 cwd=settings.server_path.parent,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                shell=False,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 env={
                     key: value
                     for key, value in os.environ.items()
@@ -116,12 +118,15 @@ class _LocalRuntime:
             )
             self._wait_ready(started + timeout)
             self.ready = True
-        except OSError:
+        except ProcessLifetimeError:
             self.close()
             raise LocalRuntimeError(
-                "Local Clef server could not start. Check the executable and its runtime dependencies.",
+                "Local Clef server could not be tied to this application's lifetime, so it was not started.",
                 DecisionErrorCode.CONFIGURATION,
             ) from None
+        except OSError:
+            self.close()
+            raise LocalRuntimeError(_COULD_NOT_START, DecisionErrorCode.CONFIGURATION) from None
         except BaseException:
             self.close()
             raise
@@ -151,7 +156,10 @@ class _LocalRuntime:
         assert self.process is not None
         with httpx.Client(trust_env=False, follow_redirects=False) as client:
             while time.monotonic() < deadline:
-                if self.process.poll() is not None:
+                returncode = self.process.poll()
+                if returncode == LAUNCH_FAILED:
+                    raise LocalRuntimeError(_COULD_NOT_START, DecisionErrorCode.CONFIGURATION)
+                if returncode is not None:
                     raise LocalRuntimeError(
                         "Local Clef server exited during startup. Check model/projector compatibility "
                         "and available memory.",
