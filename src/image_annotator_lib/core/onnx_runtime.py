@@ -18,6 +18,16 @@ from .utils import logger
 CUDA_PROVIDER = "CUDAExecutionProvider"
 CPU_PROVIDER = "CPUExecutionProvider"
 
+DEFAULT_INFERENCE_BATCH_SIZE = 8
+"""ONNX 系の 1 回の ``session.run`` に渡す画像数の既定値 (モデル設定 ``inference_batch_size`` で上書き)。
+
+TensorFlow 系 (ADR 0013) の既定と同じ値で、同じ設定キーを共有する。動的 batch 軸のモデルだけに効く。
+WD タガー (448x448x3, float32) の入力は 1 枚 約 2.4MB なので、8 枚でも入力は約 19MB。中間活性化の
+実測はしていない (GPU が無い環境で決めた値) ため、TensorFlow 系との揃えを根拠にした保守的な値で、
+VRAM / RAM の使用量は枚数に比例して増える。OOM する環境は ``inference_batch_size = 1`` で従来の
+1 枚ずつに戻せ、余裕のあるモデルだけ設定で上げる。
+"""
+
 
 class _SessionWithProviders(Protocol):
     """``onnxruntime.InferenceSession`` のうち本モジュールが使うメソッド。"""
