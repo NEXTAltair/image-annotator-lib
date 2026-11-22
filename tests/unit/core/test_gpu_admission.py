@@ -132,6 +132,12 @@ def move_components(components, device):
 def backend_factory(monkeypatch):
     """Only fake native allocations, tensor moves and hardware probes."""
     monkeypatch.setattr("image_annotator_lib.core.utils.determine_effective_device", lambda d, n: d)
+    # Issue #175: ONNX の実行先は onnxruntime の provider 一覧でも判定する。CPU 版 onnxruntime の
+    # 環境でも CUDA 経路を検証できるよう、ハードウェア調査としてここで固定する。
+    monkeypatch.setattr(
+        "image_annotator_lib.core.onnx_runtime.available_onnx_providers",
+        lambda: ["CUDAExecutionProvider", "CPUExecutionProvider"],
+    )
     monkeypatch.setattr("torch.cuda.current_device", lambda: 0)
     monkeypatch.setattr("torch.cuda.mem_get_info", lambda device: (16 * 1024**3, 16 * 1024**3))
     monkeypatch.setattr("torch.cuda.memory_reserved", lambda device: 0)

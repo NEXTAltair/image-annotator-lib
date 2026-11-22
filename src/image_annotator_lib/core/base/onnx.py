@@ -8,6 +8,7 @@ from PIL import Image
 
 # --- ローカルインポート ---
 from ...exceptions.errors import OutOfMemoryError
+from .. import onnx_runtime
 from ..model_factory import ModelLoad
 from ..types import ONNXComponents, RatingPrediction, TaskCapability, UnifiedAnnotationResult
 from ..utils import logger
@@ -23,10 +24,12 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
 
     def __init__(self, model_name: str):
         super().__init__(model_name=model_name)
-        # device 判定はローカル ML 系 base class の責務 (Issue #35 で BaseAnnotator から移譲)
-        from ..utils import determine_effective_device
-
-        self.device = determine_effective_device(self._config.device, self.model_name)
+        # device 判定はローカル ML 系 base class の責務 (Issue #35 で BaseAnnotator から移譲)。
+        # Issue #175: PyTorch の CUDA 可用性に加え、onnxruntime が CUDA EP を提供するかで判定する。
+        self.requested_device = self._config.device
+        self.device = onnx_runtime.determine_onnx_device(self._config.device, self.model_name)
+        # ロード後に session.get_providers() から決める実際の実行先 (ロード前は None)。
+        self.execution_device: str | None = None
         self.all_tags: list[str] = []
         self.target_size: tuple[int, int] | None = None
         self.is_nchw_expected: bool = False
@@ -66,6 +69,7 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
                 raise RuntimeError(f"ONNX モデル '{self.model_name}' のロードに失敗しました。")
 
             self.components = loaded
+            self.execution_device = onnx_runtime.session_execution_device(loaded["session"])
             self._load_tags()
             self._analyze_model_input_format()
             self._prepared = True
@@ -81,6 +85,16 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
             raise
 
         return self
+
+    def _sync_execution_device(self, session: Any) -> None:
+        """推論後に session の provider を読み直し、実行先と状態台帳を実際に合わせる (Issue #175)。"""
+        previous = self.execution_device
+        actual = onnx_runtime.follow_session_providers(self.model_name, session, previous)
+        if actual == previous:
+            return
+        self.execution_device = actual
+        if previous is not None and ModelLoad._get_model_state(self.model_name):
+            ModelLoad._update_model_state(self.model_name, actual, "loaded")
 
     def _load_components(self) -> ONNXComponents | None:
         """`ModelLoad.load_onnx_components` を本クラスの設定で呼ぶ薄いヘルパー。"""
@@ -464,6 +478,7 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
         for input_data in processed:
             try:
                 raw_output = session.run([output_name], {input_name: input_data})
+                self._sync_execution_device(session)
                 results.append(raw_output[0])
             except Exception as e:
                 if "Failed to allocate memory" in str(e) or "out of memory" in str(e).lower():
@@ -489,6 +504,8 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
         result_list = []
         for raw_output in raw_outputs:
             formatted = self._format_predictions_single(raw_output)
+            # Issue #175: 要求ではなく session の provider から決めた実際の実行先を結果に載せる。
+            formatted.execution_device = self.execution_device
             result_list.append(formatted)
         return result_list
 

@@ -11,16 +11,29 @@ from __future__ import annotations
 
 import gc
 from pathlib import Path
-from typing import Any, override
+from typing import Any, cast, override
 
-from .. import utils
-from ..types import ONNXComponents
+from .. import onnx_runtime, utils
+from ..types import LoaderComponents, ONNXComponents
 from ..utils import logger
 from .loader_base import LoaderBase
 
 
 class ONNXLoader(LoaderBase):
     """ONNX モデルのローダー。"""
+
+    def __init__(self, model_name: str, device: str) -> None:
+        """ONNX ローダーを初期化する。
+
+        Issue #175: 実行先は PyTorch の CUDA 可用性だけでなく、onnxruntime が CUDA EP を
+        提供しているかでも判定する (CUDA EP が無ければ CUDA admission を行わない)。
+
+        Args:
+            model_name: モデルインスタンスの名前。
+            device: 要求されたデバイス (``cuda`` / ``cpu`` 等)。
+        """
+        self.model_name = model_name
+        self.device = onnx_runtime.determine_onnx_device(device, model_name)
 
     def _resolve_model_path_internal(
         self,
@@ -81,15 +94,27 @@ class ONNXLoader(LoaderBase):
             except ImportError:
                 logger.debug("torch not available for CUDA cache clearing")
 
-        providers = (
-            ["CUDAExecutionProvider", "CPUExecutionProvider"]
-            if self.device == "cuda" and "CUDAExecutionProvider" in ort.get_available_providers()
-            else ["CPUExecutionProvider"]
-        )
-        logger.debug(f"ONNX実行プロバイダー: {providers}")
+        providers = onnx_runtime.select_providers(self.device)
+        logger.debug(f"ONNX要求プロバイダー: {providers}")
 
         logger.info(f"ONNXモデル '{self.model_name}' ロード中: '{resolved_model_path}' on {providers}... ")
         session = ort.InferenceSession(str(resolved_model_path), providers=providers)
-        logger.info(f"ONNXモデル '{self.model_name}' ロード成功。")
+        # onnxruntime は CUDA EP を作れないと例外なしで CPU のみの session を返す。
+        # ログは要求ではなく session が実際に使う provider を出す。
+        logger.info(
+            f"ONNXモデル '{self.model_name}' ロード成功 (実際のプロバイダー: {session.get_providers()})。"
+        )
 
         return {"session": session, "csv_path": metadata_path, "metadata_path": metadata_path}
+
+    @override
+    def _resolve_execution_device(self, components: LoaderComponents) -> str:
+        """session.get_providers() から実際の実行先を決め、CPU フォールバックを警告する。"""
+        session = cast(ONNXComponents, components)["session"]
+        actual = onnx_runtime.session_execution_device(session)
+        if self.device.startswith("cuda") and actual != "cuda":
+            logger.warning(
+                f"ONNXモデル '{self.model_name}': {self.device} を要求しましたが、session は "
+                f"{session.get_providers()} で作成されたため CPU で実行されます。"
+            )
+        return actual

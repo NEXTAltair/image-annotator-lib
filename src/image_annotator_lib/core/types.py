@@ -307,7 +307,8 @@ class UnifiedAnnotationResult(BaseModel):
     provider_name: str | None = None
     framework: str | None = None
     # ADR 0013 (#172): バックエンド自身の判定による実際の実行先 ("cpu" / "cuda" / "cuda:N")。
-    # 現在は TensorFlow 系のみ設定する。default 付き = 非破壊追加。
+    # TensorFlow 系と ONNX 系が設定する (ONNX は Issue #175: session.get_providers() 基準)。
+    # default 付き = 非破壊追加。
     execution_device: str | None = None
     raw_output: dict[str, Any] | None = None
 
