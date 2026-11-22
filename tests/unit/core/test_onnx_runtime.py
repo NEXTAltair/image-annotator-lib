@@ -239,6 +239,31 @@ def test_annotator_with_unavailable_cuda_provider_starts_on_cpu(tagger_factory) 
 # --- rating ONNX --------------------------------------------------------------------
 
 
+def rating_annotator(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str, device: str = "cuda"
+) -> AnimeRatingAnnotator:
+    monkeypatch.setitem(
+        config_registry._merged_config_data,
+        name,
+        {
+            "class": "AnimeRatingAnnotator",
+            "model_path": str(tmp_path),
+            "device": device,
+            "estimated_size_gb": 0.1,
+            "capabilities": ["ratings"],
+        },
+    )
+    (tmp_path / "model.onnx").write_bytes(b"fake")
+    (tmp_path / "meta.json").write_text('{"labels": ["a", "b"]}', encoding="utf-8")
+    return AnimeRatingAnnotator(name)
+
+
+def rating_session(providers: list[str]) -> Mock:
+    session = fake_session(providers)
+    session.run.return_value = [np.array([[0.2, 0.8]], dtype=np.float32)]
+    return session
+
+
 @pytest.mark.parametrize(
     ("providers", "expected_state"),
     [([CPU], "on_cpu"), ([CUDA, CPU], "on_cuda")],
@@ -249,56 +274,102 @@ def test_rating_onnx_state_follows_session_providers(
 ) -> None:
     hardware.available = [CUDA, CPU]
     name = f"test-rating-{expected_state}"
-    monkeypatch.setitem(
-        config_registry._merged_config_data,
-        name,
-        {
-            "class": "AnimeRatingAnnotator",
-            "model_path": str(tmp_path),
-            "device": "cuda",
-            "estimated_size_gb": 0.1,
-            "capabilities": ["ratings"],
-        },
-    )
-    (tmp_path / "model.onnx").write_bytes(b"fake")
-    (tmp_path / "meta.json").write_text('{"labels": ["a", "b"]}', encoding="utf-8")
-    session = fake_session(providers)
-    session.run.return_value = [np.array([[0.2, 0.8]], dtype=np.float32)]
+    session = rating_session(providers)
 
     with patch("onnxruntime.InferenceSession", return_value=session):
-        annotator = AnimeRatingAnnotator(name)
-        with annotator:
+        annotator = rating_annotator(monkeypatch, tmp_path, name)
+        with patch.object(logger, "warning") as warning, annotator:
             assert ModelLoad._get_model_state(name) == expected_state
             result = annotator.predict([Image.new("RGB", (8, 8))])[0]
 
     assert result.execution_device == ("cuda" if expected_state == "on_cuda" else "cpu")
+    fallback_warnings = [c for c in warning.call_args_list if "CPU で実行されます" in c.args[0]]
+    assert len(fallback_warnings) == (1 if expected_state == "on_cpu" else 0)
 
 
 def test_rating_onnx_skips_cuda_admission_without_cuda_provider(
     hardware, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     hardware.available = [CPU]
-    name = "test-rating-nocuda"
-    monkeypatch.setitem(
-        config_registry._merged_config_data,
-        name,
-        {
-            "class": "AnimeRatingAnnotator",
-            "model_path": str(tmp_path),
-            "device": "cuda",
-            "estimated_size_gb": 0.1,
-            "capabilities": ["ratings"],
-        },
-    )
-    (tmp_path / "model.onnx").write_bytes(b"fake")
-    (tmp_path / "meta.json").write_text('{"labels": ["a", "b"]}', encoding="utf-8")
+    annotator = rating_annotator(monkeypatch, tmp_path, "test-rating-nocuda")
 
     with (
-        patch("onnxruntime.InferenceSession", return_value=fake_session([CPU])) as create,
+        patch("onnxruntime.InferenceSession", return_value=rating_session([CPU])) as create,
         patch.object(ModelLoad, "_make_cuda_room") as make_room,
     ):
-        with AnimeRatingAnnotator(name):
+        with annotator:
             pass
 
     make_room.assert_not_called()
     assert create.call_args.kwargs["providers"] == [CPU]
+
+
+def test_rating_onnx_requests_cuda_again_after_a_cpu_fallback(
+    hardware, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """一度 CPU に落ちても、同じ instance の次のロードは要求どおり CUDA を再度要求する。"""
+    hardware.available = [CUDA, CPU]
+    annotator = rating_annotator(monkeypatch, tmp_path, "test-rating-retry")
+    sessions = [rating_session([CPU]), rating_session([CUDA, CPU]), rating_session([CUDA, CPU])]
+    expected_states = ["on_cpu", "on_cuda", "on_cuda"]
+
+    with patch("onnxruntime.InferenceSession", side_effect=sessions) as create:
+        for expected in expected_states:
+            with annotator:
+                assert ModelLoad._get_model_state(annotator.model_name) == expected
+                assert annotator.predict([Image.new("RGB", (8, 8))])[0].execution_device == (
+                    "cpu" if expected == "on_cpu" else "cuda"
+                )
+
+    assert [c.kwargs["providers"] for c in create.call_args_list] == [[CUDA, CPU]] * 3
+    assert annotator.device == "cuda"
+
+
+# --- 推論中の実行先の変化 -----------------------------------------------------------------
+
+
+def cpu_fallback_on_run(session: Mock, output: np.ndarray) -> None:
+    """推論中に ORT が EP の失敗で CPU へ切り替わる (Session.run が set_providers([CPU]))。"""
+
+    def run(*args, **kwargs):
+        session.get_providers.return_value = [CPU]
+        return [output]
+
+    session.run.side_effect = run
+
+
+def fallback_warnings(warning: Mock) -> list[str]:
+    return [c.args[0] for c in warning.call_args_list if "CPU" in c.args[0] and "推論中" in c.args[0]]
+
+
+def test_tagger_follows_provider_change_during_inference(tagger_factory) -> None:
+    annotator = tagger_factory("test-onnx-runtime-fallback", [CUDA, CPU], [CUDA, CPU])
+    images = [Image.new("RGB", (8, 8)), Image.new("RGB", (8, 8))]
+
+    with patch.object(logger, "warning") as warning, annotator:
+        assert ModelLoad._get_model_state(annotator.model_name) == "on_cuda"
+        cpu_fallback_on_run(annotator.components["session"], np.array([[0.9]], dtype=np.float32))
+        results = annotator.predict(images)
+        assert ModelLoad._get_model_state(annotator.model_name) == "on_cpu"
+
+    assert [r.execution_device for r in results] == ["cpu", "cpu"]
+    assert len(fallback_warnings(warning)) == 1
+
+
+def test_rating_follows_provider_change_during_inference(
+    hardware, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    hardware.available = [CUDA, CPU]
+    session = rating_session([CUDA, CPU])
+    cpu_fallback_on_run(session, np.array([[0.2, 0.8]], dtype=np.float32))
+    annotator = rating_annotator(monkeypatch, tmp_path, "test-rating-runtime-fallback")
+
+    with patch("onnxruntime.InferenceSession", return_value=session):
+        with patch.object(logger, "warning") as warning, annotator:
+            assert ModelLoad._get_model_state(annotator.model_name) == "on_cuda"
+            first = annotator.predict([Image.new("RGB", (8, 8))])[0]
+            second = annotator.predict([Image.new("RGB", (8, 8))])[0]
+            assert ModelLoad._get_model_state(annotator.model_name) == "on_cpu"
+
+    assert first.execution_device == second.execution_device == "cpu"
+    assert len(fallback_warnings(warning)) == 1

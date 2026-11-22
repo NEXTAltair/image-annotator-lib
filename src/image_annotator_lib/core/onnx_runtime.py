@@ -84,3 +84,27 @@ def session_execution_device(session: _SessionWithProviders) -> str:
         session の provider に CUDA EP が含まれれば ``cuda``、それ以外は ``cpu``。
     """
     return "cuda" if CUDA_PROVIDER in session.get_providers() else "cpu"
+
+
+def follow_session_providers(model_name: str, session: _SessionWithProviders, current: str | None) -> str:
+    """推論後に session の provider を読み直し、実行先が CPU へ変わっていれば警告する。
+
+    onnxruntime の ``Session.run`` は、EP の実行失敗時に provider を CPU へ切り替える
+    (``set_providers``)。ロード直後の実行先が推論中に変わり得るため、推論のたびに読み直す。
+    警告は CUDA から CPU へ遷移したときだけ出す (``current`` が更新されるので繰り返さない)。
+
+    Args:
+        model_name: ログ用のモデル名。
+        session: 推論に使った ``InferenceSession``。
+        current: 直前に記録していた実行先。未確定なら None。
+
+    Returns:
+        現在の実行先 (``cuda`` / ``cpu``)。
+    """
+    actual = session_execution_device(session)
+    if current == "cuda" and actual != "cuda":
+        logger.warning(
+            f"ONNXモデル '{model_name}': 推論中に session の provider が {session.get_providers()} へ"
+            " 切り替わったため、以降は CPU で実行されます。"
+        )
+    return actual

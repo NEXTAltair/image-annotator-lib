@@ -9,7 +9,7 @@ onnxruntime と onnxruntime-gpu のように同じ配置先へファイルを書
     python tools/verify_distribution_record.py onnxruntime-gpu
     python tools/verify_distribution_record.py onnxruntime
 
-終了コード: 0=完全 / 1=不一致・欠落あり / 2=未インストール・引数不正。
+終了コード: 0=完全 / 1=不一致・欠落・RECORD なし・照合対象なし / 2=未インストール・引数不正。
 """
 
 from __future__ import annotations
@@ -30,13 +30,15 @@ def _record_digest(path: str, algorithm: str) -> str:
     return base64.urlsafe_b64encode(digest.digest()).rstrip(b"=").decode("ascii")
 
 
-def _hashed_entries(distribution: metadata.Distribution) -> list[tuple[str, str, str]]:
-    """RECORD から (相対パス, hash 方式, hash 値) を読む。
+def _hashed_entries(distribution: metadata.Distribution) -> list[tuple[str, str, str]] | None:
+    """RECORD から (相対パス, hash 方式, hash 値) を読む。RECORD が無ければ None。
 
     ``Distribution.files`` は存在しないファイルを黙って除外する (Python 3.13 で確認)。削除された
     ファイルこそ検出したいので、RECORD を直接読む。
     """
-    text = distribution.read_text("RECORD") or ""
+    text = distribution.read_text("RECORD")
+    if text is None:
+        return None
     entries = []
     for row in csv.reader(io.StringIO(text)):
         if len(row) >= 2 and "=" in row[1]:
@@ -46,16 +48,26 @@ def _hashed_entries(distribution: metadata.Distribution) -> list[tuple[str, str,
 
 
 def verify_distribution(distribution: metadata.Distribution) -> list[str]:
-    """RECORD に hash がある全ファイルを照合し、問題のあるファイルの説明を返す。
+    """RECORD に hash がある全ファイルを照合し、問題の説明を返す。
+
+    照合できなかった場合 (RECORD が無い・hash 付きの項目が 0 件) も問題として返す。
+    何も検証していないのに「問題なし」とは扱わない。
 
     Args:
         distribution: 検証する distribution。
 
     Returns:
-        ``missing: <path>`` または ``mismatch: <path>`` の一覧。空なら完全。
+        ``missing: <path>`` / ``mismatch: <path>`` / ``no RECORD: <name>`` /
+        ``no hashed entries in RECORD: <name>`` の一覧。空なら完全。
     """
+    name = distribution.metadata["Name"]
+    entries = _hashed_entries(distribution)
+    if entries is None:
+        return [f"no RECORD: {name}"]
+    if not entries:
+        return [f"no hashed entries in RECORD: {name}"]
     problems: list[str] = []
-    for relative, mode, value in _hashed_entries(distribution):
+    for relative, mode, value in entries:
         located = str(distribution.locate_file(relative))
         try:
             actual = _record_digest(located, mode)
@@ -79,7 +91,7 @@ def main(argv: list[str]) -> int:
     problems = verify_distribution(distribution)
     for problem in problems:
         print(problem)
-    checked = len(_hashed_entries(distribution))
+    checked = len(_hashed_entries(distribution) or [])
     print(f"{argv[0]} {distribution.version}: {checked} files checked, {len(problems)} problems")
     return 1 if problems else 0
 

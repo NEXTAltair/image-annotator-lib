@@ -56,14 +56,20 @@ def _pyproject_requirements() -> list[tuple[str, str | None]]:
     return entries
 
 
-def _lock_dependents() -> list[tuple[str, str | None]]:
-    """uv.lock の全 package のうち、ONNX Runtime に依存する宣言から (名前, marker) を集める。"""
-    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
-    entries = []
+def _dependents_from_lock(lock: dict) -> list[tuple[str, str | None]]:
+    """uv.lock の全 package の依存宣言 (本体・optional・dev) から (名前, marker) を集める。"""
+    entries: list[tuple[str, str | None]] = []
     for package in lock["package"]:
-        for dependency in package.get("dependencies", []):
-            entries.append((dependency["name"], dependency.get("marker")))
+        declared = list(package.get("dependencies", []))
+        for group_key in ("optional-dependencies", "dev-dependencies"):
+            for group in package.get(group_key, {}).values():
+                declared.extend(group)
+        entries.extend((dependency["name"], dependency.get("marker")) for dependency in declared)
     return entries
+
+
+def _lock_dependents() -> list[tuple[str, str | None]]:
+    return _dependents_from_lock(tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8")))
 
 
 @pytest.mark.parametrize("platform", list(PLATFORMS))
@@ -84,7 +90,7 @@ def test_pyproject_selects_gpu_distribution_except_on_macos() -> None:
 
 @pytest.mark.parametrize("platform", list(PLATFORMS))
 def test_lockfile_selects_exactly_one_onnxruntime_distribution(platform: str) -> None:
-    """uv.lock の依存宣言 (推移的依存を含む全 package) でも片方だけが選ばれる。"""
+    """uv.lock の依存宣言 (推移的依存・optional・dev を含む全 package) でも片方だけが選ばれる。"""
     selected = _selected(_lock_dependents(), platform)
 
     assert len(selected) == 1, f"{platform}: {selected}"
@@ -107,3 +113,19 @@ def test_selector_detects_the_pre_fix_definition() -> None:
 
     assert _selected(pre_fix, "windows") == [CPU_DISTRIBUTION, GPU_DISTRIBUTION]
     assert _selected(pre_fix, "macos") == [CPU_DISTRIBUTION]
+
+
+@pytest.mark.parametrize("group_key", ["optional-dependencies", "dev-dependencies"])
+def test_lock_scan_detects_onnxruntime_declared_through_optional_or_dev_groups(group_key: str) -> None:
+    """extra / dev グループ経由の CPU 版宣言も、排他性の検証が拾うこと。"""
+    lock = {
+        "package": [
+            {
+                "name": "app",
+                "dependencies": [{"name": GPU_DISTRIBUTION, "marker": "sys_platform != 'darwin'"}],
+                group_key: {"extra": [{"name": CPU_DISTRIBUTION}]},
+            }
+        ]
+    }
+
+    assert _selected(_dependents_from_lock(lock), "linux") == [CPU_DISTRIBUTION, GPU_DISTRIBUTION]

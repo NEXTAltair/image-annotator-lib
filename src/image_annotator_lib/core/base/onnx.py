@@ -86,6 +86,16 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
 
         return self
 
+    def _sync_execution_device(self, session: Any) -> None:
+        """推論後に session の provider を読み直し、実行先と状態台帳を実際に合わせる (Issue #175)。"""
+        previous = self.execution_device
+        actual = onnx_runtime.follow_session_providers(self.model_name, session, previous)
+        if actual == previous:
+            return
+        self.execution_device = actual
+        if previous is not None and ModelLoad._get_model_state(self.model_name):
+            ModelLoad._update_model_state(self.model_name, actual, "loaded")
+
     def _load_components(self) -> ONNXComponents | None:
         """`ModelLoad.load_onnx_components` を本クラスの設定で呼ぶ薄いヘルパー。"""
         return ModelLoad.load_onnx_components(
@@ -468,6 +478,7 @@ class ONNXBaseAnnotator(LocalModelAnnotator):
         for input_data in processed:
             try:
                 raw_output = session.run([output_name], {input_name: input_data})
+                self._sync_execution_device(session)
                 results.append(raw_output[0])
             except Exception as e:
                 if "Failed to allocate memory" in str(e) or "out of memory" in str(e).lower():

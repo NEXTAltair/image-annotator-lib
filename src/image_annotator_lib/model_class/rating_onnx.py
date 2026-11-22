@@ -71,7 +71,8 @@ class AnimeRatingAnnotator(LocalModelAnnotator):
                 f"Anime rating ONNX model '{self.model_name}': {self.device} を要求しましたが、session は "
                 f"{session.get_providers()} で作成されたため CPU で実行されます。"
             )
-        self.device = actual_device
+        # self.device は要求側のまま保持する。上書きすると、一度 CPU に落ちた instance が
+        # 次のロードから CUDA を要求しなくなる。
         self.execution_device = actual_device
         self.labels = self._load_labels(meta_path)
         self.components = {
@@ -80,8 +81,18 @@ class AnimeRatingAnnotator(LocalModelAnnotator):
             "meta_path": meta_path,
         }
         self._prepared = True
-        ModelLoad._update_model_state(self.model_name, self.device, "loaded", size_mb)
+        ModelLoad._update_model_state(self.model_name, actual_device, "loaded", size_mb)
         return self
+
+    def _sync_execution_device(self, session: Any) -> None:
+        """推論後に session の provider を読み直し、実行先と状態台帳を実際に合わせる (Issue #175)。"""
+        previous = self.execution_device
+        actual = onnx_runtime.follow_session_providers(self.model_name, session, previous)
+        if actual == previous:
+            return
+        self.execution_device = actual
+        if previous is not None and ModelLoad._get_model_state(self.model_name):
+            ModelLoad._update_model_state(self.model_name, actual, "loaded")
 
     @local_model_exit
     def __exit__(
@@ -136,7 +147,9 @@ class AnimeRatingAnnotator(LocalModelAnnotator):
         input_name = session.get_inputs()[0].name
         output_name = session.get_outputs()[0].name
         try:
-            return cast(np.ndarray, session.run([output_name], {input_name: processed})[0])
+            output = cast(np.ndarray, session.run([output_name], {input_name: processed})[0])
+            self._sync_execution_device(session)
+            return output
         except Exception as error:
             if "failed to allocate memory" in str(error).lower() or "out of memory" in str(error).lower():
                 self._discard_components()

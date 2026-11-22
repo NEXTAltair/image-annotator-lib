@@ -22,8 +22,9 @@ depends_on: [onnxruntime, onnxruntime-gpu, uv]
 
 次のいずれかなら混在を疑う。
 
-- ログに `ONNX要求プロバイダー: ['CUDAExecutionProvider', ...]` の後で
-  `session は [...'CPUExecutionProvider'] で作成されたため CPU で実行されます` と出る
+- ログに WARNING として
+  `ONNXモデル '...': cuda を要求しましたが、session は ['CPUExecutionProvider'] で作成されたため CPU で実行されます`
+  が出る (INFO のロード成功ログにも `実際のプロバイダー: [...]` が出る。要求した provider のログは DEBUG のみ)
 - `onnxruntime.get_available_providers()` に `CUDAExecutionProvider` が無いのに、`onnxruntime-gpu` が入っている
 
 対象環境の Python で、両 distribution の有無と provider 一覧を確認する。
@@ -54,35 +55,59 @@ uv pip list --python .venv\Scripts\python.exe | Select-String onnxruntime
 
 ## 3. 修復
 
-共有の開発 venv に対しては、並列で他の `uv` 操作を走らせない (`uv sync` / `uv pip` は直列で実行する)。
+**共有の開発 venv では実行しない。** 先に手順を使い捨ての venv で確認し、その後で対象の環境に適用する。
+並列で他の `uv` 操作を走らせない (`uv sync` / `uv pip` は直列で実行する)。
 Windows では、アプリ (GUI) が `onnxruntime` の `.pyd` を掴んでいると削除に失敗して中途半端な状態になる。
 アプリと、同じ venv を使うすべての Python プロセスを終了してから行う。
 
 残す distribution は、このライブラリの依存定義に合わせる (macOS は `onnxruntime`、それ以外は `onnxruntime-gpu`)。
+どの場合も最初に、両方の distribution を削除する (片方だけ消さない。手順 2)。
 
 ```bash
-# Linux: 両方を削除し、残す版を入れ直す
+# Linux
 uv pip uninstall --python .venv/bin/python onnxruntime onnxruntime-gpu
-uv pip install --python .venv/bin/python --reinstall "onnxruntime-gpu>=1.16.0"
 ```
 
 ```powershell
 # Windows PowerShell
 uv pip uninstall --python .venv\Scripts\python.exe onnxruntime onnxruntime-gpu
-uv pip install --python .venv\Scripts\python.exe --reinstall "onnxruntime-gpu>=1.16.0"
 ```
 
-LoRAIro のように lockfile 管理の環境では、両方を `uv pip uninstall` した後に `uv sync --dev` で
-lockfile どおりの版に戻す。`uv sync` だけでは、メタデータ上は入っているように見える片方のファイルが
-欠けていても再導入されないことがあるため、先に両方を削除する。
+### lockfile 管理の環境 (LoRAIro など): `uv sync` を使う
 
-`pip` を使う環境は `python -m pip uninstall -y onnxruntime onnxruntime-gpu` の後に
-`python -m pip install --force-reinstall onnxruntime-gpu` とする。
+両方を削除した後、lockfile どおりの版を入れ直す。lockfile は更新しない (`--frozen`)。
+
+```bash
+uv sync --frozen --dev
+```
+
+`uv sync` は、メタデータ上は入っているように見える distribution のファイルが欠けていても再導入しない
+ことがある。そのため、先に両方を削除してから同期する。
+
+### lockfile の無い環境: 残す distribution だけを `--reinstall-package` で入れ直す
+
+版は、削除前に `uv pip list` で確認した現在の版に固定する。
+
+```bash
+# Linux
+uv pip install --python .venv/bin/python --reinstall-package onnxruntime-gpu "onnxruntime-gpu==<現在の版>"
+```
+
+```powershell
+# Windows PowerShell
+uv pip install --python .venv\Scripts\python.exe --reinstall-package onnxruntime-gpu "onnxruntime-gpu==<現在の版>"
+```
+
+`--reinstall` (package 指定なし) は使わない。解決した全 package を再導入し、無関係な依存まで最新へ
+上げてしまう (使い捨て venv で、`--reinstall` が `unrelated` を 1.0 から 2.0 へ上げ、`--reinstall-package` は
+上げないことを確認した)。`pip` の場合も、依存を動かさないよう
+`python -m pip install --force-reinstall --no-deps "onnxruntime-gpu==<現在の版>"` とする (pip の手順は未検証)。
 
 ## 4. 完全性の検証
 
 `tools/verify_distribution_record.py` は、distribution の RECORD に記録された hash と実ファイルを照合する
-(標準ライブラリのみ)。検証したい環境の Python で実行する。
+(標準ライブラリのみ)。検証したい環境の Python で実行する。以下のパスは、image-annotator-lib の
+リポジトリ直下から実行する前提である。
 
 ```bash
 .venv/bin/python tools/verify_distribution_record.py onnxruntime-gpu
@@ -92,7 +117,18 @@ lockfile どおりの版に戻す。`uv sync` だけでは、メタデータ上�
 .venv\Scripts\python.exe tools\verify_distribution_record.py onnxruntime-gpu
 ```
 
-- 終了コード 0 かつ `0 problems` なら、RECORD の全ファイルが一致している
+LoRAIro のリポジトリ直下から実行する場合は、サブモジュール内のスクリプトを指定する。
+
+```bash
+.venv/bin/python local_packages/image-annotator-lib/tools/verify_distribution_record.py onnxruntime-gpu
+```
+
+```powershell
+.venv\Scripts\python.exe local_packages\image-annotator-lib\tools\verify_distribution_record.py onnxruntime-gpu
+```
+
+- 終了コード 0 かつ `0 problems` なら、RECORD の全ファイルが一致している。RECORD が無い、または hash 付きの項目が
+  0 件で照合できなかった場合は、問題ありとして終了コード 1 になる
 - `missing:` は他方の uninstall でファイルが消えた状態、`mismatch:` は他方に上書きされた状態。手順 3 をやり直す
 - もう片方 (例: `onnxruntime`) が `not installed` (終了コード 2) になっていることも確認する
 
@@ -107,7 +143,9 @@ CUDA / cuDNN の互換が要るため、GPU のある環境で別途確認する
 ## 検証した範囲
 
 - 同じパスに別内容のファイルを置く 2 つの distribution を使い捨て venv に導入し、上記の症状
-  (後から入れた方が勝つ、片方の削除だけで他方の共有ファイルが消える) と、手順 3・4 で完全に戻ることを
-  Linux で確認した。実物の onnxruntime の wheel での再現は行っていない。
+  (後から入れた方が勝つ、片方の削除だけで他方の共有ファイルが消える) と、両方を削除してから
+  `--reinstall-package` で入れ直すと完全に戻ることを Linux で確認した。実物の onnxruntime の wheel での
+  再現は行っていない。
+- `uv sync --frozen --dev` による復旧と、`pip` の手順は実行していない (共有の lockfile・環境に触れるため)。
 - Windows PowerShell のコマンドは、パス区切りとインタプリタの場所以外は Linux と同じ操作である。
   Windows 上での実行は、確認 Issue に分離した実機確認で行う。
