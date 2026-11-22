@@ -15,11 +15,12 @@ import sys
 import threading
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 import pytest
 
+from image_annotator_lib.decisions import process_lifetime
 from image_annotator_lib.decisions import runtime as runtime_module
 from image_annotator_lib.decisions.runtime import LocalRuntimeError, RuntimeSettings
 from image_annotator_lib.decisions.types import DecisionErrorCode
@@ -322,6 +323,119 @@ module.shutdown_local_runtime()
         timeout=90,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_owner_that_execs_while_the_server_starts_leaves_no_server(
+    settings: RuntimeSettings, records: Path, tmp_path: Path
+) -> None:
+    # 所有プロセスが launcher の起動中に exec する。PID が変わらないので親 PID の検査では見分けられない。
+    script = """
+import os, sys, threading, time
+from pathlib import Path
+{imports}
+settings = module.RuntimeSettings(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[2]), "clef-flash", 0, 4096, ())
+def start():
+    try:
+        with module.runtime_session(settings, 20):
+            pass
+    except module.LocalRuntimeError:
+        pass
+if sys.argv[3] == "after-start":
+    start()  # 起動が返った直後に exec する。
+else:
+    threading.Thread(target=start, daemon=True).start()
+    time.sleep(float(sys.argv[3]))
+os.execv(sys.executable, [sys.executable, "-c", "import time; time.sleep(60)"])
+"""
+    owners = []
+    try:
+        # 起動開始から exec までの間隔を launcher の起動時間 (数十 ms) の前後に散らし、同時に走らせる。
+        for index in range(40):
+            owners.append(
+                subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-c",
+                        script.replace("{imports}", _IMPORT_RUNTIME),
+                        str(settings.server_path),
+                        str(settings.model_path),
+                        "after-start" if index % 10 == 9 else str((index % 10) * 0.01),
+                    ],
+                    env={**os.environ, "TMPDIR": str(tmp_path)},
+                )
+            )
+        time.sleep(4)  # 遅れて exec される server も記録されるまで待つ。
+        started = sorted(records.glob("*.json"))
+        assert started, "no server was started, so the race was not exercised"
+        watched: list[int] = []
+        try:
+            for path in started:
+                with suppress(ProcessLookupError):  # 既に回収された server は監視不要。
+                    watched.append(os.pidfd_open(int(json.loads(path.read_text(encoding="utf-8"))["pid"])))
+            deadline = time.monotonic() + 10
+            pending = list(watched)
+            while pending and (remaining := deadline - time.monotonic()) > 0:
+                ready = select.select(pending, [], [], remaining)[0]
+                pending = [descriptor for descriptor in pending if descriptor not in ready]
+            survivors = len(pending)
+        finally:
+            for descriptor in watched:
+                if not _exited(descriptor, 0):
+                    signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                os.close(descriptor)
+        assert not survivors, f"{survivors} of {len(started)} servers outlived an owner that exec'd"
+    finally:
+        for owner in owners:
+            owner.kill()
+            owner.wait(10)
+
+
+def test_start_during_interpreter_finalization_fails_without_hanging(settings: RuntimeSettings) -> None:
+    # 終了処理の後半では import できないため、runtime ではなく起動部分を直接呼ぶ。
+    script = """
+import os, sys
+from pathlib import Path
+{imports}
+lifetime = sys.modules["image_annotator_lib.decisions.process_lifetime"]
+settings = module.RuntimeSettings(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[2]), "clef-flash", 0, 4096, ())
+with module.runtime_session(settings, 20):
+    pass  # 起動用スレッドを作っておく。
+
+class StartsAtFinalization:
+    def __del__(self):
+        try:
+            lifetime.spawn_owned(["/bin/true"], cwd=Path("/"), env={})
+            os.write(1, b"started")
+        except lifetime.ProcessLifetimeError:
+            os.write(1, b"refused")
+
+late = StartsAtFinalization()  # module の後始末 (sys.is_finalizing() が真) で __del__ が走る。
+"""
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            script.replace("{imports}", _IMPORT_RUNTIME),
+            str(settings.server_path),
+            str(settings.model_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert completed.stdout == "refused", (completed.stdout, completed.stderr)
+
+
+def test_launcher_failure_is_not_reported_as_a_model_problem(
+    settings: RuntimeSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(process_lifetime.sys, "executable", "/bin/false")
+    with pytest.raises(LocalRuntimeError) as caught:
+        with runtime_module.runtime_session(settings, 20):
+            pytest.fail("a server without a working launcher must not be used")
+    assert "model/projector" not in str(caught.value)
+    assert "could not be tied" in str(caught.value)
+    assert caught.value.code == DecisionErrorCode.CONFIGURATION
 
 
 @pytest.mark.parametrize("problem", ["not-executable", "invalid-format"])

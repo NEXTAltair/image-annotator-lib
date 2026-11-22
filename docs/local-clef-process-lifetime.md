@@ -18,7 +18,7 @@ depends_on: [psutil]
 | 場面 | 責任を持つもの | 動作 |
 | --- | --- | --- |
 | 設定変更・推論失敗・`shutdown_local_runtime()`・通常終了 | server を起動したプロセスの runtime | terminate、応答しなければ kill、回収、一時キー削除 |
-| 所有プロセスの強制終了・クラッシュ・`os._exit`・`exec` | OS | server を強制終了する。Python の後始末は走らない |
+| 所有プロセスの強制終了・クラッシュ・`os._exit`・`exec` | OS | server を強制終了する (OS ごとの例外は下記)。Python の後始末は走らない |
 | fork した子プロセス | 子自身が起動した server だけ | 親の server とキーには触れない。子の終了で親の server は止まらない |
 
 所有者は「プロセス」であり、判定を呼んだスレッドやクライアントではない。worker thread が終わっても
@@ -28,13 +28,17 @@ server は残り、次の判定で再利用される。LoRAIro などの利用�
 
 ### Linux
 
-- 短い Python の launcher が `PR_SET_PDEATHSIG(SIGKILL)` を設定し、親が生存していることを確かめてから
-  llama-server を exec する。PID は変わらない。
+- 短い Python の launcher が `PR_SET_PDEATHSIG(SIGKILL)` を設定し、設定済みを所有側の起動スレッドへ報告する。
+  起動スレッドの返信を受けてから llama-server を exec する。PID は変わらない。
+- 返信が届くのは、設定の時点で起動スレッドが生きていた場合だけである。所有プロセスが設定より前に
+  終了・exec した場合は返信が届かず (close-on-exec の pipe が閉じる)、server は起動しない。
 - この signal は子を作ったスレッドの終了で届く。そのため server は、プロセスの終了まで残る専用の
   daemon thread からだけ起動する。**このスレッドを終わらせたり、別のスレッドから直接起動したりしない。**
 - 届くのは server 本体だけで、server が作った孫プロセスには届かない。
 - set-user-ID、set-group-ID、capability 付きの実行ファイルでは kernel が設定を消すため、回収されない。
 - `sys.executable` が通常の Python であることを前提にする。
+- インタプリタの終了処理の後半 (`sys.is_finalizing()` が真) では起動スレッドが止まるため、起動せず
+  `configuration` エラーにする。
 
 ### Windows
 

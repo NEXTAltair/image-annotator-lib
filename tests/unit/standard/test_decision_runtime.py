@@ -66,9 +66,12 @@ def settings(tmp_path: Path) -> RuntimeSettings:
 
 @pytest.fixture(autouse=True)
 def isolate_runtime(monkeypatch: pytest.MonkeyPatch) -> Any:
+    # FakeProcess には結び付ける OS プロセスが無い。Job Object と launcher の報告は
+    # test_decision_process_lifetime.py と実プロセスのテストで検証する。
     if sys.platform == "win32":
-        # FakeProcess には登録先の OS プロセスが無い。Job Object の配線は専用のテストで検証する。
         monkeypatch.setattr(process_lifetime, "_spawn_in_job", lambda launch: launch(0x4))
+    if sys.platform == "linux":
+        monkeypatch.setattr(process_lifetime, "_confirm_launch", lambda go, report: None)
     runtime_module.shutdown_local_runtime()
     yield
     runtime_module.shutdown_local_runtime()
@@ -128,7 +131,8 @@ def test_runtime_launch_is_hidden_loopback_and_ready_before_use(
     assert len(calls) == 1 and len(requests) == 4
     args, kwargs = calls[0]
     if sys.platform == "linux":
-        launcher = process_lifetime._parent_bound_command([str(settings.server_path), "-m"])
+        go, report = kwargs["pass_fds"]
+        launcher = process_lifetime._parent_bound_command([str(settings.server_path), "-m"], go, report)
         assert args[: len(launcher)] == launcher
     else:
         assert args[:2] == [str(settings.server_path), "-m"]

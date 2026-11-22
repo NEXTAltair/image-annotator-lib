@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import ctypes
 import os
+import select
 import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -334,19 +336,76 @@ def test_owning_thread_start_failure_is_typed_and_can_be_retried(monkeypatch: py
 def test_missing_interpreter_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(process_lifetime.sys, "executable", "")
     with pytest.raises(process_lifetime.ProcessLifetimeError):
-        process_lifetime._parent_bound_command(["/bin/true"])
+        process_lifetime._parent_bound_command(["/bin/true"], 3, 4)
+
+
+def test_no_child_is_started_during_interpreter_finalization(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(process_lifetime.sys, "is_finalizing", lambda: True)
+    with pytest.raises(process_lifetime.ProcessLifetimeError):
+        process_lifetime._spawn_on_lasting_thread(lambda: pytest.fail("must not launch"))
+
+
+@pytest.mark.parametrize(
+    ("report", "expected"),
+    [
+        (b"", process_lifetime.ProcessLifetimeError),  # launcher が exec 前に異常終了した
+        (b"P", process_lifetime.ProcessLifetimeError),
+        (b"R", process_lifetime.ProcessLifetimeError),
+        (b"+E2", FileNotFoundError),
+        (b"+E13", PermissionError),
+        (b"+Ex", process_lifetime.ProcessLifetimeError),
+        (b"++", process_lifetime.ProcessLifetimeError),
+    ],
+)
+def test_launch_report_distinguishes_binding_from_executable_failures(
+    report: bytes, expected: type[BaseException]
+) -> None:
+    with pytest.raises(expected) as caught:
+        process_lifetime._check_launch_report(report)
+    assert type(caught.value) is expected or issubclass(type(caught.value), expected)
+    if expected is process_lifetime.ProcessLifetimeError:
+        assert type(caught.value) is process_lifetime.ProcessLifetimeError
+    process_lifetime._check_launch_report(b"+")
+
+
+def _run_bound(command: list[str], **options: Any) -> tuple[subprocess.Popen[bytes], bytes]:
+    """本番と同じ手順で launcher を起動し、標準出力を返す。"""
+    started: list[subprocess.Popen[bytes]] = []
+
+    def launch(args: Any, fds: Any) -> subprocess.Popen[bytes]:
+        started.append(subprocess.Popen(args, pass_fds=fds, stdout=subprocess.PIPE, **options))
+        return started[-1]
+
+    try:
+        process = process_lifetime._launch_parent_bound(command, launch)
+    except BaseException:
+        for child in started:
+            child.communicate(timeout=10)
+        raise
+    output, _ = process.communicate(timeout=10)
+    return process, output
 
 
 @linux_only
 @pytest.mark.parametrize("env", [{}, {"LANG": "C", "EXTRA": "a=b"}, {"LC_ALL": "C.UTF-8"}])
-def test_launcher_hands_over_the_same_environment_and_signals_as_a_direct_start(
+def test_launcher_hands_over_the_same_environment_signals_and_fds_as_a_direct_start(
     env: dict[str, str],
 ) -> None:
-    for command in (["/usr/bin/env", "-0"], ["/bin/grep", "-E", "^Sig(Ign|Blk)", "/proc/self/status"]):
-        direct = subprocess.run(command, capture_output=True, env=env, check=True, timeout=10)
-        bound = process_lifetime._parent_bound_command(command)
-        launched = subprocess.run(bound, capture_output=True, env=env, check=True, timeout=10)
-        assert sorted(launched.stdout.split(b"\0")) == sorted(direct.stdout.split(b"\0"))
+    # 直接起動の比較対象も pass_fds 付きにする。CPython は pass_fds の有無で起動経路を変え、
+    # 経路によって glibc 内部用 signal (32, 33) の無視が子に残る。launcher 由来の差だけを見る。
+    spare_read, spare_write = os.pipe()
+    commands = (
+        (["/usr/bin/env", "-0"], (spare_read,)),
+        (["/bin/grep", "-E", "^Sig(Ign|Blk)", "/proc/self/status"], (spare_read,)),
+        (["/bin/ls", "/proc/self/fd"], ()),
+    )
+    for command, fds in commands:
+        direct = subprocess.run(command, capture_output=True, env=env, check=True, timeout=10, pass_fds=fds)
+        process, output = _run_bound(command, env=env)
+        assert process.returncode == 0
+        assert sorted(output.split(b"\0")) == sorted(direct.stdout.split(b"\0"))
+    os.close(spare_read)
+    os.close(spare_write)
 
 
 @linux_only
@@ -355,25 +414,99 @@ def test_launcher_sets_sigkill_as_parent_death_signal_on_the_executed_program() 
         "import ctypes; value = ctypes.c_int(); "
         "assert ctypes.CDLL(None).prctl(2, ctypes.byref(value)) == 0; print(value.value)"
     )
-    command = process_lifetime._parent_bound_command([sys.executable, "-c", query])
-    completed = subprocess.run(command, capture_output=True, text=True, timeout=10)
-    assert completed.stdout.strip() == str(int(signal.SIGKILL)), completed.stderr
+    _, output = _run_bound([sys.executable, "-c", query])
+    assert output.strip() == str(int(signal.SIGKILL)).encode()
 
 
 @linux_only
-def test_launcher_does_not_run_the_program_when_the_owner_is_already_gone(tmp_path: Path) -> None:
+@pytest.mark.parametrize("owner", ["exited", "exec"])
+def test_launcher_does_not_run_the_program_when_the_owner_is_already_gone(
+    tmp_path: Path, owner: str
+) -> None:
     marker = tmp_path / "ran"
-    command = process_lifetime._parent_bound_command(["/usr/bin/touch", str(marker)])
-    owner = command.index(str(os.getpid()))
-    command[owner] = str(os.getppid())  # launcher の親ではない PID (付け替え後と同じ状態)。
-    completed = subprocess.run(command, capture_output=True, timeout=10)
-    assert completed.returncode == process_lifetime.LAUNCH_FAILED and not marker.exists()
+    go_read, go_write = os.pipe()
+    report_read, report_write = os.pipe()
+    command = process_lifetime._parent_bound_command(["/usr/bin/touch", str(marker)], go_read, report_write)
+    if owner == "exited":
+        command[5] = str(os.getppid())  # launcher の親ではない PID (付け替え後と同じ状態)。
+    else:
+        os.close(go_write)  # exec で close-on-exec の返信端が閉じ、返信が届かない状態。
+    with subprocess.Popen(command, pass_fds=(go_read, report_write)) as launcher:
+        for descriptor in (go_read, report_write):
+            os.close(descriptor)
+        report = process_lifetime._read_report(report_read, time.monotonic() + 10)
+        assert launcher.wait(10) == process_lifetime.LAUNCH_FAILED
+    os.close(report_read)
+    if owner == "exited":
+        os.close(go_write)
+    assert report == (b"P" if owner == "exited" else b"R")
+    assert not marker.exists()
+    with pytest.raises(process_lifetime.ProcessLifetimeError):
+        process_lifetime._check_launch_report(report)
+
+
+@linux_only
+def test_launcher_waits_for_the_owning_thread_before_executing(tmp_path: Path) -> None:
+    marker = tmp_path / "ran"
+    go_read, go_write = os.pipe()
+    report_read, report_write = os.pipe()
+    command = process_lifetime._parent_bound_command(["/usr/bin/touch", str(marker)], go_read, report_write)
+    with subprocess.Popen(command, pass_fds=(go_read, report_write)) as launcher:
+        for descriptor in (go_read, report_write):
+            os.close(descriptor)
+        assert process_lifetime._read_report(report_read, time.monotonic() + 10, until=b"R") == b"R"
+        assert not select.select([report_read], [], [], 0.3)[0], "exec must wait for the reply"
+        assert launcher.poll() is None and not marker.exists()
+        os.write(go_write, b"G")
+        os.close(go_write)
+        assert process_lifetime._read_report(report_read, time.monotonic() + 10) == b"+"
+        assert launcher.wait(10) == 0
+    os.close(report_read)
+    assert marker.exists()
+
+
+@linux_only
+@pytest.mark.parametrize("problem", ["missing", "not-executable"])
+def test_launcher_reports_why_the_program_could_not_be_executed(tmp_path: Path, problem: str) -> None:
+    program = tmp_path / "server"
+    if problem == "not-executable":
+        program.write_text("#!/bin/sh\n", encoding="utf-8")
+        program.chmod(0o600)
+    expected = FileNotFoundError if problem == "missing" else PermissionError
+    with pytest.raises(expected):
+        _run_bound([str(program)])
+
+
+@linux_only
+def test_launcher_that_dies_before_exec_is_a_binding_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(process_lifetime.sys, "executable", "/bin/false")
+    with pytest.raises(process_lifetime.ProcessLifetimeError):
+        _run_bound(["/bin/true"])
+
+
+@linux_only
+def test_silent_launcher_is_killed_after_the_report_deadline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    silent = tmp_path / "python"
+    silent.write_text("#!/bin/sh\nexec sleep 30\n", encoding="utf-8")
+    silent.chmod(0o700)
+    monkeypatch.setattr(process_lifetime.sys, "executable", str(silent))
+    monkeypatch.setattr(process_lifetime, "_LAUNCH_REPORT_TIMEOUT", 0.5)
+    started: list[subprocess.Popen[bytes]] = []
+
+    def launch(args: Any, fds: Any) -> subprocess.Popen[bytes]:
+        started.append(subprocess.Popen(args, pass_fds=fds))
+        return started[-1]
+
+    with pytest.raises(process_lifetime.ProcessLifetimeError):
+        process_lifetime._launch_parent_bound(["/bin/true"], launch)
+    assert started[0].returncode == -signal.SIGKILL
 
 
 @linux_only
 def test_launcher_never_imports_code_from_the_server_directory(tmp_path: Path) -> None:
-    for name in ("ctypes", "signal"):
+    for name in ("ctypes", "select", "signal"):
         (tmp_path / f"{name}.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
-    command = process_lifetime._parent_bound_command(["/bin/true"])
-    env = {**os.environ, "PYTHONPATH": str(tmp_path)}
-    assert subprocess.run(command, cwd=tmp_path, env=env, timeout=10).returncode == 0
+    process, _ = _run_bound(["/bin/true"], cwd=tmp_path, env={**os.environ, "PYTHONPATH": str(tmp_path)})
+    assert process.returncode == 0
