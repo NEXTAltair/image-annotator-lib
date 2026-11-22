@@ -510,3 +510,112 @@ def test_launcher_never_imports_code_from_the_server_directory(tmp_path: Path) -
         (tmp_path / f"{name}.py").write_text("raise SystemExit(3)\n", encoding="utf-8")
     process, _ = _run_bound(["/bin/true"], cwd=tmp_path, env={**os.environ, "PYTHONPATH": str(tmp_path)})
     assert process.returncode == 0
+
+
+class _DescriptorLedger:
+    """process_lifetime が作った pipe の記述子と、そのモジュールが行った close を記録する。"""
+
+    def __init__(self) -> None:
+        self.created: list[int] = []
+        self.closed: list[int] = []
+
+    def pipe(self) -> tuple[int, int]:
+        pair = os.pipe()
+        self.created.extend(pair)
+        return pair
+
+    def close(self, descriptor: int) -> None:
+        self.closed.append(descriptor)
+        os.close(descriptor)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(os, name)
+
+
+def _prepare_launch_path(
+    path: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> tuple[list[str], type[BaseException] | None]:
+    """経路ごとに launcher の状況を作り、起動する command と期待する例外を返す。"""
+    if path == "exec-failure":
+        return [str(tmp_path / "missing")], FileNotFoundError
+    if path == "launcher-dies":
+        monkeypatch.setattr(process_lifetime.sys, "executable", "/bin/false")
+        return ["/bin/true"], process_lifetime.ProcessLifetimeError
+    if path == "timeout":
+        silent = tmp_path / "python"
+        silent.write_text("#!/bin/sh\nexec sleep 30\n", encoding="utf-8")
+        silent.chmod(0o700)
+        monkeypatch.setattr(process_lifetime.sys, "executable", str(silent))
+        monkeypatch.setattr(process_lifetime, "_LAUNCH_REPORT_TIMEOUT", 0.5)
+        return ["/bin/true"], process_lifetime.ProcessLifetimeError
+    if path == "interrupt":
+        read_report = process_lifetime._read_report
+
+        def interrupted(descriptor: int, deadline: float, until: bytes | None = None) -> bytes:
+            read_report(descriptor, deadline, until)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(process_lifetime, "_read_report", interrupted)
+        return ["/bin/true"], KeyboardInterrupt
+    if path == "popen":
+        return ["/bin/true"], FileNotFoundError
+    return ["/bin/true"], None
+
+
+@linux_only
+@pytest.mark.parametrize(
+    "path", ["success", "exec-failure", "launcher-dies", "timeout", "interrupt", "popen"]
+)
+def test_each_launch_pipe_end_is_closed_exactly_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, path: str
+) -> None:
+    # 同じ番号を二度 close すると、間に別スレッドが開いた無関係な記述子を閉じてしまう。
+    ledger = _DescriptorLedger()
+    monkeypatch.setattr(process_lifetime, "os", ledger)
+    command, expected = _prepare_launch_path(path, monkeypatch, tmp_path)
+    started: list[subprocess.Popen[bytes]] = []
+
+    def launch(args: Any, fds: Any) -> subprocess.Popen[bytes]:
+        if path == "popen":
+            raise FileNotFoundError("python")
+        started.append(subprocess.Popen(args, pass_fds=fds))
+        return started[-1]
+
+    try:
+        if expected is None:
+            process_lifetime._launch_parent_bound(command, launch)
+        else:
+            with pytest.raises(expected):
+                process_lifetime._launch_parent_bound(command, launch)
+    finally:
+        for child in started:  # このテストが起動した launcher だけを止める。
+            if child.poll() is None:
+                child.kill()
+            child.wait(10)
+    assert len(ledger.created) == 4
+    assert sorted(ledger.closed) == sorted(ledger.created), ledger.closed
+
+
+@linux_only
+def test_spawn_succeeds_when_descriptor_numbers_exceed_select_limit(tmp_path: Path) -> None:
+    # select.select() は FD_SETSIZE (1024) 以上の記述子を扱えず ValueError になる。
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    needed = 1100
+    if soft < needed:
+        if hard != resource.RLIM_INFINITY and hard < needed:
+            pytest.skip(f"RLIMIT_NOFILE の hard limit ({hard}) が {needed} 未満")
+        resource.setrlimit(resource.RLIMIT_NOFILE, (needed, hard))
+    base = os.open(os.devnull, os.O_RDONLY)
+    held = [base]
+    try:
+        while held[-1] < 1030:
+            held.append(os.dup(base))
+        child = process_lifetime.spawn_owned(["/bin/true"], cwd=tmp_path, env={})
+        assert child.wait(10) == 0
+    finally:
+        for descriptor in held:
+            os.close(descriptor)
+        if soft < needed:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))

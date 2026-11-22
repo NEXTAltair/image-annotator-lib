@@ -19,7 +19,7 @@ from __future__ import annotations
 import ctypes
 import os
 import queue
-import select
+import selectors
 import subprocess
 import sys
 import threading
@@ -171,14 +171,21 @@ def _launch_parent_bound(
     呼び出し元のスレッドが launcher の親スレッドになる。
     """
     # 所有側の端は継承不可 (close-on-exec) なので、所有プロセスが終わるか exec すると閉じる。
-    go_read, go_write = os.pipe()
-    report_read, report_write = os.pipe()
+    # 4 つの端は全てこの関数だけが 1 度ずつ閉じる。閉じた番号は別スレッドに再利用され得るため、
+    # 他の関数に閉じさせず、閉じた後に同じ番号を再び閉じない。
+    descriptors: list[int] = []
     try:
+        go_read, go_write = os.pipe()
+        descriptors += (go_read, go_write)
+        report_read, report_write = os.pipe()
+        descriptors += (report_read, report_write)
         try:
             process = launch(_parent_bound_command(command, go_read, report_write), (go_read, report_write))
         finally:
-            os.close(go_read)
-            os.close(report_write)
+            # launcher 側の端。所有側が持ち続けると launcher の終了が EOF で伝わらない。
+            for descriptor in (go_read, report_write):
+                descriptors.remove(descriptor)
+                os.close(descriptor)
         try:
             _confirm_launch(go_write, report_read)
         except BaseException:
@@ -186,9 +193,8 @@ def _launch_parent_bound(
             raise
         return process
     finally:
-        os.close(report_read)
-        with suppress(OSError):  # _confirm_launch が閉じた後は EBADF。
-            os.close(go_write)
+        for descriptor in descriptors:
+            os.close(descriptor)
 
 
 def _confirm_launch(go: int, report: int) -> None:
@@ -201,22 +207,24 @@ def _confirm_launch(go: int, report: int) -> None:
         os.write(go, b"G")
     except BrokenPipeError:
         pass  # launcher は既に終了している。報告の残りで理由を判定する。
-    os.close(go)
     _check_launch_report(_read_report(report, deadline))
 
 
 def _read_report(descriptor: int, deadline: float, until: bytes | None = None) -> bytes:
     """pipe が閉じるか ``until`` を読むまで読む。"""
     received = b""
-    while (remaining := deadline - time.monotonic()) > 0:
-        if not select.select([descriptor], [], [], remaining)[0]:
-            continue
-        chunk = os.read(descriptor, 1 if until is not None else 64)
-        if not chunk:
-            return received
-        received += chunk
-        if until is not None and received.endswith(until):
-            return received
+    # select.select() は 1024 以上の番号を扱えないため、番号に上限の無い selectors を使う。
+    with selectors.DefaultSelector() as selector:
+        selector.register(descriptor, selectors.EVENT_READ)
+        while (remaining := deadline - time.monotonic()) > 0:
+            if not selector.select(remaining):
+                continue
+            chunk = os.read(descriptor, 1 if until is not None else 64)
+            if not chunk:
+                return received
+            received += chunk
+            if until is not None and received.endswith(until):
+                return received
     raise ProcessLifetimeError("launcher の応答がありません")
 
 
