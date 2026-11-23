@@ -427,6 +427,33 @@ def test_active_onnx_same_name_replacement_failure_preserves_original_session(on
     loads.assert_called_once_with()
 
 
+@pytest.mark.parametrize(
+    ("device", "cuda_available", "expected_calls"),
+    [
+        ("cuda:0", True, ["move:cpu", "empty_cache"]),
+        ("cuda", True, ["move:cpu", "empty_cache"]),
+        ("cuda:0", False, ["move:cpu"]),
+        ("mps", True, ["move:cpu"]),
+    ],
+)
+def test_cpu_offload_releases_unused_cuda_cache(monkeypatch, device, cuda_available, expected_calls):
+    calls = []
+    cuda = SimpleNamespace(
+        is_available=lambda: cuda_available,
+        empty_cache=lambda: calls.append("empty_cache"),
+    )
+    monkeypatch.setattr("torch.cuda", cuda)
+    monkeypatch.setattr(
+        ModelLoad, "_move_components_to_device", lambda components, device: calls.append(f"move:{device}")
+    )
+    ModelLoad._update_model_state("offload", device, "loaded")
+    components = {"model": object()}
+
+    assert ModelLoad.cache_to_main_memory("offload", components) is components
+    assert ModelLoad._get_model_state("offload") == "on_cpu"
+    assert calls == expected_calls
+
+
 def test_cpu_recache_counts_protected_model_as_replacement_once(monkeypatch):
     monkeypatch.setattr(ModelLoad, "_get_max_cache_size", classmethod(lambda cls: 2048.0))
     other_release = Mock()
