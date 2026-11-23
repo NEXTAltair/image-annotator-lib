@@ -138,6 +138,48 @@ def _server_pid(records: Path) -> int:
     raise AssertionError("the stand-in server did not start")
 
 
+def _wait_until_all_execed(
+    owners: list[subprocess.Popen[bytes]], argv: list[str], *, timeout: float
+) -> None:
+    """各 owner が ``argv`` に exec するか終了するまで待つ。
+
+    exec 前の owner の script にも exec 先の引数の文字列が含まれるので、部分一致ではなく
+    cmdline 全体の一致で判定する。
+    """
+    expected = b"".join(os.fsencode(arg) + b"\0" for arg in argv)
+    deadline = time.monotonic() + timeout
+    pending = list(owners)
+    while pending and time.monotonic() < deadline:
+        still = []
+        for owner in pending:
+            if owner.poll() is not None:
+                continue
+            try:
+                cmdline = Path(f"/proc/{owner.pid}/cmdline").read_bytes()
+            except FileNotFoundError:
+                continue
+            if cmdline != expected:
+                still.append(owner)
+        pending = still
+        if pending:
+            time.sleep(0.1)
+    assert not pending, f"{len(pending)} owners did not exec within {timeout} s"
+
+
+def _wait_until_records_settle(records: Path, *, quiet: float, timeout: float) -> None:
+    """server の記録数が quiet 秒間増えなくなるまで待つ。"""
+    deadline = time.monotonic() + timeout
+    count = len(list(records.glob("*.json")))
+    stable_since = time.monotonic()
+    while time.monotonic() < deadline:
+        time.sleep(0.2)
+        current = len(list(records.glob("*.json")))
+        if current != count:
+            count, stable_since = current, time.monotonic()
+        elif time.monotonic() - stable_since >= quiet:
+            return
+
+
 def _exited(descriptor: int, timeout: float) -> bool:
     # pidfd は終了時に読めるようになる。未回収の zombie でも判定できる。
     return bool(select.select([descriptor], [], [], timeout)[0])
@@ -364,7 +406,10 @@ os.execv(sys.executable, [sys.executable, "-c", "import time; time.sleep(60)"])
                     env={**os.environ, "TMPDIR": str(tmp_path)},
                 )
             )
-        time.sleep(4)  # 遅れて exec される server も記録されるまで待つ。
+        # 固定時間では負荷の高い CI で起動前に打ち切られる。全 owner が exec を終える (または終了する) まで待ち、
+        # その後、遅れて exec される server の記録が増えなくなるまで待つ。
+        _wait_until_all_execed(owners, [sys.executable, "-c", "import time; time.sleep(60)"], timeout=60)
+        _wait_until_records_settle(records, quiet=2, timeout=30)
         started = sorted(records.glob("*.json"))
         assert started, "no server was started, so the race was not exercised"
         watched: list[int] = []
