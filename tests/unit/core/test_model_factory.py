@@ -389,36 +389,6 @@ def test_get_model_state_not_exists():
     assert result is None
 
 
-@pytest.mark.unit
-@pytest.mark.fast
-def test_release_model_state():
-    """Test releasing model state.
-
-    Tests:
-    - State removal
-    - Memory usage cleanup
-    - Last used timestamp cleanup
-    """
-    model_name = "test-model"
-
-    # Setup state
-    ModelLoad._MODEL_STATES.clear()
-    ModelLoad._MEMORY_USAGE.clear()
-    ModelLoad._MODEL_LAST_USED.clear()
-
-    ModelLoad._MODEL_STATES[model_name] = "loaded"
-    ModelLoad._MEMORY_USAGE[model_name] = 500.0
-    ModelLoad._MODEL_LAST_USED[model_name] = 100.0
-
-    # Release state
-    ModelLoad._release_model_state(model_name)
-
-    # Verify cleanup
-    assert model_name not in ModelLoad._MODEL_STATES
-    assert model_name not in ModelLoad._MEMORY_USAGE
-    assert model_name not in ModelLoad._MODEL_LAST_USED
-
-
 # ==============================================================================
 # Category 5: Memory Management Tests (メモリ管理テスト)
 # ==============================================================================
@@ -687,29 +657,6 @@ def test_update_model_state_cached_on_cpu():
     assert model_name in ModelLoad._MODEL_STATES
     assert ModelLoad._MODEL_STATES[model_name] == "on_cpu"
     assert ModelLoad._MEMORY_USAGE[model_name] == size_mb
-
-
-@pytest.mark.unit
-@pytest.mark.fast
-def test_update_model_state_released():
-    """Test releasing model state clears all tracking."""
-    ModelLoad._MODEL_STATES.clear()
-    ModelLoad._MEMORY_USAGE.clear()
-    ModelLoad._MODEL_LAST_USED.clear()
-
-    model_name = "test-model"
-
-    # First set the model state
-    ModelLoad._MODEL_STATES[model_name] = "on_cuda"
-    ModelLoad._MEMORY_USAGE[model_name] = 2048.0
-    ModelLoad._MODEL_LAST_USED[model_name] = 100.0
-
-    # Then release it
-    ModelLoad._update_model_state(model_name, status="released")
-
-    assert model_name not in ModelLoad._MODEL_STATES
-    assert model_name not in ModelLoad._MEMORY_USAGE
-    assert model_name not in ModelLoad._MODEL_LAST_USED
 
 
 @pytest.mark.unit

@@ -3,7 +3,7 @@
 このモジュールでは、複数のテストファイルで使用される共通のfixtureを定義します。
 """
 
-# Import shared fixtures from fixtures module
+import gc
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -23,11 +23,18 @@ from PIL import Image
 tests_dir = Path(__file__).parent
 sys.path.insert(0, str(tests_dir))
 
-# Temporarily disable shared fixtures for testing
-# from unit.fixtures.mock_libraries import *
-# from unit.fixtures.mock_configs import *
-# from unit.fixtures.mock_components import *
-# from unit.fixtures.shared_fixtures import *
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """収集で読み込んだ重い依存のオブジェクトを GC の走査対象から外す。
+
+    src はモデル解放と ONNX ロードのたびに full `gc.collect()` を呼ぶ。収集時に
+    torch / tensorflow / transformers などを import したテストプロセスでは、その 1 回が
+    約 0.85 秒かかっていた。収集の直後に一度だけ回収してから `gc.freeze()` すると、以降の
+    `gc.collect()` はテスト中に作られたオブジェクトだけを走査する。テストが解放を確かめる
+    オブジェクトはすべてテスト中に作られるので、回収の挙動は変わらない。
+    """
+    gc.collect()
+    gc.freeze()
 
 
 def _remove_test_config_entries(config_registry) -> None:

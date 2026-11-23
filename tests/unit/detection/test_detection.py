@@ -7,9 +7,6 @@ fake の ONNX セッションで前処理・出力デコード・閾値・NMS・
 from __future__ import annotations
 
 import inspect
-import json
-import subprocess
-import sys
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
@@ -576,21 +573,3 @@ def test_top_level_wrapper_delegates(install_session) -> None:
     assert result.detections[0].class_name == "person"
     assert image_annotator_lib.list_detectors() == list_detectors()
     assert image_annotator_lib.release_detectors() == 1
-
-
-def test_detection_import_does_not_load_heavy_deps() -> None:
-    """detection パッケージの import と list_detectors() で重い依存を読み込まない。"""
-    sentinel = "IAMLIB_DETECTION_JSON:"
-    code = (
-        "import sys, json\n"
-        "import image_annotator_lib.detection as d\n"
-        "d.list_detectors()\n"
-        "heavy = {'torch', 'onnxruntime', 'tensorflow', 'transformers'}\n"
-        f"print({sentinel!r} + json.dumps(sorted(heavy & set(sys.modules))))\n"
-    )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
-    assert result.returncode == 0, result.stderr
-    payload = next(
-        line[len(sentinel) :] for line in result.stdout.splitlines() if line.startswith(sentinel)
-    )
-    assert json.loads(payload) == []

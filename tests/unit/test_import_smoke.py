@@ -41,7 +41,12 @@ def test_import_image_annotator_lib_does_not_eager_load_heavy_deps() -> None:
         "import image_annotator_lib\n"
         f"heavy = set({list(_HEAVY_MODULES)!r})\n"
         "loaded = sorted(heavy & set(sys.modules))\n"
-        f"print({_SENTINEL!r} + json.dumps(loaded))\n"
+        # 同じプロセスで detection パッケージの import と list_detectors() も確かめる
+        # (cold import は 1 回約 9 秒かかるので、別の subprocess を起動しない)。
+        "import image_annotator_lib.detection as detection\n"
+        "detection.list_detectors()\n"
+        "detection_loaded = sorted(heavy & set(sys.modules))\n"
+        f"print({_SENTINEL!r} + json.dumps({{'import': loaded, 'detection': detection_loaded}}))\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", code],
@@ -57,15 +62,16 @@ def test_import_image_annotator_lib_does_not_eager_load_heavy_deps() -> None:
     payload: str | None = None
     for line in result.stdout.splitlines():
         if line.startswith(_SENTINEL):
-            payload = line[len(_SENTINEL):]
+            payload = line[len(_SENTINEL) :]
             break
-    assert payload is not None, (
-        f"sentinel marker {_SENTINEL!r} not found in stdout: {result.stdout!r}"
-    )
+    assert payload is not None, f"sentinel marker {_SENTINEL!r} not found in stdout: {result.stdout!r}"
 
     loaded = json.loads(payload)
-    assert loaded == [], (
-        f"eager-loaded heavy deps after bare `import image_annotator_lib`: {loaded}"
+    assert loaded["import"] == [], (
+        f"eager-loaded heavy deps after bare `import image_annotator_lib`: {loaded['import']}"
+    )
+    assert loaded["detection"] == [], (
+        f"heavy deps loaded by `image_annotator_lib.detection` / list_detectors(): {loaded['detection']}"
     )
 
 

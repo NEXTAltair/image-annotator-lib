@@ -391,9 +391,17 @@ def test_fork_hook_discards_state_without_closing_parent_resources(
 @pytest.mark.skipif(os.name != "posix", reason="POSIX fork lifecycle")
 @pytest.mark.parametrize("scenario", ["other-thread", "session"])
 def test_posix_fork_child_has_independent_ownership(scenario: str) -> None:
-    script = """
-import os, signal, sys, threading, time
+    # package の __init__ は全モデルを登録して約 8 秒かかる。fork 後の所有権には不要なので、
+    # package の場所だけを与えて decisions を実物のまま import する
+    # (tests/integration/test_decision_runtime_orphans.py の _IMPORT_RUNTIME と同じ方式)。
+    package_dir = str(Path(runtime_module.__file__).parents[1])
+    script = (
+        """
+import os, signal, sys, threading, time, types
 from pathlib import Path
+package = types.ModuleType("image_annotator_lib")
+package.__path__ = [PACKAGE_DIR]
+sys.modules[package.__name__] = package
 from image_annotator_lib.decisions import runtime as module
 
 settings = module.RuntimeSettings(Path(sys.executable), Path(sys.executable), Path(sys.executable), "clef-flash", 0, 4096, ())
@@ -458,6 +466,7 @@ finally:
     module.shutdown_local_runtime()
 assert not key_file.exists() and not directory.exists()
 """
+    ).replace("PACKAGE_DIR", repr(package_dir))
     completed = subprocess.run(
         [sys.executable, "-c", script, scenario], capture_output=True, text=True, timeout=30
     )
