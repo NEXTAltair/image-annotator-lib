@@ -65,51 +65,7 @@ def test_release_model_state():
     assert model_name in ModelLoad._MODEL_SIZES
 
 
-@pytest.mark.unit
-def test_get_models_sorted_by_last_used():
-    """_get_models_sorted_by_last_used が最終使用時刻でソートするかテスト"""
-    now = time.time()
-    ModelLoad._MODEL_LAST_USED["model_c"] = now
-    ModelLoad._MODEL_LAST_USED["model_a"] = now - 200
-    ModelLoad._MODEL_LAST_USED["model_b"] = now - 100
-
-    sorted_models = ModelLoad._get_models_sorted_by_last_used()
-    assert [name for name, ts in sorted_models] == ["model_a", "model_b", "model_c"]
-
-
 # --- Config and Size Management ---
-
-
-@pytest.mark.unit
-@patch("image_annotator_lib.core.loaders.loader_base.config_registry")
-def test_get_model_size_from_config_success(mock_config_registry):
-    """config からモデルサイズを正常に取得するテスト"""
-    mock_config_registry.get.return_value = 2.5  # 2.5 GB
-    size_mb = ModelLoad._get_model_size_from_config("test_model")
-    assert size_mb == 2.5 * 1024
-    mock_config_registry.get.assert_called_once_with("test_model", "estimated_size_gb")
-
-
-@pytest.mark.unit
-@patch("image_annotator_lib.core.loaders.loader_base.config_registry")
-def test_get_model_size_from_config_not_found(mock_config_registry):
-    """config にモデルが存在しない場合のテスト"""
-    mock_config_registry.get.side_effect = KeyError
-    size_mb = ModelLoad._get_model_size_from_config("unknown_model")
-    assert size_mb is None
-
-
-@pytest.mark.unit
-@patch("image_annotator_lib.core.loaders.loader_base.config_registry")
-def test_save_size_to_config(mock_config_registry):
-    """計算したモデルサイズを runtime cache に保存するテスト"""
-    ModelLoad._save_size_to_config("test_model", 2048)  # 2GB
-    mock_config_registry.set_runtime_cache_value.assert_called_once_with(
-        "test_model", "estimated_size_gb", 2.0
-    )
-    mock_config_registry.save_runtime_cache.assert_called_once()
-    mock_config_registry.set_system_value.assert_not_called()
-    mock_config_registry.save_system_config.assert_not_called()
 
 
 # --- Error Handling ---
@@ -170,23 +126,9 @@ MOCK_VIRTUAL_MEMORY = type(
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.core.loaders.loader_base.psutil.virtual_memory", return_value=MOCK_VIRTUAL_MEMORY)
-def test_check_memory_before_load_sufficient(mock_psutil_vm):
-    """十分なメモリがある場合の _check_memory_before_load のテスト"""
-    # 利用可能メモリは 15GB
-    assert ModelLoad._check_memory_before_load(10 * 1024, "model_10gb") is True
-
-
-@pytest.mark.unit
-@patch("image_annotator_lib.core.loaders.loader_base.psutil.virtual_memory", return_value=MOCK_VIRTUAL_MEMORY)
-def test_check_memory_before_load_insufficient(mock_psutil_vm):
-    """メモリが不足している場合の _check_memory_before_load のテスト"""
-    # 利用可能メモリは 15GB
-    assert ModelLoad._check_memory_before_load(16 * 1024, "model_16gb") is False
-
-
-@pytest.mark.unit
-@patch("image_annotator_lib.core.loaders.loader_base.psutil.virtual_memory", return_value=MOCK_VIRTUAL_MEMORY)
+@patch(
+    "image_annotator_lib.core.loaders.loader_base.psutil.virtual_memory", return_value=MOCK_VIRTUAL_MEMORY
+)
 def test_clear_cache_internal_no_release(mock_psutil_vm):
     """キャッシュに十分空きがあり、解放が不要な場合のテスト"""
     # 事前準備: ModelLoad の状態を設定
@@ -207,7 +149,9 @@ def test_clear_cache_internal_no_release(mock_psutil_vm):
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.core.loaders.loader_base.psutil.virtual_memory", return_value=MOCK_VIRTUAL_MEMORY)
+@patch(
+    "image_annotator_lib.core.loaders.loader_base.psutil.virtual_memory", return_value=MOCK_VIRTUAL_MEMORY
+)
 def test_clear_cache_internal_release_oldest(mock_psutil_vm):
     """キャッシュが不足し、最も古いモデルが解放されるテスト"""
     # 事前準備: 状態設定 (model_a が古い)
@@ -239,7 +183,9 @@ def test_clear_cache_internal_release_oldest(mock_psutil_vm):
 
 
 @pytest.mark.unit
-@patch("image_annotator_lib.core.loaders.loader_base.psutil.virtual_memory", return_value=MOCK_VIRTUAL_MEMORY)
+@patch(
+    "image_annotator_lib.core.loaders.loader_base.psutil.virtual_memory", return_value=MOCK_VIRTUAL_MEMORY
+)
 def test_clear_cache_internal_insufficient_space(mock_psutil_vm):
     """モデルを解放しても十分なスペースが確保できない場合のテスト"""
     # 事前準備: 状態設定

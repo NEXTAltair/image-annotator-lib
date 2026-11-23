@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -12,21 +13,7 @@ import pytest
 from image_annotator_lib import CONFIG_READ_ONLY_ENV, ReadOnlyConfigError
 from image_annotator_lib.core.config import ModelConfigRegistry
 
-
-@pytest.mark.parametrize("prepared", [False, True])
-@pytest.mark.parametrize("entrypoint", ["list_annotator_info", "list_available_annotators"])
-def test_cold_public_import_readonly_policy(tmp_path, prepared, entrypoint):
-    cwd = tmp_path / "cold 日本語"
-    cwd.mkdir()
-    config = cwd / "config" / "annotator_config.toml"
-    if prepared:
-        config.parent.mkdir()
-        config.write_text("# Existing model configuration\n")
-    env = os.environ.copy()
-    env.pop("PYTEST_CURRENT_TEST", None)
-    env[CONFIG_READ_ONLY_ENV] = "1"
-    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[3] / "src")
-    code = """
+_COLD_CODE = """
 import json, socket
 from pathlib import Path
 from unittest.mock import patch
@@ -39,12 +26,58 @@ with patch.object(socket.socket, 'connect', side_effect=AssertionError('network 
         result = {'ok': False, 'action': exc.details['action']}
 print(json.dumps(result))
 """
-    code = code.replace("list_annotator_info", entrypoint)
-    completed = subprocess.run(
-        [sys.executable, "-c", code], cwd=cwd, env=env, capture_output=True, text=True, timeout=90
-    )
-    assert completed.returncode == 0, completed.stderr
-    result = json.loads(completed.stdout.splitlines()[-1])
+_ENTRYPOINTS = ("list_annotator_info", "list_available_annotators")
+_PREPARED = (False, True)
+
+
+@pytest.fixture(scope="module")
+def cold_public_imports(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[dict[tuple[str, bool], tuple[Path, subprocess.Popen[str]]]]:
+    """4 通りの cold import の subprocess を同時に起動しておく。
+
+    cold import は 1 回約 9 秒かかり、子 1 つのピーク RSS は約 0.3 GB。各組み合わせは
+    別の cwd を持つので互いに干渉しない。各テストは自分の組み合わせの結果だけを受け取る。
+    """
+    env = os.environ.copy()
+    env.pop("PYTEST_CURRENT_TEST", None)
+    env[CONFIG_READ_ONLY_ENV] = "1"
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[3] / "src")
+    runs: dict[tuple[str, bool], tuple[Path, subprocess.Popen[str]]] = {}
+    try:
+        for entrypoint in _ENTRYPOINTS:
+            for prepared in _PREPARED:
+                cwd = tmp_path_factory.mktemp("cold") / "cold 日本語"
+                cwd.mkdir()
+                config = cwd / "config" / "annotator_config.toml"
+                if prepared:
+                    config.parent.mkdir()
+                    config.write_text("# Existing model configuration\n")
+                code = _COLD_CODE.replace("list_annotator_info", entrypoint)
+                process = subprocess.Popen(
+                    [sys.executable, "-c", code],
+                    cwd=cwd,
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                runs[(entrypoint, prepared)] = (config, process)
+        yield runs
+    finally:
+        for _, process in runs.values():
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+
+
+@pytest.mark.parametrize("prepared", _PREPARED)
+@pytest.mark.parametrize("entrypoint", _ENTRYPOINTS)
+def test_cold_public_import_readonly_policy(cold_public_imports, prepared, entrypoint):
+    config, process = cold_public_imports[(entrypoint, prepared)]
+    stdout, stderr = process.communicate(timeout=90)
+    assert process.returncode == 0, stderr
+    result = json.loads(stdout.splitlines()[-1])
     assert result["ok"] is prepared, result
     if prepared:
         assert result["count"] > 0
