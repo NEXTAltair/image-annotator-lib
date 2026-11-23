@@ -159,6 +159,15 @@ class ModelLoad:
 
         try:
             ModelLoad._move_components_to_device(components, "cpu")
+            if state is not None and state.split(":", 1)[0] == "on_cuda":
+                try:
+                    import torch
+
+                    # 後続モデルの空き VRAM 判定に反映されるよう、未使用領域をドライバへ返す。
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except (ImportError, RuntimeError, AssertionError) as error:
+                    logger.debug(f"CUDA キャッシュを解放できませんでした: {error}")
             ModelLoad._update_model_state(model_name, "cpu", "cached_cpu", model_size)
             logger.info(f"モデル '{model_name}' をCPUにキャッシュしました。")
             return components
