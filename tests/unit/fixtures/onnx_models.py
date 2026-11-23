@@ -5,15 +5,79 @@
 
 モデルは ``入力 [B, 3, H, W] -> Flatten -> MatMul(重み) -> Sigmoid -> 出力 [B, K]`` で、
 行ごとの出力が同じ行の入力だけに依存する。入力の batch 軸 (B) の宣言を切り替えられる。
+
+重みは ``3 * H * W * K`` 要素あり、大きな引数を渡すと数十 GiB を確保してしまう
+(NEXTAltair/image-annotator-lib#193)。``build_tagger_onnx`` は生成前に必要量を見積もり、
+予算を超える場合は割当の前に ``SyntheticModelBudgetError`` で拒否する。
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
 
 _FLOAT = 1
+
+# 合成モデル生成に許すピーク必要量の既定値 (バイト)。
+DEFAULT_SYNTHETIC_MODEL_BUDGET_BYTES = 256 * 1024 * 1024
+# 予算を上書きする環境変数 (正の整数のバイト数)。
+SYNTHETIC_MODEL_BUDGET_ENV = "IAL_TEST_SYNTHETIC_MODEL_BUDGET_BYTES"
+
+# 重み 1 要素あたりの float32 のバイト数。
+_FLOAT32_BYTES = 4
+# 生成時のピーク必要量 = float32 の重みのバイト数 × この係数。
+# 根拠 (N = 重みの要素数):
+# - 重みの生成 (tagger_weights): ``rng.standard_normal`` の float64 (8N) と ``* 0.05`` の
+#   float64 一時領域 (8N) が同時に生き、そこへ ``astype(float32)`` (4N) が加わる → 最大 20N。
+# - 直列化: 保持中の重み (4N) に ``tobytes()`` (4N) と、``_field_bytes`` / ``graph +=`` /
+#   ModelProto の連結で作られる bytes のコピー (各 4N、同時に 2〜3 個) が重なる → 最大 16〜20N。
+# どちらの段階も 20N (= float32 の重みの 5 倍) 程度に収まるが、numpy / bytes の実装差や
+# アロケータの断片化に備えて余裕を取り、8 倍 (32N) を見積もりとする。
+_PEAK_FACTOR = 8
+
+
+class SyntheticModelBudgetError(RuntimeError):
+    """合成モデルの見積もり必要量が予算を超えたため、割当前に生成を拒否したことを表す。"""
+
+
+def estimate_tagger_onnx_bytes(height: int, width: int, tag_count: int) -> int:
+    """``build_tagger_onnx`` が生成時に必要とするピークのメモリ量を見積もる (バイト)。
+
+    整数演算だけで求め、配列は確保しない。
+
+    Args:
+        height: 入力の高さ。
+        width: 入力の幅。
+        tag_count: 出力のタグ数 K。
+
+    Returns:
+        見積もったピーク必要量 (バイト)。
+    """
+    weight_bytes = 3 * height * width * tag_count * _FLOAT32_BYTES
+    return weight_bytes * _PEAK_FACTOR
+
+
+def _resolve_budget(max_bytes: int | None) -> int:
+    """予算を ``max_bytes`` → 環境変数 → 既定値の順で決める。"""
+    if max_bytes is not None:
+        budget = max_bytes
+        source = "max_bytes"
+    else:
+        raw = os.environ.get(SYNTHETIC_MODEL_BUDGET_ENV)
+        if raw is None:
+            return DEFAULT_SYNTHETIC_MODEL_BUDGET_BYTES
+        try:
+            budget = int(raw.strip())
+        except ValueError as exc:
+            raise ValueError(
+                f"{SYNTHETIC_MODEL_BUDGET_ENV} は正の整数 (バイト数) で指定する: {raw!r}"
+            ) from exc
+        source = SYNTHETIC_MODEL_BUDGET_ENV
+    if budget <= 0:
+        raise ValueError(f"{source} は正の整数 (バイト数) で指定する: {budget}")
+    return budget
 
 
 def _varint(value: int) -> bytes:
@@ -91,8 +155,12 @@ def build_tagger_onnx(
     width: int = 8,
     tag_count: int = 6,
     collapse_batch: bool = False,
+    max_bytes: int | None = None,
 ) -> Path:
     """小さな NCHW タガー形式の ONNX モデルを ``path`` に書き出す。
+
+    生成前に ``estimate_tagger_onnx_bytes`` で必要量を見積もり、予算を超える場合は
+    重みの生成とファイルの作成より前に拒否する。
 
     Args:
         path: 出力先のファイルパス。
@@ -102,10 +170,26 @@ def build_tagger_onnx(
         tag_count: 出力のタグ数 K。
         collapse_batch: True なら出力を batch 軸で平均して [K] にする
             (入力は動的でも、出力が画像ごとに分割できないモデルを作る)。
+        max_bytes: 生成時のピーク必要量の上限 (バイト)。None なら環境変数
+            ``IAL_TEST_SYNTHETIC_MODEL_BUDGET_BYTES``、それも無ければ
+            ``DEFAULT_SYNTHETIC_MODEL_BUDGET_BYTES`` を使う。大きなモデルを意図して作る場合だけ引き上げる。
 
     Returns:
         書き出したファイルパス。
+
+    Raises:
+        SyntheticModelBudgetError: 見積もり必要量が予算を超える場合 (割当前に送出する)。
+        ValueError: 予算 (``max_bytes`` または環境変数) が正の整数でない場合。
     """
+    budget = _resolve_budget(max_bytes)
+    estimated = estimate_tagger_onnx_bytes(height, width, tag_count)
+    if estimated > budget:
+        raise SyntheticModelBudgetError(
+            f"合成 ONNX モデル (height={height}, width={width}, tag_count={tag_count}) の"
+            f"見積もり必要量 {estimated:,} バイトが予算 {budget:,} バイトを超えるため生成しない。"
+            f"意図して大きなモデルを作る場合は build_tagger_onnx(max_bytes=...) か"
+            f"環境変数 {SYNTHETIC_MODEL_BUDGET_ENV} で予算を引き上げる。"
+        )
     elements = 3 * height * width
     weights = tagger_weights(elements, tag_count)
     nodes = [
